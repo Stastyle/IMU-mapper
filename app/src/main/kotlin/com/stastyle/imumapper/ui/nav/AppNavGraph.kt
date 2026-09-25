@@ -11,6 +11,7 @@ import com.stastyle.imumapper.ui.calibration.CalibrationScreen
 import com.stastyle.imumapper.ui.debug.DebugScreen
 import com.stastyle.imumapper.ui.record.RecordScreen
 import com.stastyle.imumapper.ui.settings.SettingsScreen
+import com.stastyle.imumapper.ui.settings.UpdateBanner
 import com.stastyle.imumapper.ui.triplist.TripListScreen
 import com.stastyle.imumapper.ui.viewer.ViewerScreen
 
@@ -25,6 +26,7 @@ fun AppNavGraph() {
                 onOpenCalibration = { nav.navigate(Routes.CALIBRATION) },
                 onOpenDebug = { nav.navigate(Routes.debug()) },
                 onOpenSettings = { nav.navigate(Routes.SETTINGS) },
+                banner = { UpdateBanner() },
             )
         }
         composable(

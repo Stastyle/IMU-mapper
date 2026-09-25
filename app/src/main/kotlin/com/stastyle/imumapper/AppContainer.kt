@@ -4,13 +4,16 @@ import android.content.Context
 import com.stastyle.imumapper.data.CalibrationRepository
 import com.stastyle.imumapper.data.RoomCalibrationRepository
 import com.stastyle.imumapper.data.RoomTripRepository
+import com.stastyle.imumapper.data.TripExporter
 import com.stastyle.imumapper.data.TripFiles
+import com.stastyle.imumapper.data.TripImporter
 import com.stastyle.imumapper.data.TripRepository
 import com.stastyle.imumapper.data.db.AppDatabase
 import com.stastyle.imumapper.pipeline.DefaultProcessor
 import com.stastyle.imumapper.pipeline.core.Processor
 import com.stastyle.imumapper.process.DefaultTripProcessor
 import com.stastyle.imumapper.process.TripProcessor
+import com.stastyle.imumapper.update.UpdateManager
 import kotlinx.serialization.json.Json
 
 /**
@@ -38,6 +41,12 @@ class AppContainer(context: Context) {
     val processor: Processor by lazy { DefaultProcessor() }
 
     val tripProcessor: TripProcessor by lazy {
-        DefaultTripProcessor(tripRepository, calibrationRepository, tripFiles, processor)
+        DefaultTripProcessor(tripRepository, calibrationRepository, tripFiles, processor, json)
     }
+
+    val tripExporter: TripExporter by lazy { TripExporter(appContext, tripRepository, tripFiles) }
+
+    val tripImporter: TripImporter by lazy { TripImporter(appContext, tripRepository, tripFiles) }
+
+    val updateManager: UpdateManager by lazy { UpdateManager.get(appContext) }
 }
