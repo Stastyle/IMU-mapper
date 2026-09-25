@@ -12,7 +12,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Layers
-import androidx.compose.material.icons.filled.ThreeDRotation
+import androidx.compose.material.icons.filled.ViewInAr
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -246,7 +246,7 @@ private fun RunMenu(ui: ViewerUiState, vm: ViewerViewModel) {
 private fun PresetMenu(vm: ViewerViewModel) {
     var open by remember { mutableStateOf(false) }
     IconButton(onClick = { open = true }) {
-        Icon(Icons.Filled.ThreeDRotation, contentDescription = "View presets")
+        Icon(Icons.Filled.ViewInAr, contentDescription = "View presets")
     }
     DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
         DropdownMenuItem(text = { Text("3D") }, onClick = { open = false; vm.applyPreset(CameraPreset.THREE_D) })

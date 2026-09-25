@@ -4,6 +4,7 @@ name: CI
 # uploaded as an artifact or attached to a release. Releases are made only by release.yml.
 on:
   push:
+    branches: [main]
   pull_request:
 
 concurrency:
