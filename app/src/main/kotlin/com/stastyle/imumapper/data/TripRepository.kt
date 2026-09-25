@@ -4,7 +4,10 @@ import com.stastyle.imumapper.data.db.PathResultDao
 import com.stastyle.imumapper.data.db.PathResultEntity
 import com.stastyle.imumapper.data.db.TripDao
 import com.stastyle.imumapper.data.db.TripEntity
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.withContext
 
 interface TripRepository {
     fun observeTrips(): Flow<List<TripEntity>>
@@ -12,7 +15,17 @@ interface TripRepository {
     suspend fun getTrip(tripId: Long): TripEntity?
     /** Inserts and returns the new id. Creates the trip directory. */
     suspend fun createTrip(trip: TripEntity): Long
+    /**
+     * Writes every column of [trip]. Prefer the targeted writes below when only one aspect changes,
+     * because this one silently overwrites whatever another writer stored since the row was read.
+     */
     suspend fun updateTrip(trip: TripEntity)
+    /** Changes only the name; a status change landing at the same time is kept. */
+    suspend fun renameTrip(tripId: Long, name: String)
+    /** Records a successful processing run: status PROCESSED, latest run and stats, error cleared. */
+    suspend fun markProcessed(tripId: Long, runId: Int, distanceM: Double, durationS: Double)
+    /** Records a failed processing run: status FAILED and the message; earlier results stay listed. */
+    suspend fun markFailed(tripId: Long, error: String)
     /** Removes the row, its results and every file of the trip. */
     suspend fun deleteTrip(tripId: Long)
 
@@ -28,6 +41,7 @@ class RoomTripRepository(
     private val trips: TripDao,
     private val results: PathResultDao,
     private val files: TripFiles,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : TripRepository {
 
     override fun observeTrips(): Flow<List<TripEntity>> = trips.observeAll()
@@ -38,16 +52,24 @@ class RoomTripRepository(
 
     override suspend fun createTrip(trip: TripEntity): Long {
         val id = trips.insert(trip)
-        files.tripDir(id)
+        withContext(ioDispatcher) { files.tripDir(id) }
         return id
     }
 
     override suspend fun updateTrip(trip: TripEntity) = trips.update(trip)
 
+    override suspend fun renameTrip(tripId: Long, name: String) = trips.rename(tripId, name)
+
+    override suspend fun markProcessed(tripId: Long, runId: Int, distanceM: Double, durationS: Double) =
+        trips.markProcessed(tripId, runId, distanceM, durationS)
+
+    override suspend fun markFailed(tripId: Long, error: String) = trips.markFailed(tripId, error)
+
     override suspend fun deleteTrip(tripId: Long) {
         results.deleteForTrip(tripId)
         trips.delete(tripId)
-        files.deleteTrip(tripId)
+        // Callers launch from the main thread; unlinking a raw log and hundreds of photos is slow.
+        withContext(ioDispatcher) { files.deleteTrip(tripId) }
     }
 
     override fun observeResults(tripId: Long): Flow<List<PathResultEntity>> = results.observeForTrip(tripId)

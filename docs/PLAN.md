@@ -202,9 +202,10 @@ app start that shows a banner when a newer version exists):
 
 **Release workflow** (`release.yml`, `workflow_dispatch` only, input: version `X.Y.Z`):
 
-- Computes `versionCode = major*10000 + minor*100 + patch` so codes stay monotonic.
-- Builds a signed release APK and creates tag `vX.Y.Z` plus a GitHub Release with the APK attached
-  and the changelog in the body.
+- Computes `versionCode = major*10000 + minor*100 + patch` so codes stay monotonic; minor and patch
+  must stay below 100, which both the build and the workflow enforce.
+- Builds a signed release APK and publishes a GitHub Release with the APK attached and the changelog
+  in the body; the release action creates tag `vX.Y.Z` on publish, so a failed run leaves no tag behind.
 - Android only updates an installed app if the new APK is signed with the same key, so the signing
   key must be stable across releases. It comes from repository secrets:
   `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`.
