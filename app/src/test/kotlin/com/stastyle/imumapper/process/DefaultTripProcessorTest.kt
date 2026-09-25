@@ -82,7 +82,7 @@ class DefaultTripProcessorTest {
     }
 
     @Test
-    fun processesAndStoresFirstRun() = runBlocking {
+    fun processesAndStoresFirstRun() = runBlocking<Unit> {
         val id = recordedTrip()
         val entity = subject().process(id)
 
@@ -109,7 +109,7 @@ class DefaultTripProcessorTest {
     }
 
     @Test
-    fun usesSavedCalibrationUnlessConfigGiven() = runBlocking {
+    fun usesSavedCalibrationUnlessConfigGiven() = runBlocking<Unit> {
         val id = recordedTrip()
         subject().process(id)
         assertEquals(0.66, processor.calls.single().strideLengthM)
@@ -121,7 +121,7 @@ class DefaultTripProcessorTest {
     }
 
     @Test
-    fun secondRunGetsNextIdAndKeepsFirst() = runBlocking {
+    fun secondRunGetsNextIdAndKeepsFirst() = runBlocking<Unit> {
         val id = recordedTrip()
         val first = subject().process(id)
         processor.result = sampleResult(distanceM = 20.0)
@@ -137,13 +137,13 @@ class DefaultTripProcessorTest {
     }
 
     @Test
-    fun labelIsVioWhenLogHasTracking() = runBlocking {
+    fun labelIsVioWhenLogHasTracking() = runBlocking<Unit> {
         val id = recordedTrip(withVio = true)
         assertEquals("VIO", subject().process(id).label)
     }
 
     @Test
-    fun explicitProcessorAndLabel() = runBlocking {
+    fun explicitProcessorAndLabel() = runBlocking<Unit> {
         val id = recordedTrip(withVio = true)
         val other = FakeProcessor(result = sampleResult(distanceM = 3.0))
         val entity = subject().processWith(id, other, label = "PDR only")
@@ -154,7 +154,7 @@ class DefaultTripProcessorTest {
     }
 
     @Test
-    fun failureMarksTripFailedAndRethrows() = runBlocking {
+    fun failureMarksTripFailedAndRethrows() = runBlocking<Unit> {
         val id = recordedTrip()
         processor.failure = IllegalStateException("no steps found")
 
@@ -176,7 +176,7 @@ class DefaultTripProcessorTest {
     }
 
     @Test
-    fun missingLogFails() = runBlocking {
+    fun missingLogFails() = runBlocking<Unit> {
         val id = trips.createTrip(
             TripEntity(
                 name = "empty", mode = TripMode.POCKET, carryPosition = CarryPosition.HAND, startedAtEpochMs = 1L,
@@ -189,7 +189,7 @@ class DefaultTripProcessorTest {
     }
 
     @Test
-    fun refusesTripStillRecording() = runBlocking {
+    fun refusesTripStillRecording() = runBlocking<Unit> {
         val id = recordedTrip(status = TripStatus.RECORDING)
         assertFailsWith<IllegalStateException> { subject().process(id) }
         // The recorder owns the row: its status must not be clobbered.
@@ -198,12 +198,12 @@ class DefaultTripProcessorTest {
     }
 
     @Test
-    fun unknownTripThrows() = runBlocking {
+    fun unknownTripThrows() = runBlocking<Unit> {
         assertFailsWith<IllegalArgumentException> { subject().process(42L) }
     }
 
     @Test
-    fun runsOnTheSameTripAreSerialised() = runBlocking {
+    fun runsOnTheSameTripAreSerialised() = runBlocking<Unit> {
         val id = recordedTrip()
         val entered = CountDownLatch(1)
         val slow = FakeProcessor(onProcess = { _, _ ->
@@ -226,7 +226,7 @@ class DefaultTripProcessorTest {
     }
 
     @Test
-    fun runsOnDifferentTripsMayOverlap() = runBlocking {
+    fun runsOnDifferentTripsMayOverlap() = runBlocking<Unit> {
         val a = recordedTrip()
         val b = recordedTrip()
         val both = CountDownLatch(2)
@@ -243,7 +243,7 @@ class DefaultTripProcessorTest {
     }
 
     @Test
-    fun readResultLoadsStoredFile() = runBlocking {
+    fun readResultLoadsStoredFile() = runBlocking<Unit> {
         val id = recordedTrip()
         val entity = subject().process(id)
         val loaded = files.readResult(entity)
