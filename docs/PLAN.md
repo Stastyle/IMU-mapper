@@ -14,6 +14,7 @@ and pan on the phone.
 - Keep every raw sensor sample so a trip can be re-processed later with a better algorithm.
 - Calibration and debug screens so accuracy can be measured and improved over time.
 - Typical trip: up to ~5 minutes of walking, sometimes longer with stops.
+- Update itself from GitHub Releases, so new versions install from inside the app.
 
 **Non-goals (for now)**
 
@@ -68,28 +69,31 @@ Mode selection is a single choice on the "new trip" screen. Mode A is the defaul
 ## 4. Architecture
 
 ```
-app/
+pipeline/        standalone Kotlin/JVM Gradle build (no Android deps) — composite-included by the root
+  core/          Vec3, Quat, sample types, Trip/Path result models, PipelineConfig
+  log/           LogCodec: binary raw-log format shared by recorder and pipeline
+  pdr/           Orientation, StepDetector, StrideModel, HeadingEstimator, Altitude, PdrSolver
+  vio/           VioFuser: ARCore poses + PDR gap filling + re-anchoring
+  post/          LoopClosure, Smoothing, PathBuilder
+  test/          synthetic-walk unit tests, golden-file tests on recorded logs
+app/             Android application module
   ui/            Jetpack Compose screens
     TripListScreen        list of recorded trips, new trip, delete
     RecordScreen          per-mode recording UI, annotation buttons, live stats
     ViewerScreen          3D path viewer (orbit/zoom/pan), markers, photo popup
     CalibrationScreen     stride, heading offset, still-bias, loop test
     DebugScreen           live sensor plots, log export, re-process
+    SettingsScreen        carry position, units, check for updates, about
+  update/
+    UpdateChecker         GitHub Releases API: latest tag vs installed version
+    UpdateDownloader      DownloadManager download + size/sha256 verification
+    UpdateInstaller       FileProvider + package-installer intent
   capture/
     SensorLogger          writes raw samples to a binary log via a foreground service
     ArCoreSession         ARCore session, torch, pose + point cloud + keyframe capture
     RecordingService      foreground service + wake lock (Mode A survives screen-off)
-  pipeline/      pure Kotlin, no Android deps, unit-testable, deterministic
-    LogReader             raw log -> typed sample streams
-    Orientation           quaternion from rotation vector (+ own Madgwick filter for comparison)
-    StepDetector          peak detection on vertical accel; hardware step detector as cross-check
-    StrideModel           fixed calibrated stride, then Weinberg (accel-amplitude) model
-    HeadingEstimator      gyro yaw fused with magnetometer, with anomaly gating
-    Altitude              barometer -> relative height, low-pass, still-segment hold
-    PdrSolver             steps + heading + altitude -> 3D positions
-    VioFuser              ARCore poses + PDR gap filling + re-anchoring
-    LoopClosure           distribute end-to-start error linearly along the path
-    PathBuilder           final polyline + annotations + keyframes -> Trip result
+  process/
+    ProcessTrip           raw log -> pipeline -> versioned PathResult stored per trip
   data/
     Room DB               trip metadata, annotations, calibration values
     Files                 raw logs (binary), processed path (JSON), photos (JPEG)
@@ -97,11 +101,16 @@ app/
     PathRenderer          3D projection + drawing on a Compose Canvas
 tools/
   replay.py             offline runner: raw log -> path, plots, error metrics (for algorithm work)
+.github/workflows/
+  ci.yml                every push/PR: pipeline tests, app compile + unit tests. No APK is published.
+  release.yml           manual only: signed release APK -> GitHub Release (feeds the in-app updater)
 ```
 
 Key decisions
 
-- **Kotlin + Jetpack Compose, minSdk 30, targetSdk latest.** Single-module app.
+- **Kotlin + Jetpack Compose, minSdk 30, targetSdk 35.** Two modules: `pipeline` (pure Kotlin/JVM,
+  its own Gradle build, included into the root as a composite build) and `app` (Android).
+  The split keeps the algorithm testable on any machine without an Android SDK.
 - **Raw log first, processing second.** Recording only writes samples. Processing is a
   separate step that can be re-run on any old trip. This is what makes calibration and
   algorithm iteration possible.
@@ -113,8 +122,9 @@ Key decisions
   (copied from the ARCore sample) rather than a full scene-graph library.
 - **Sensor rates.** IMU at `SENSOR_DELAY_FASTEST` (200–500 Hz on this device), no batching,
   timestamps from the sensor event (monotonic ns). ARCore poses at frame rate.
-- **Debug APK built by GitHub Actions** on every push and attached as a workflow artifact,
-  so a build can be installed without Android Studio.
+- **CI compiles, but publishes nothing.** GitHub Actions runs the pipeline tests and compiles the
+  app on every push so integration errors surface early. No APK is attached or released until all
+  phases are complete; the first APK is produced by the manual release workflow (section 8).
 
 ## 5. PDR pipeline detail (Mode A and the fallback for B/C)
 
@@ -171,21 +181,82 @@ Debug screen:
 - Toggle overlays: previous processing versions, ARCore point cloud, raw PDR vs fused.
 - Top-down and side presets. Numbers panel: distance, duration, vertical range, closure error.
 
-## 8. Phases
+## 8. Updates and releases
 
-1. **Skeleton** — project setup, CI building a debug APK, trip list, empty screens.
-2. **Recorder** — foreground service, raw logger, Mode A recording, annotations, debug plots,
-   log export.
-3. **PDR + viewer** — pipeline, calibration screen, square test, 3D viewer, re-process,
-   `tools/replay.py`.
-4. **Mode B** — ARCore session, torch, pose logging, tracking-loss fallback and re-anchoring,
-   fused path.
-5. **Mode C** — auto keyframe photos, point cloud overlay, photo markers in the viewer.
-6. **Polish** — GLTF/CSV export, altitude colouring, presets, battery tuning.
+**In-app updater** (Settings → "Check for updates", plus a silent check at most once per day on
+app start that shows a banner when a newer version exists):
 
-Each phase ends with a pushed commit and an installable APK from CI.
+1. `GET https://api.github.com/repos/Stastyle/IMU-mapper/releases/latest` with
+   `Accept: application/vnd.github+json`. The repo is public, so no token is needed.
+2. Parse `tag_name` (`vX.Y.Z`), release notes (`body`) and the `.apk` asset (`browser_download_url`,
+   `size`, and `digest` when GitHub provides a sha256).
+3. Compare semver against `BuildConfig.VERSION_NAME`. Show "up to date" or a dialog with the notes
+   and an Update button.
+4. Download with `DownloadManager` into the app's private downloads directory, show progress,
+   verify size and sha256 when available.
+5. Install through a `FileProvider` URI and `ACTION_VIEW` with the package-archive MIME type.
+   Requires `REQUEST_INSTALL_PACKAGES`; if the user has not allowed installs from this app, open
+   `ACTION_MANAGE_UNKNOWN_APP_SOURCES` first.
+6. Failures (offline, rate limit, no asset, checksum mismatch) are reported in plain language and
+   never leave a partial file behind.
 
-## 9. Risks
+**Release workflow** (`release.yml`, `workflow_dispatch` only, input: version `X.Y.Z`):
+
+- Computes `versionCode = major*10000 + minor*100 + patch` so codes stay monotonic.
+- Builds a signed release APK and creates tag `vX.Y.Z` plus a GitHub Release with the APK attached
+  and the changelog in the body.
+- Android only updates an installed app if the new APK is signed with the same key, so the signing
+  key must be stable across releases. It comes from repository secrets:
+  `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`.
+  `scripts/gen-keystore.sh` creates a keystore and prints the base64 to paste into the secret.
+  The workflow refuses to run without them, so no APK can be published by accident.
+- The first release is not created until every phase in section 9 is done.
+
+## 9. Build plan
+
+**Step 1 — Plan and PR.** This document, reviewed in a pull request.
+
+**Step 2 — Base structure (one author, sequential).** Everything the parallel work depends on:
+
+- Gradle composite build, version catalog with every dependency pre-declared (agents do not touch
+  build files), wrapper, `.gitignore`, README.
+- `pipeline` core: `Vec3`, `Quat`, sample records, `LogCodec` (binary raw-log format), `Trip`,
+  `PathResult`, `PipelineConfig`, `Processor` interface, and one passing test.
+- `app` skeleton: manifest with permissions, `Application` with a manual dependency container,
+  `MainActivity`, navigation graph with every screen as a stub, Room database with entities and
+  DAOs, repository interfaces, `FileProvider`, theme.
+- `ci.yml` and `release.yml`, `scripts/gen-keystore.sh`.
+
+**Step 3 — Parallel implementation (multiple agents, disjoint file ownership).**
+
+| Agent | Owns | Delivers |
+|---|---|---|
+| pipeline-pdr | `pipeline/…/pdr`, `post` | Orientation, steps, stride, heading, altitude, PDR solver, loop closure, smoothing, tests with synthetic walks |
+| pipeline-vio | `pipeline/…/vio` | VioFuser: pose resampling, tracking-loss gap fill with PDR, re-anchoring, tests |
+| app-capture | `app/…/capture` (IMU), `ui/record` (mode A) | Foreground service, sensor logger, annotations, volume-key waypoint, record screen |
+| app-arcore | `app/…/capture/arcore`, `ui/record` (camera part) | ARCore session, torch, pose/point-cloud/keyframe logging, tracking-state UI, fallback hooks |
+| app-viewer | `app/…/render`, `ui/viewer` | Canvas 3D renderer, gestures, grid, markers, overlays, photo popup, stats |
+| app-data | `app/…/data`, `process`, `ui/triplist` | Room implementation, file layout, ProcessTrip, versioned results, ZIP export, trip list |
+| app-calib-debug | `ui/calibration`, `ui/debug` | Calibration flows, square test, ARCore-vs-PDR comparison, live plots, re-process |
+| app-updater | `app/…/update`, `ui/settings` | GitHub Releases updater end to end, settings screen |
+| tools | `tools/` | `replay.py` mirroring the pipeline, plots, error metrics (runs after pipeline-pdr) |
+
+**Step 4 — Integration.** One agent builds everything through CI, fixes compile and wiring errors,
+and runs all tests. **Step 5 — Review.** Independent reviewers per module try to break it
+(correctness, crash paths, sensor edge cases, permissions); confirmed findings go back to a fix
+round. Repeat until a round finds nothing.
+
+**Step 6 — First release.** Only after steps 3 to 5 are complete: add the signing secrets, run the
+release workflow, install from the GitHub Release, and from then on update from inside the app.
+
+### Build environment note
+
+The cloud container used for development cannot reach `dl.google.com`, which serves both the Android
+SDK and Google's Maven artifacts. The `pipeline` module builds and tests locally; the `app` module
+is compiled by GitHub Actions on every push. Allowing `dl.google.com` in the environment's network
+settings would let the app compile locally too.
+
+## 10. Risks
 
 - **Magnetometer in caves.** Handled by gating; worst case heading is gyro-only, which drifts
   slowly over minutes. Acceptable for ≤5 min trips.
@@ -196,7 +267,7 @@ Each phase ends with a pushed commit and an installable APK from CI.
 - **Battery / heat** with ARCore and torch on. Fine for minutes, not hours.
 - **Google Play Services for AR** must be installed (it is, on Galaxy devices).
 
-## 10. References
+## 11. References
 
 - ARCore flash / torch: https://developers.google.com/ar/develop/camera/flash/java
 - ARCore `Config.FlashMode`: https://developers.google.com/ar/reference/java/com/google/ar/core/Config
