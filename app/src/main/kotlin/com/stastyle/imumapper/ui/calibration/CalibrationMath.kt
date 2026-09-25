@@ -1,5 +1,6 @@
 package com.stastyle.imumapper.ui.calibration
 
+import com.stastyle.imumapper.pipeline.core.HeadingAxisMode
 import com.stastyle.imumapper.pipeline.core.Quat
 import com.stastyle.imumapper.pipeline.core.Vec3
 import kotlin.math.PI
@@ -24,6 +25,9 @@ object CalibrationMath {
 
     /** Gyro RMS above this while "still" means the phone was moving during the still-bias flow. */
     const val STILL_GYRO_RMS_LIMIT: Double = 0.03
+
+    /** Key of the PDR diagnostic that names the device axis each heading segment was measured on. */
+    const val HEADING_AXIS_DIAG: String = "headingAxis"
 
     // --- still bias ---
 
@@ -109,6 +113,18 @@ object CalibrationMath {
         val horizontal = sqrt(end.x * end.x + end.y * end.y)
         if (horizontal < MIN_HEADING_WALK_M) return null
         return wrapRad(offsetUsedRad - directionRad(end))
+    }
+
+    /**
+     * The device axis the PDR solver measured the heading on during a calibration walk, from the
+     * result's `headingAxis` diagnostic (one entry per heading segment, `;`-separated; the walk has
+     * no REORIENT so the first entry is the one the offset belongs to). AUTO when the diagnostic is
+     * missing or unknown, which makes later trips pick the axis themselves as before.
+     */
+    fun headingAxisFromDiagnostics(diagnostics: Map<String, String>): HeadingAxisMode {
+        val first = diagnostics[HEADING_AXIS_DIAG]?.split(';')?.firstOrNull()?.trim() ?: return HeadingAxisMode.AUTO
+        return HeadingAxisMode.entries.firstOrNull { it != HeadingAxisMode.AUTO && it.name == first }
+            ?: HeadingAxisMode.AUTO
     }
 
     // --- square test ---

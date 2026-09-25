@@ -23,6 +23,13 @@ import java.util.concurrent.RejectedExecutionException
  * TRACKING_REGAINED events on transitions, a decimated [PointCloudSample] every few frames while tracking
  * and, when a [KeyframeSaver] is given (illuminated mode), a photo keyframe by [KeyframePolicy].
  *
+ * One logger serves one ARCore `Session`, and every session starts its own world frame, so the log marks
+ * the session boundaries: a TRACKING_LOST is written before the session's first pose (and, through
+ * [onSessionStopped], when the camera stops while tracking). A pause/resume of the same session therefore
+ * shows as LOST ... REGAINED, while a new session shows as a second TRACKING_LOST with no
+ * TRACKING_REGAINED in between: the pipeline must re-yaw the run that follows instead of assuming the old
+ * frame. The first session of a trip starts with the same TRACKING_LOST; it precedes any pose and is harmless.
+ *
  * [onFrame] runs on the GL thread right after `Session.update()`; it only copies data out of the frame.
  * Writes go through [writeExecutor], JPEG work through the saver's own thread.
  */
@@ -32,7 +39,12 @@ class ArFrameLogger(
     private val saver: KeyframeSaver?,
     private val onTracking: (TrackingState, TrackingFailureReason) -> Unit,
     private val onKeyframeSaved: (Int) -> Unit,
+    /** Highest keyframe index already in the trip's photo directory; numbering continues after it. */
+    lastKeyframeIndex: Int = 0,
+    /** Keyframes already on disk from earlier sessions of the trip, counted into [onKeyframeSaved]. */
+    keyframesOnDisk: Int = 0,
 ) {
+    private var started = false
     private var lastFrameTimestamp = -1L
     private var frameCount = 0L
     private var wasTracking = false
@@ -40,8 +52,21 @@ class ArFrameLogger(
     private var lastReason: TrackingFailureReason = TrackingFailureReason.NONE
     private var lastCloudTimestamp = -1L
     private val policy = KeyframePolicy()
-    private var keyframeIndex = 0
-    private var keyframesSaved = 0
+    private var keyframeIndex = lastKeyframeIndex
+    private var keyframesSaved = keyframesOnDisk
+
+    /**
+     * The camera stopped ([ArSessionManager.pause] or close): tracking cannot go on, so the log gets the
+     * TRACKING_LOST that no frame will deliver. Called under the session lock, never concurrently with
+     * [onFrame]. The next frame reports its tracking state afresh.
+     */
+    fun onSessionStopped() {
+        reported = false
+        if (!wasTracking) return
+        wasTracking = false
+        val nowNs = SystemClock.elapsedRealtimeNanos()
+        submit { controller.write(EventRecord(nowNs, EventKind.TRACKING_LOST)) }
+    }
 
     fun onFrame(frame: Frame) {
         val frameTs = frame.timestamp
@@ -68,23 +93,26 @@ class ArFrameLogger(
             tracking = tracking,
             failureReason = if (isTracking) 0 else reason.ordinal,
         )
-        val event = when {
-            isTracking && !wasTracking -> EventKind.TRACKING_REGAINED
-            !isTracking && wasTracking -> EventKind.TRACKING_LOST
-            else -> null
+        val events = ArrayList<EventKind>(2)
+        if (!started) {
+            // Session boundary marker, before the first pose of this session (see the class comment).
+            started = true
+            events.add(EventKind.TRACKING_LOST)
         }
+        val transition = isTracking != wasTracking
+        if (transition) events.add(if (isTracking) EventKind.TRACKING_REGAINED else EventKind.TRACKING_LOST)
         wasTracking = isTracking
         frameCount++
 
         val cloud = if (isTracking && frameCount % POINT_CLOUD_EVERY_N_FRAMES == 0L) readPointCloud(frame) else null
         val pointCloud = cloud?.let { PointCloudSample(nowNs, it) }
         submit {
-            if (event != null) controller.write(EventRecord(nowNs, event))
+            for (event in events) controller.write(EventRecord(nowNs, event))
             controller.write(sample)
             if (pointCloud != null) controller.write(pointCloud)
         }
 
-        if (!reported || event != null || reason != lastReason) {
+        if (!reported || transition || reason != lastReason) {
             reported = true
             lastReason = reason
             onTracking(tracking, reason)

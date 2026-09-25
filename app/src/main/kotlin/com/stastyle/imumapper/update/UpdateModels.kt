@@ -42,7 +42,11 @@ sealed interface UpdateState {
 
 /** Fetches the newest release from GitHub. Implemented by the app-updater work item. */
 interface UpdateChecker {
-    /** Null when the repo has no release with an APK asset. Throws on network errors. */
+    /**
+     * Null only when the repository has no release at all (HTTP 404). A latest release without an
+     * APK asset is an [UpdateCheckException], like network and API errors, so it is never mistaken
+     * for "up to date".
+     */
     suspend fun fetchLatest(): ReleaseInfo?
 }
 
@@ -82,4 +86,12 @@ object SemVer {
         val i = parse(installed) ?: return false
         return c > i
     }
+
+    /**
+     * True for the `-debug` versionNameSuffix of the debug build type. That build has a different
+     * applicationId, so a release APK could never update it: the installer would add a second app.
+     */
+    fun isDebugBuild(installed: String): Boolean = installed.trim().endsWith(DEBUG_SUFFIX, ignoreCase = true)
+
+    private const val DEBUG_SUFFIX = "-debug"
 }

@@ -85,10 +85,12 @@ fun TripListScreen(
             processor = container.tripProcessor,
             exporter = TripExporter(context.applicationContext, container.tripRepository, container.tripFiles),
             importer = TripImporter(context.applicationContext, container.tripRepository, container.tripFiles),
+            defaultTripMode = container.updateManager.preferences.defaultTripMode,
         )
     }
     val trips by vm.tripList.collectAsStateWithLifecycle()
     val carryPosition by vm.carryPosition.collectAsStateWithLifecycle()
+    val defaultTripMode by vm.defaultTripMode.collectAsStateWithLifecycle()
     val ui by vm.ui.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
 
@@ -163,6 +165,7 @@ fun TripListScreen(
 
     if (showNewTrip) {
         NewTripDialog(
+            initialMode = defaultTripMode,
             initialCarryPosition = carryPosition,
             onDismiss = { showNewTrip = false },
             onStart = { mode, carry ->

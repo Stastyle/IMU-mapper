@@ -67,8 +67,9 @@ open class RecordingService : LifecycleService() {
     /** Called once the service is in the foreground for [tripId]. */
     protected open fun onStartRecording(tripId: Long) {
         val controller = RecordingController.get(this)
-        val current = controller.state.value
-        if (current !is RecordingState.Recording || current.tripId != tripId) {
+        // currentTripId is set under the controller's lock before the start intent is sent, so it is
+        // reliable even when this runs before the controller has published its Recording state.
+        if (controller.currentTripId != tripId) {
             // Nobody in this process is recording that trip: the process died and we were restarted, or
             // a stale start intent arrived. Close the trip out and leave.
             lifecycleScope.launch {

@@ -1,5 +1,6 @@
 package com.stastyle.imumapper.ui.debug
 
+import com.stastyle.imumapper.pipeline.core.HeadingAxisMode
 import com.stastyle.imumapper.pipeline.core.PipelineConfig
 import com.stastyle.imumapper.pipeline.core.Vec3
 import com.stastyle.imumapper.ui.calibration.CalibrationMath
@@ -33,18 +34,25 @@ enum class ConfigField(val label: String, val type: FieldType, val hint: String)
     VIO_RESAMPLE_PERIOD_S("VIO resample period (s)", FieldType.DOUBLE, "0.01 to 5"),
 }
 
-/** Text of every field as typed by the user. */
-data class ConfigDraft(val values: Map<ConfigField, String>) {
+/**
+ * Text of every field as typed by the user. [headingAxis] is not editable: it belongs to the
+ * calibrated offset and is carried through so that saving from the editor keeps it.
+ */
+data class ConfigDraft(
+    val values: Map<ConfigField, String>,
+    val headingAxis: HeadingAxisMode = HeadingAxisMode.AUTO,
+) {
 
     fun text(field: ConfigField): String = values[field] ?: ""
 
     fun bool(field: ConfigField): Boolean = values[field] == "true"
 
-    fun with(field: ConfigField, text: String): ConfigDraft = ConfigDraft(values + (field to text))
+    fun with(field: ConfigField, text: String): ConfigDraft = copy(values = values + (field to text))
 
     companion object {
         fun from(c: PipelineConfig): ConfigDraft = ConfigDraft(
-            mapOf(
+            headingAxis = c.headingAxis,
+            values = mapOf(
                 ConfigField.STRIDE_LENGTH_M to num(c.strideLengthM),
                 ConfigField.WEINBERG_K to num(c.weinbergK),
                 ConfigField.HEADING_OFFSET_DEG to num(Math.toDegrees(c.headingOffsetRad)),
@@ -132,6 +140,7 @@ object ConfigFields {
             strideLengthM = stride!!,
             weinbergK = weinberg!!,
             headingOffsetRad = CalibrationMath.wrapRad(Math.toRadians(headingDeg!!)),
+            headingAxis = draft.headingAxis,
             useMagnetometer = draft.bool(ConfigField.USE_MAGNETOMETER),
             magGateTolerance = magTol!!,
             gyroBias = Vec3(bx!!, by!!, bz!!),
@@ -154,7 +163,8 @@ object ConfigFields {
     fun differs(a: PipelineConfig, b: PipelineConfig): Boolean {
         fun d(x: Double, y: Double) = abs(x - y) > 1e-6
         return d(a.strideLengthM, b.strideLengthM) || d(a.weinbergK, b.weinbergK) ||
-            d(a.headingOffsetRad, b.headingOffsetRad) || a.useMagnetometer != b.useMagnetometer ||
+            d(a.headingOffsetRad, b.headingOffsetRad) || a.headingAxis != b.headingAxis ||
+            a.useMagnetometer != b.useMagnetometer ||
             d(a.magGateTolerance, b.magGateTolerance) || d(a.gyroBias.x, b.gyroBias.x) ||
             d(a.gyroBias.y, b.gyroBias.y) || d(a.gyroBias.z, b.gyroBias.z) ||
             d(a.stepMinIntervalS, b.stepMinIntervalS) || d(a.stepMinSwing, b.stepMinSwing) ||

@@ -2,6 +2,7 @@ package com.stastyle.imumapper.data
 
 import com.stastyle.imumapper.data.db.PathResultEntity
 import com.stastyle.imumapper.data.db.TripEntity
+import com.stastyle.imumapper.data.db.TripStatus
 import com.stastyle.imumapper.pipeline.core.AccelSample
 import com.stastyle.imumapper.pipeline.core.CarryPosition
 import com.stastyle.imumapper.pipeline.core.EventKind
@@ -50,6 +51,31 @@ class FakeTripRepository(private val files: TripFiles) : TripRepository {
     override suspend fun updateTrip(trip: TripEntity) {
         check(trip.id in trips.value) { "unknown trip ${trip.id}" }
         trips.value = trips.value + (trip.id to trip)
+    }
+
+    override suspend fun renameTrip(tripId: Long, name: String) {
+        updateTrip(checkNotNull(trips.value[tripId]) { "unknown trip $tripId" }.copy(name = name))
+    }
+
+    override suspend fun markProcessed(tripId: Long, runId: Int, distanceM: Double, durationS: Double) {
+        updateTrip(
+            checkNotNull(trips.value[tripId]) { "unknown trip $tripId" }.copy(
+                status = TripStatus.PROCESSED,
+                latestRunId = runId,
+                distanceM = distanceM,
+                durationS = durationS,
+                lastError = null,
+            ),
+        )
+    }
+
+    override suspend fun markFailed(tripId: Long, error: String) {
+        updateTrip(
+            checkNotNull(trips.value[tripId]) { "unknown trip $tripId" }.copy(
+                status = TripStatus.FAILED,
+                lastError = error,
+            ),
+        )
     }
 
     override suspend fun deleteTrip(tripId: Long) {

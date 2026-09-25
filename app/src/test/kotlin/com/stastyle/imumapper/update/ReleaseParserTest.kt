@@ -4,6 +4,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class ReleaseParserTest {
 
@@ -103,6 +104,24 @@ class ReleaseParserTest {
         assertNull(ReleaseParser.parse("""{"message":"Not Found"}"""))
         assertNull(ReleaseParser.parse("not json at all"))
         assertNull(ReleaseParser.parse("[]"))
+    }
+
+    @Test
+    fun releaseWithoutApkIsKeptApartFromGarbage() {
+        // A real release with no APK must surface as a failure, never as "up to date".
+        val noApk = """{"tag_name":"v1.0.0","assets":[{"name":"SHA256SUMS.txt","browser_download_url":"https://x/s"}]}"""
+        assertEquals(ReleaseParser.Outcome.NoApk("v1.0.0"), ReleaseParser.classify(noApk))
+        assertEquals(ReleaseParser.Outcome.NoApk("v1.0.0"), ReleaseParser.classify("""{"tag_name":"v1.0.0"}"""))
+        assertEquals(
+            ReleaseParser.Outcome.NoApk("v1.0.0"),
+            ReleaseParser.classify("""{"tag_name":"v1.0.0","assets":[{"name":"a.apk","browser_download_url":""}]}"""),
+        )
+        assertEquals(ReleaseParser.Outcome.NotARelease, ReleaseParser.classify("""{"message":"Not Found"}"""))
+        assertEquals(ReleaseParser.Outcome.NotARelease, ReleaseParser.classify("not json at all"))
+        assertEquals(ReleaseParser.Outcome.NotARelease, ReleaseParser.classify("[]"))
+        val ok = ReleaseParser.classify(digestRelease)
+        assertTrue(ok is ReleaseParser.Outcome.Release)
+        assertEquals("v1.2.3", ok.parsed.release.tagName)
     }
 
     @Test

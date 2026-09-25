@@ -162,3 +162,60 @@ class FormatTest {
         assertFalse(SensorStats().coreSensorsHealthy)
     }
 }
+
+class PauseLedgerTest {
+    private val s = 1_000_000_000L
+
+    @Test
+    fun elapsedAndStepsExcludePauses() {
+        val l = PauseLedger(startedNs = 10 * s)
+        assertFalse(l.paused)
+        assertEquals(5 * s, l.activeElapsedNs(15 * s))
+        assertEquals(40, l.activeSteps(40))
+
+        assertTrue(l.pause(nowNs = 15 * s, stepsSoFar = 40))
+        assertTrue(l.paused)
+        // A pause still open: the timer and the step count stay frozen.
+        assertEquals(5 * s, l.activeElapsedNs(25 * s))
+        assertEquals(40, l.activeSteps(70))
+
+        assertTrue(l.resume(nowNs = 25 * s, stepsSoFar = 70))
+        assertFalse(l.paused)
+        assertEquals(5 * s, l.activeElapsedNs(25 * s))
+        assertEquals(8 * s, l.activeElapsedNs(28 * s))
+        assertEquals(45, l.activeSteps(75))
+
+        // A second pause adds up with the first.
+        assertTrue(l.pause(28 * s, 75))
+        assertTrue(l.resume(30 * s, 80))
+        assertEquals(9 * s, l.activeElapsedNs(31 * s))
+        assertEquals(46, l.activeSteps(81))
+    }
+
+    @Test
+    fun transitionsHappenOnce() {
+        val l = PauseLedger(startedNs = 0)
+        assertFalse(l.resume(1 * s, 0))
+        assertTrue(l.pause(1 * s, 0))
+        assertFalse(l.pause(2 * s, 0))
+        assertTrue(l.resume(3 * s, 0))
+        assertFalse(l.resume(4 * s, 0))
+        assertEquals(2 * s, l.activeElapsedNs(4 * s))
+    }
+
+    @Test
+    fun stepCountNeverGoesNegative() {
+        // The logger's counter went backwards (restarted) during a pause: that pause counts no steps.
+        val l = PauseLedger(startedNs = 0)
+        l.pause(1 * s, 30)
+        assertEquals(5, l.activeSteps(5))
+        l.resume(2 * s, 5)
+        assertEquals(5, l.activeSteps(5))
+        // Backwards after a pause that did count steps: clamp instead of reporting a negative count.
+        val m = PauseLedger(startedNs = 0)
+        m.pause(1 * s, 0)
+        m.resume(2 * s, 10)
+        assertEquals(0, m.activeSteps(3))
+        assertEquals(2, m.activeSteps(12))
+    }
+}

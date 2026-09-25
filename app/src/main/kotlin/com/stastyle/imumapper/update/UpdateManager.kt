@@ -35,11 +35,24 @@ class UpdateManager(
     /** The releases page on GitHub, for the "open release page" link when no release is known. */
     val releasesPageUrl: String = "https://github.com/${BuildConfig.GITHUB_REPO}/releases"
 
+    /**
+     * Why this build cannot be updated from GitHub, or null when it can. The debug build type has
+     * its own applicationId, so the release APK would install as a second app instead of updating;
+     * it also carries a `-debug` pre-release tag that would make every release look newer.
+     */
+    val updatesUnavailableReason: String? =
+        if (SemVer.isDebugBuild(installedVersion)) {
+            "Updates are unavailable for debug builds. Install a release build to update from GitHub."
+        } else {
+            null
+        }
+
     private var checkJob: Job? = null
     private var downloadJob: Job? = null
 
     /** Settings button: always reports the outcome, including "up to date" and errors. */
     fun checkNow() {
+        if (updatesUnavailableReason != null) return
         if (checkJob?.isActive == true) return
         checkJob = scope.launch { runCheck(manual = true) }
     }
@@ -49,6 +62,7 @@ class UpdateManager(
      * dismissed. Never interrupts a check, download or pending install that is in progress.
      */
     fun autoCheckIfDue() {
+        if (updatesUnavailableReason != null) return
         if (checkJob?.isActive == true) return
         checkJob = scope.launch {
             val current = _state.value
@@ -145,17 +159,27 @@ class UpdateManager(
         }
         runCatching { preferences.recordCheck(System.currentTimeMillis()) }
             .onFailure { Log.w(TAG, "prefs write failed", it) }
-        if (release != null && SemVer.isNewer(release.version, installedVersion)) {
-            val dismissed = if (manual) null else runCatching { preferences.lastSeenTag() }.getOrNull()
-            if (manual || release.tagName != dismissed) {
-                _state.value = UpdateState.Available(release)
+        when {
+            release == null -> {
+                // The repository has no release at all. Nothing to compare against, and nothing to
+                // clean up either: a downloaded APK could still be newer than this build.
+                if (manual) _state.value = UpdateState.UpToDate(installedVersion)
             }
-        } else {
-            // The installed build is the newest, so any APK from an earlier update is just clutter.
-            withContext(Dispatchers.IO) {
-                runCatching { downloader.deleteStaleApks() }.onFailure { Log.w(TAG, "stale apk cleanup failed", it) }
+            SemVer.isNewer(release.version, installedVersion) -> {
+                val dismissed = if (manual) null else runCatching { preferences.lastSeenTag() }.getOrNull()
+                if (manual || release.tagName != dismissed) {
+                    _state.value = UpdateState.Available(release)
+                }
             }
-            if (manual) _state.value = UpdateState.UpToDate(installedVersion)
+            else -> {
+                // The installed build is at least as new as the latest release, so any APK from an
+                // earlier update is just clutter.
+                withContext(Dispatchers.IO) {
+                    runCatching { downloader.deleteStaleApks() }
+                        .onFailure { Log.w(TAG, "stale apk cleanup failed", it) }
+                }
+                if (manual) _state.value = UpdateState.UpToDate(installedVersion)
+            }
         }
     }
 

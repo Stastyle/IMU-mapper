@@ -29,6 +29,9 @@ class SettingsViewModel(
 
     val installedVersion: String get() = updates.installedVersion
 
+    /** Non-null when this build cannot be updated from GitHub (debug builds); shown instead of the check button. */
+    val updatesUnavailableReason: String? get() = updates.updatesUnavailableReason
+
     val releasesPageUrl: String get() = updates.releasesPageUrl
 
     fun setCarryPosition(position: CarryPosition) {

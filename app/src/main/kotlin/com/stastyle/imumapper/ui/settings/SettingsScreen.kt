@@ -97,6 +97,7 @@ fun SettingsScreen(onBack: () -> Unit) {
             UpdatesSection(
                 state = updateState,
                 installedVersion = vm.installedVersion,
+                unavailableReason = vm.updatesUnavailableReason,
                 releasesPageUrl = vm.releasesPageUrl,
                 onCheck = vm::checkForUpdates,
                 onDownload = vm::downloadUpdate,
@@ -176,6 +177,7 @@ private fun RecordingSection(
 private fun UpdatesSection(
     state: UpdateState,
     installedVersion: String,
+    unavailableReason: String?,
     releasesPageUrl: String,
     onCheck: () -> Unit,
     onDownload: () -> Unit,
@@ -187,54 +189,82 @@ private fun UpdatesSection(
 ) {
     SectionCard(title = "Updates") {
         Text("Installed version: $installedVersion", style = MaterialTheme.typography.bodyMedium)
-        when (state) {
-            UpdateState.Idle -> Button(onClick = onCheck) { Text("Check for updates") }
-            UpdateState.Checking -> Row(verticalAlignment = Alignment.CenterVertically) {
-                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                Spacer(Modifier.width(12.dp))
-                Text("Checking GitHub for a newer release…")
-            }
-            is UpdateState.UpToDate -> {
-                Text("You have the latest version.")
-                OutlinedButton(onClick = onCheck) { Text("Check again") }
-            }
-            is UpdateState.Available -> AvailableBlock(state.release, onDownload = onDownload, onDismiss = onDismiss)
-            is UpdateState.Downloading -> {
-                val percent = (state.progress * 100f).roundToInt().coerceIn(0, 100)
-                Text("Downloading version ${state.release.version}… $percent %")
-                LinearProgressIndicator(
-                    progress = { state.progress.coerceIn(0f, 1f) },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                TextButton(onClick = onCancel) { Text("Cancel") }
-            }
-            is UpdateState.ReadyToInstall -> {
-                Text("Version ${state.release.version} is downloaded and verified.")
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = onInstall) { Text("Install") }
-                    TextButton(onClick = onDismiss) { Text("Later") }
-                }
-            }
-            is UpdateState.NeedsInstallPermission -> {
-                Text(
-                    "Android needs your permission first: allow \"Install unknown apps\" for IMU Mapper on the " +
-                        "settings page that opened, then come back and tap Install again.",
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = onInstall) { Text("Install") }
-                    TextButton(onClick = onDismiss) { Text("Later") }
-                }
-            }
-            is UpdateState.Error -> {
-                Text(state.message, color = MaterialTheme.colorScheme.error)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = onRetry) { Text("Retry") }
-                    TextButton(onClick = onDismiss) { Text("Dismiss") }
-                }
-            }
+        when {
+            unavailableReason != null -> Text(
+                unavailableReason,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            else -> UpdateControls(
+                state = state,
+                onCheck = onCheck,
+                onDownload = onDownload,
+                onCancel = onCancel,
+                onInstall = onInstall,
+                onRetry = onRetry,
+                onDismiss = onDismiss,
+            )
         }
         val releaseUrl = releaseOf(state)?.htmlUrl?.takeIf { it.isNotBlank() } ?: releasesPageUrl
         TextButton(onClick = { onOpenUrl(releaseUrl) }) { Text("Open release page") }
+    }
+}
+
+@Composable
+private fun UpdateControls(
+    state: UpdateState,
+    onCheck: () -> Unit,
+    onDownload: () -> Unit,
+    onCancel: () -> Unit,
+    onInstall: () -> Unit,
+    onRetry: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    when (state) {
+        UpdateState.Idle -> Button(onClick = onCheck) { Text("Check for updates") }
+        UpdateState.Checking -> Row(verticalAlignment = Alignment.CenterVertically) {
+            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+            Spacer(Modifier.width(12.dp))
+            Text("Checking GitHub for a newer release…")
+        }
+        is UpdateState.UpToDate -> {
+            Text("You have the latest version.")
+            OutlinedButton(onClick = onCheck) { Text("Check again") }
+        }
+        is UpdateState.Available -> AvailableBlock(state.release, onDownload = onDownload, onDismiss = onDismiss)
+        is UpdateState.Downloading -> {
+            val percent = (state.progress * 100f).roundToInt().coerceIn(0, 100)
+            Text("Downloading version ${state.release.version}… $percent %")
+            LinearProgressIndicator(
+                progress = { state.progress.coerceIn(0f, 1f) },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            TextButton(onClick = onCancel) { Text("Cancel") }
+        }
+        is UpdateState.ReadyToInstall -> {
+            Text("Version ${state.release.version} is downloaded and verified.")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = onInstall) { Text("Install") }
+                TextButton(onClick = onDismiss) { Text("Later") }
+            }
+        }
+        is UpdateState.NeedsInstallPermission -> {
+            Text(
+                "Android needs your permission first: allow \"Install unknown apps\" for IMU Mapper on the " +
+                    "settings page that opened, then come back and tap Install again.",
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = onInstall) { Text("Install") }
+                TextButton(onClick = onDismiss) { Text("Later") }
+            }
+        }
+        is UpdateState.Error -> {
+            Text(state.message, color = MaterialTheme.colorScheme.error)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = onRetry) { Text("Retry") }
+                TextButton(onClick = onDismiss) { Text("Dismiss") }
+            }
+        }
     }
 }
 

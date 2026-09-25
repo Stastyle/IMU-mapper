@@ -111,23 +111,13 @@ class DefaultTripProcessor(
                 label = label.ifBlank { defaultLabel(processor, log) },
             )
             trips.addResult(entity)
-            // Re-read the row: a rename or note edit may have landed while the pipeline ran.
-            val current = trips.getTrip(tripId) ?: trip
-            trips.updateTrip(
-                current.copy(
-                    status = TripStatus.PROCESSED,
-                    latestRunId = runId,
-                    distanceM = result.stats.distanceM,
-                    durationS = result.stats.durationS,
-                    lastError = null,
-                ),
-            )
+            // Column-scoped write: a rename or note edit that landed while the pipeline ran is kept.
+            trips.markProcessed(tripId, runId, result.stats.distanceM, result.stats.durationS)
             entity
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            val current = trips.getTrip(tripId) ?: trip
-            trips.updateTrip(current.copy(status = TripStatus.FAILED, lastError = describe(e)))
+            trips.markFailed(tripId, describe(e))
             throw e
         }
     }

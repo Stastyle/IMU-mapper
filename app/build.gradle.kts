@@ -9,11 +9,18 @@ plugins {
 }
 
 // Version comes from the release workflow (-PversionName=X.Y.Z). versionCode is derived so it
-// is always monotonic: 1.2.3 -> 10203.
+// is always monotonic: 1.2.3 -> 10203. That only holds while minor and patch stay below 100
+// (1.0.100 would collide with 1.1.0), so larger components fail the build; the release workflow
+// rejects them up front with the same rule.
 val appVersionName: String = (project.findProperty("versionName") as String?)?.takeIf { it.isNotBlank() } ?: "0.0.1"
 val appVersionCode: Int = (project.findProperty("versionCode") as String?)?.toIntOrNull() ?: run {
     val parts = appVersionName.removePrefix("v").split(".").map { it.toIntOrNull() ?: 0 }
-    val code = parts.getOrElse(0) { 0 } * 10_000 + parts.getOrElse(1) { 0 } * 100 + parts.getOrElse(2) { 0 }
+    val minor = parts.getOrElse(1) { 0 }
+    val patch = parts.getOrElse(2) { 0 }
+    require(minor in 0..99 && patch in 0..99) {
+        "versionName '$appVersionName': minor and patch must be 0..99 so versionCode stays monotonic"
+    }
+    val code = parts.getOrElse(0) { 0 } * 10_000 + minor * 100 + patch
     maxOf(code, 1)
 }
 

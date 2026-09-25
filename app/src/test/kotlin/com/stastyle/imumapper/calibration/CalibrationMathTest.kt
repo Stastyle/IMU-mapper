@@ -1,5 +1,6 @@
 package com.stastyle.imumapper.calibration
 
+import com.stastyle.imumapper.pipeline.core.HeadingAxisMode
 import com.stastyle.imumapper.pipeline.core.Quat
 import com.stastyle.imumapper.pipeline.core.Vec3
 import com.stastyle.imumapper.ui.calibration.CalibrationMath
@@ -83,6 +84,19 @@ class HeadingMathTest {
         // A walk that already points north changes nothing.
         assertEquals(0.1, assertNotNull(CalibrationMath.headingOffsetFromEnd(Vec3(0.0, 5.0, 1.0), 0.1)), 1e-12)
         assertNull(CalibrationMath.headingOffsetFromEnd(Vec3(0.2, 0.2, 0.0), 0.0))
+    }
+
+    @Test
+    fun axisComesFromTheFirstHeadingSegment() {
+        fun axis(diag: String?): HeadingAxisMode =
+            CalibrationMath.headingAxisFromDiagnostics(if (diag == null) emptyMap() else mapOf("headingAxis" to diag))
+        assertEquals(HeadingAxisMode.CAMERA, axis("CAMERA"))
+        assertEquals(HeadingAxisMode.FORWARD, axis("FORWARD;CAMERA"))
+        // Missing, empty or unknown entries fall back to letting each trip choose.
+        assertEquals(HeadingAxisMode.AUTO, axis(null))
+        assertEquals(HeadingAxisMode.AUTO, axis(""))
+        assertEquals(HeadingAxisMode.AUTO, axis("AUTO"))
+        assertEquals(HeadingAxisMode.AUTO, axis("SIDEWAYS"))
     }
 }
 

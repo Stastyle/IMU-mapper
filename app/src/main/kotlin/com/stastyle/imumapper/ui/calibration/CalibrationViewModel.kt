@@ -16,6 +16,7 @@ import com.stastyle.imumapper.data.db.TripStatus
 import com.stastyle.imumapper.pipeline.core.CarryPosition
 import com.stastyle.imumapper.pipeline.core.EventKind
 import com.stastyle.imumapper.pipeline.core.EventRecord
+import com.stastyle.imumapper.pipeline.core.HeadingAxisMode
 import com.stastyle.imumapper.pipeline.core.LogMeta
 import com.stastyle.imumapper.pipeline.core.PathResult
 import com.stastyle.imumapper.pipeline.core.PipelineConfig
@@ -28,9 +29,11 @@ import com.stastyle.imumapper.pipeline.pdr.PdrProcessor
 import com.stastyle.imumapper.pipeline.pdr.PdrSolver
 import com.stastyle.imumapper.pipeline.vio.VioProcessor
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -70,6 +73,8 @@ sealed interface FlowResult {
 
     data class Heading(
         val offsetRad: Double,
+        /** Device axis the solver measured the heading on; saved with the offset so trips reuse it. */
+        val axis: HeadingAxisMode,
         /** Direction the path ended in with the current offset, radians clockwise from north. */
         val endDirectionRad: Double,
         val walkedM: Double,
@@ -161,6 +166,19 @@ class CalibrationViewModel(
     private var logger: SensorLogger? = null
     private var session: Session? = null
 
+    /** Flow whose log file is being opened on the IO dispatcher; [session] is still null then. */
+    private var opening: FlowKind? = null
+
+    /**
+     * Stops the sensors and closes the writer of the previous session. SensorLogger.stop() runs on
+     * the IO dispatcher, so a new start has to wait for it or the late stop would unregister the
+     * listeners the new session just registered.
+     */
+    private var closeJob: Job? = null
+
+    /** Deletes logs left behind by a flow whose process died; a new flow waits for it. */
+    private val pruneJob: Job = viewModelScope.launch(Dispatchers.IO) { pruneStaleLogs() }
+
     init {
         viewModelScope.launch {
             calibration.observeConfig().collect { c -> _ui.update { it.copy(config = c) } }
@@ -198,7 +216,7 @@ class CalibrationViewModel(
 
     /** Starts recording for [kind]. The still flow stops itself after [STILL_SECONDS]; walks stop on [stop]. */
     fun start(kind: FlowKind) {
-        if (session != null) {
+        if (session != null || opening != null) {
             _ui.update { it.copy(message = "Finish the running flow first") }
             return
         }
@@ -208,17 +226,34 @@ class CalibrationViewModel(
             return
         }
         val sensorLogger = logger ?: SensorLogger(appContext).also { logger = it }
+        opening = kind
         setPhase(kind, FlowPhase.Running(0, if (kind == FlowKind.STILL) STILL_SECONDS else null, 0))
         viewModelScope.launch {
-            val opened = runCatching {
-                withContext(Dispatchers.IO) { openSession(kind, sensorLogger, distance) }
-            }
-            val s = opened.getOrElse { e ->
-                if (e is CancellationException) throw e
+            // Assigned inside the IO block: withContext throws CancellationException after the block
+            // completed when the scope is cancelled meanwhile, and the open writer must not be lost.
+            var opened: Session? = null
+            try {
+                pruneJob.join()
+                closeJob?.join()
+                withContext(Dispatchers.IO) { opened = openSession(kind, sensorLogger, distance) }
+            } catch (e: CancellationException) {
+                opened?.let { withContext(NonCancellable + Dispatchers.IO) { discardUnstarted(it) } }
+                throw e
+            } catch (e: Exception) {
                 Log.w(TAG, "calibration log could not be opened", e)
-                setPhase(kind, FlowPhase.Failed("Could not open a log file: " + describe(e)))
+                if (opening == kind) {
+                    opening = null
+                    setPhase(kind, FlowPhase.Failed("Could not open a log file: " + describe(e)))
+                }
                 return@launch
             }
+            val s = opened ?: return@launch
+            if (opening != kind) {
+                // cancelActive() ran while the file was being opened; it already marked the flow.
+                withContext(NonCancellable + Dispatchers.IO) { discardUnstarted(s) }
+                return@launch
+            }
+            opening = null
             session = s
             sensorLogger.start(s.writer)
             s.ticker = viewModelScope.launch { tick(s, sensorLogger) }
@@ -234,11 +269,18 @@ class CalibrationViewModel(
 
     /** Aborts whatever is recording (screen left, app stopped). Safe to call when nothing runs. */
     fun cancelActive() {
+        val pending = opening
+        if (pending != null) {
+            // The log is still being opened: start() sees the cleared intent and discards the file.
+            opening = null
+            setPhase(pending, FlowPhase.Failed("Interrupted before it finished"))
+            return
+        }
         val s = session ?: return
         session = null
         s.ticker?.cancel()
         setPhase(s.kind, FlowPhase.Failed("Interrupted before it finished"))
-        viewModelScope.launch(Dispatchers.IO) { closeSession(s) }
+        closeJob = viewModelScope.launch(Dispatchers.IO) { closeSession(s) }
     }
 
     fun save(kind: FlowKind) {
@@ -255,8 +297,9 @@ class CalibrationViewModel(
                 "Stride walk: " + result.steps + " steps over " + Fmt.metres(result.distanceM),
             )
             is FlowResult.Heading -> Pair(
-                current.copy(headingOffsetRad = result.offsetRad),
-                "Heading offset " + Fmt.degrees(result.offsetRad) + " (" + Fmt.carry(_ui.value.carry) + ")",
+                current.copy(headingOffsetRad = result.offsetRad, headingAxis = result.axis),
+                "Heading offset " + Fmt.degrees(result.offsetRad) + " on the " + Fmt.axis(result.axis) +
+                    " axis (" + Fmt.carry(_ui.value.carry) + ")",
             )
             // Nothing to change for the square test: it is the baseline number, kept as a note.
             is FlowResult.Square -> Pair(
@@ -303,6 +346,7 @@ class CalibrationViewModel(
     override fun onCleared() {
         val s = session
         session = null
+        opening = null
         s?.ticker?.cancel()
         // viewModelScope is already cancelled here, so the cleanup has to be synchronous.
         if (s != null) closeSession(s)
@@ -329,8 +373,21 @@ class CalibrationViewModel(
         finish(s)
     }
 
+    /**
+     * Every flow deletes its own log when it ends, but a process killed mid-walk leaves a multi-megabyte
+     * file behind. Runs once per ViewModel, before the first flow opens its file.
+     */
+    private fun pruneStaleLogs() {
+        val stale = calibrationDir().listFiles() ?: return
+        for (f in stale) {
+            if (f.isFile && !f.delete()) Log.w(TAG, "could not delete stale calibration log " + f.name)
+        }
+    }
+
+    private fun calibrationDir(): File = File(appContext.cacheDir, "calibration").also { it.mkdirs() }
+
     private fun openSession(kind: FlowKind, logger: SensorLogger, distanceM: Double?): Session {
-        val dir = File(appContext.cacheDir, "calibration").also { it.mkdirs() }
+        val dir = calibrationDir()
         val file = File(dir, kind.name.lowercase() + "-" + System.currentTimeMillis() + ".imul")
         val writer = LogWriter(FileOutputStream(file))
         try {
@@ -362,13 +419,21 @@ class CalibrationViewModel(
         s.ticker?.cancel()
         setPhase(s.kind, FlowPhase.Computing)
         val config = _ui.value.config
+        // Closing is its own job so that a flow started right after this one waits for the sensors to
+        // stop, without also waiting for the computation. async keeps a write failure for await(), and
+        // ATOMIC makes the writer close even when the ViewModel is cleared before the job gets a thread.
+        val closing = viewModelScope.async(Dispatchers.IO, start = CoroutineStart.ATOMIC) {
+            try {
+                s.writer.write(EventRecord(SystemClock.elapsedRealtimeNanos(), EventKind.STOP))
+            } finally {
+                closeSession(s, delete = false)
+            }
+        }
+        closeJob = closing
         viewModelScope.launch {
             try {
-                val log = withContext(Dispatchers.IO) {
-                    s.writer.write(EventRecord(SystemClock.elapsedRealtimeNanos(), EventKind.STOP))
-                    closeSession(s, delete = false)
-                    LogReader.read(s.file)
-                }
+                closing.await()
+                val log = withContext(Dispatchers.IO) { LogReader.read(s.file) }
                 val result = withContext(Dispatchers.Default) { compute(s, log, config) }
                 setPhase(s.kind, FlowPhase.Done(result))
             } catch (e: CancellationException) {
@@ -400,6 +465,20 @@ class CalibrationViewModel(
             Log.w(TAG, "log writer close failed", e)
         }
         if (delete) s.file.delete()
+    }
+
+    /** Drops a session whose sensors never started: only the writer and the file exist. */
+    private fun discardUnstarted(s: Session) {
+        synchronized(s) {
+            if (s.closed) return
+            s.closed = true
+        }
+        try {
+            s.writer.close()
+        } catch (e: Exception) {
+            Log.w(TAG, "log writer close failed", e)
+        }
+        s.file.delete()
     }
 
     // --- computation (pure; runs on Dispatchers.Default) ---
@@ -448,6 +527,7 @@ class CalibrationViewModel(
             ?: throw IllegalStateException("Walk further: the path ended under one metre from the start")
         return FlowResult.Heading(
             offsetRad = offset,
+            axis = CalibrationMath.headingAxisFromDiagnostics(result.diagnostics),
             endDirectionRad = CalibrationMath.directionRad(end),
             walkedM = result.stats.distanceM,
             steps = result.stats.stepCount,

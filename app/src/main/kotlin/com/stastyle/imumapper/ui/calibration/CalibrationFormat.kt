@@ -2,6 +2,7 @@ package com.stastyle.imumapper.ui.calibration
 
 import com.stastyle.imumapper.data.db.TripEntity
 import com.stastyle.imumapper.pipeline.core.CarryPosition
+import com.stastyle.imumapper.pipeline.core.HeadingAxisMode
 import com.stastyle.imumapper.pipeline.core.PipelineConfig
 import com.stastyle.imumapper.pipeline.core.Vec3
 import java.text.DateFormat
@@ -33,6 +34,12 @@ object Fmt {
         CarryPosition.HELMET -> "Helmet"
     }
 
+    fun axis(axis: HeadingAxisMode): String = when (axis) {
+        HeadingAxisMode.AUTO -> "auto"
+        HeadingAxisMode.FORWARD -> "forward (+Y)"
+        HeadingAxisMode.CAMERA -> "camera (-Z)"
+    }
+
     /** "Sep 25, 2026 10:12 · 4:05 · 120 m" for trip pickers, dropping unknown parts. */
     fun tripLine(trip: TripEntity): String {
         val parts = ArrayList<String>()
@@ -62,7 +69,7 @@ object Fmt {
     fun configSummary(c: PipelineConfig): List<Pair<String, String>> = listOf(
         "Stride length" to metres(c.strideLengthM),
         "Weinberg k" to (if (c.weinbergK > 0.0) num(c.weinbergK, 3) else "off (fixed stride)"),
-        "Heading offset" to degrees(c.headingOffsetRad),
+        "Heading offset" to degrees(c.headingOffsetRad) + " on " + axis(c.headingAxis) + " axis",
         "Gyro bias (rad/s)" to vec3(c.gyroBias),
         "Magnetometer" to (if (c.useMagnetometer) "used, gate " + num(c.magGateTolerance * 100.0, 0) + " %" else "off"),
         "Hardware steps" to (if (c.preferHardwareSteps) "preferred" else "software detector"),

@@ -183,6 +183,9 @@ class SensorLogger(context: Context) : SensorEventListener {
             return
         }
         running = false
+        // Unregister here as well as in stop(): a start() posted just before stop() registers the
+        // listeners on this thread after stop() already ran its unregister on the caller's thread.
+        sensorManager.unregisterListener(this)
         handler.removeCallbacks(tick)
         try {
             writer?.flush()

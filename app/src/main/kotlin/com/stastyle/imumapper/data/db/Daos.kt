@@ -25,6 +25,19 @@ interface TripDao {
     @Update
     suspend fun update(trip: TripEntity)
 
+    /** Column-scoped writes: each touches only its own fields, so concurrent editors cannot revert each other. */
+    @Query("UPDATE trips SET name = :name WHERE id = :id")
+    suspend fun rename(id: Long, name: String)
+
+    @Query(
+        "UPDATE trips SET status = 'PROCESSED', latestRunId = :runId, distanceM = :distanceM, " +
+            "durationS = :durationS, lastError = NULL WHERE id = :id",
+    )
+    suspend fun markProcessed(id: Long, runId: Int, distanceM: Double, durationS: Double)
+
+    @Query("UPDATE trips SET status = 'FAILED', lastError = :error WHERE id = :id")
+    suspend fun markFailed(id: Long, error: String)
+
     @Query("DELETE FROM trips WHERE id = :id")
     suspend fun delete(id: Long)
 }

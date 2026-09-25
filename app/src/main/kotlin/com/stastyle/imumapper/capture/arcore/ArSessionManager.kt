@@ -128,8 +128,16 @@ class ArSessionManager(context: Context, private val controller: RecordingContro
         } else {
             null
         }
+        // A trip can outlive this session (screen re-entered, Retry, activity recreated): keyframe numbering
+        // continues after the photos already on disk so none of them is overwritten.
+        val existingKeyframes =
+            if (keyframeSaver != null) existingKeyframeIndices(photosDir.list()?.asList() ?: emptyList()) else emptyList()
         val executor = Executors.newSingleThreadExecutor { r -> Thread(r, "ar-log") }
-        logger = ArFrameLogger(controller, executor, keyframeSaver, ::onTracking, ::onKeyframeSaved)
+        logger = ArFrameLogger(
+            controller, executor, keyframeSaver, ::onTracking, ::onKeyframeSaved,
+            lastKeyframeIndex = existingKeyframes.maxOrNull() ?: 0,
+            keyframesOnDisk = existingKeyframes.size,
+        )
         saver = keyframeSaver
         writeExecutor = executor
         session = s
@@ -137,7 +145,12 @@ class ArSessionManager(context: Context, private val controller: RecordingContro
         resumed = false
         textureDirty = true
         geometryDirty = true
-        _state.value = ArSessionState(status = ArStatus.PAUSED, torchSupported = torchSupported, torchOn = torchOn)
+        _state.value = ArSessionState(
+            status = ArStatus.PAUSED,
+            torchSupported = torchSupported,
+            torchOn = torchOn,
+            keyframeCount = existingKeyframes.size,
+        )
         true
     }
 
@@ -166,6 +179,8 @@ class ArSessionManager(context: Context, private val controller: RecordingContro
             if (!resumed) return
             resumed = false
             runCatching { s.pause() }.onFailure { Log.w(TAG, "pause failed", it) }
+            // The camera is off: close the tracking run in the log rather than leaving it open-ended.
+            logger?.onSessionStopped()
             if (torchOn) controller.writeEvent(EventKind.TORCH_OFF)
             _state.update {
                 if (it.status == ArStatus.FAILED) {
@@ -244,16 +259,25 @@ class ArSessionManager(context: Context, private val controller: RecordingContro
             logger?.onFrame(frame)
             frame
         } catch (e: CameraNotAvailableException) {
-            resumed = false
-            runCatching { s.pause() }
+            stopAfterFailure(s)
             fail("Camera not available. Close other camera apps and try again.", e)
             null
         } catch (e: Exception) {
-            resumed = false
-            runCatching { s.pause() }
+            stopAfterFailure(s)
             fail("ARCore stopped: ${e.message ?: e.javaClass.simpleName}", e)
             null
         }
+    }
+
+    /**
+     * Under [lock]. Leaves the session paused after a GL-thread failure; [pause] would skip it later, so the
+     * log's tracking run is closed here (Retry then opens a fresh session, which the log must not mistake
+     * for a resume of this one).
+     */
+    private fun stopAfterFailure(s: Session) {
+        resumed = false
+        runCatching { s.pause() }
+        logger?.onSessionStopped()
     }
 
     private fun onTracking(tracking: TrackingState, reason: TrackingFailureReason) {

@@ -1,7 +1,9 @@
 package com.stastyle.imumapper.pipeline.pdr
 
 import com.stastyle.imumapper.pipeline.core.AnnotationKind
+import com.stastyle.imumapper.pipeline.core.HeadingAxisMode
 import com.stastyle.imumapper.pipeline.core.PathPoint
+import com.stastyle.imumapper.pipeline.core.PauseIntervals
 import com.stastyle.imumapper.pipeline.core.PipelineConfig
 import com.stastyle.imumapper.pipeline.core.PositionSource
 import com.stastyle.imumapper.pipeline.core.Vec3
@@ -23,10 +25,12 @@ class PdrContext(
     val orientation: OrientationTrack,
     val orientationSource: OrientationEstimator.Source,
     val worldAccel: WorldAccel,
-    /** The steps positions are built from: software or hardware depending on the config. */
+    /** The steps positions are built from: software or hardware depending on the config, none inside a pause. */
     val steps: DetectedSteps,
     val softwareStepCount: Int,
     val hardwareStepCount: Int,
+    /** The recorder's [PAUSE, RESUME) intervals: no step and no barometric change is taken from them. */
+    val pauses: PauseIntervals,
     val headingSegments: List<HeadingSegment>,
     /** Walking heading of each used step (device heading + offset), radians clockwise from north. */
     val stepHeadingRad: DoubleArray,
@@ -57,8 +61,6 @@ class PdrSolution(val points: List<PathPoint>, val context: PdrContext)
  */
 class PdrSolver(
     private val orientationEstimator: OrientationEstimator = OrientationEstimator(),
-    /** A gap between steps longer than this is "standing still": barometric change during it is ignored. */
-    private val stillGapS: Double = 2.0,
     /** Steps used to re-estimate the heading offset after a REORIENT annotation. */
     private val reorientSteps: Int = 10,
     /** Steps before a REORIENT whose mean heading resolves the front/back ambiguity of the estimate. */
@@ -74,13 +76,29 @@ class PdrSolver(
 
         val software = StepDetector.detect(world, config)
         val hardware = StepDetector.fromHardware(log.steps, world, config)
-        val useHardware = config.preferHardwareSteps && hardware.size > 0
-        val steps = if (useHardware) hardware else software
+        // The hardware detector is the fallback when the software one has nothing to work with
+        // (accelerometer absent or stalled): an empty path is never the better answer.
+        val useHardware = (config.preferHardwareSteps || software.size == 0) && hardware.size > 0
+        val detected = if (useHardware) hardware else software
         diag["softwareSteps"] = software.size.toString()
         diag["hardwareSteps"] = hardware.size.toString()
         diag["stepsUsed"] = if (useHardware) "hardware" else "software"
-        if (config.preferHardwareSteps && hardware.size == 0) {
-            diag["stepsNote"] = "hardware steps preferred but none logged"
+        when {
+            config.preferHardwareSteps && hardware.size == 0 ->
+                diag["stepsNote"] = "hardware steps preferred but none logged"
+            useHardware && !config.preferHardwareSteps ->
+                diag["stepsNote"] = if (log.accel.isEmpty()) {
+                    "no accelerometer samples; hardware steps used"
+                } else {
+                    "software detector found no steps; hardware steps used"
+                }
+        }
+
+        val pauses = PauseIntervals.of(log.events)
+        val steps = excludePaused(detected, pauses)
+        if (!pauses.isEmpty) {
+            diag["pauses"] = pauses.size.toString()
+            diag["pausedSteps"] = (detected.size - steps.size).toString()
         }
 
         val strides = DoubleArray(steps.size) { StrideModel.strideM(config, steps.swing[it]) }
@@ -97,7 +115,7 @@ class PdrSolver(
 
         return PdrContext(
             log, config, orientation.track, orientation.source, world, steps, software.size, hardware.size,
-            segments, headings, strides, altitude, diag,
+            pauses, segments, headings, strides, altitude, diag,
         )
     }
 
@@ -126,7 +144,10 @@ class PdrSolver(
         var z = start.z
         var prevNs = fromNs
         val altitude = ctx.altitude
+        val pauses = ctx.pauses
         val hold = ctx.config.baroHoldWhenStill
+        val stillGapNs = (ctx.config.baroStillGapS * 1e9).toLong()
+        val settleNs = (SETTLING_TIME_CONSTANTS * ctx.config.baroSmoothingS * 1e9).toLong()
         for (i in first until last) {
             val t = steps.tNs[i]
             val h = Angles.wrap(ctx.stepHeadingRad[i] + correction)
@@ -134,8 +155,17 @@ class PdrSolver(
             x += d * sin(h)
             y += d * cos(h)
             if (altitude != null) {
-                val gapS = (t - prevNs) / 1e9
-                if (!hold || gapS <= stillGapS) z += altitude.at(t) - altitude.at(prevNs)
+                if (!hold || t - prevNs <= stillGapNs) {
+                    z += altitudeDelta(altitude, pauses, prevNs, t)
+                } else {
+                    // Standing still: freeze only the middle of the gap. The low-passed barometer is
+                    // still catching up with the last steps right after them, and the climb of this
+                    // step has begun before its peak, so both ends of the gap are kept.
+                    val tailEnd = minOf(t, prevNs + settleNs)
+                    val headStart = maxOf(t - settleNs, tailEnd)
+                    z += altitudeDelta(altitude, pauses, prevNs, tailEnd)
+                    z += altitudeDelta(altitude, pauses, headStart, t)
+                }
             }
             out.add(PathPoint(t, Vec3(x, y, z), PositionSource.PDR, h, i))
             prevNs = t
@@ -189,10 +219,13 @@ class PdrSolver(
             val toNs = if (b + 1 < boundaries.size) boundaries[b + 1] else Long.MAX_VALUE
             val first = steps.lowerBound(fromNs)
             val last = steps.lowerBound(toNs)
-            val axis = if (first < last) {
-                DeviceHeading.chooseAxis(track, steps.tNs, first, last)
-            } else {
-                DeviceHeading.chooseAxis(track, longArrayOf(fromNs), 0, 1)
+            // The calibrated offset belongs to one axis, so the first segment takes the configured
+            // one; after a REORIENT the offset is re-estimated and the axis may be chosen freely.
+            val axis = when {
+                b == 0 && config.headingAxis == HeadingAxisMode.FORWARD -> HeadingAxis.FORWARD
+                b == 0 && config.headingAxis == HeadingAxisMode.CAMERA -> HeadingAxis.CAMERA
+                first < last -> DeviceHeading.chooseAxis(track, steps.tNs, first, last)
+                else -> DeviceHeading.chooseAxis(track, longArrayOf(fromNs), 0, 1)
             }
             var wasEstimated = false
             if (b > 0 && first < last) {
@@ -219,8 +252,37 @@ class PdrSolver(
                 headings[i] = Angles.wrap(DeviceHeading.headingRad(cursor.at(steps.tNs[i]), axis) + offset)
             }
         }
+        diag["headingAxisMode"] = config.headingAxis.name
         diag["headingAxis"] = segments.joinToString(";") { it.axis.name }
         diag["headingOffsetDeg"] = Diag.num(Math.toDegrees(config.headingOffsetRad), 1)
         if (estimated.isNotEmpty()) diag["reorientOffsetsDeg"] = estimated.toString()
+    }
+
+    private fun excludePaused(steps: DetectedSteps, pauses: PauseIntervals): DetectedSteps {
+        if (pauses.isEmpty || steps.size == 0) return steps
+        val times = LongArray(steps.size)
+        val swings = DoubleArray(steps.size)
+        var k = 0
+        for (i in 0 until steps.size) {
+            if (pauses.contains(steps.tNs[i])) continue
+            times[k] = steps.tNs[i]
+            swings[k] = steps.swing[i]
+            k++
+        }
+        return if (k == steps.size) steps else DetectedSteps(times.copyOf(k), swings.copyOf(k))
+    }
+
+    /** Barometric altitude change over [fromNs, toNs] with the paused parts left out. */
+    private fun altitudeDelta(altitude: AltitudeTrack, pauses: PauseIntervals, fromNs: Long, toNs: Long): Double {
+        if (toNs <= fromNs) return 0.0
+        if (pauses.isEmpty) return altitude.at(toNs) - altitude.at(fromNs)
+        var delta = 0.0
+        pauses.forEachUnpaused(fromNs, toNs) { a, b -> delta += altitude.at(b) - altitude.at(a) }
+        return delta
+    }
+
+    companion object {
+        /** Time constants after which a first-order low-pass is taken as settled (95 %). */
+        const val SETTLING_TIME_CONSTANTS: Double = 3.0
     }
 }

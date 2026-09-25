@@ -57,6 +57,7 @@ sealed interface RecordingState {
         /** Recording time so far, not counting pauses. */
         val elapsedNs: Long,
         val paused: Boolean,
+        /** Hardware steps so far, not counting those taken during pauses. */
         val stepCount: Int,
         val annotationCount: Int,
         /** Where the ARCore keyframe photos of this trip go. */
@@ -74,6 +75,11 @@ sealed interface RecordingState {
  * Threading: [start] and [stop] are serialised by a mutex and run in the controller's own scope, so a
  * caller that is cancelled mid-way (a ViewModel being cleared) never leaves the recorder half stopped.
  * [write], [annotate], [pause] and [resume] may be called from any thread.
+ *
+ * Pausing: the sensors and the ARCore producers keep logging through a pause so the raw log stays
+ * complete; the pipeline is authoritative and drops every sample between the PAUSE and RESUME events.
+ * The recorder writes those two events exactly once per transition, keeps taking annotations while
+ * paused, and reports elapsed time and steps without the paused stretches.
  */
 class RecordingController private constructor(context: Context) {
 
@@ -104,16 +110,9 @@ class RecordingController private constructor(context: Context) {
         val startedAtEpochMs: Long,
         val photosDir: File,
     ) {
-        var paused = false
-        var pauseStartNs = 0L
-        var pausedAccumNs = 0L
+        val pauses = PauseLedger(startedNs)
         var annotationCount = 0
         var serviceStarted = false
-
-        fun activeElapsedNs(nowNs: Long): Long {
-            val pausedNow = if (paused) nowNs - pauseStartNs else 0L
-            return nowNs - startedNs - pausedAccumNs - pausedNow
-        }
     }
 
     val isRecording: Boolean
@@ -125,11 +124,18 @@ class RecordingController private constructor(context: Context) {
 
     init {
         // A trip left in RECORDING status means the process died mid-recording; whatever was flushed
-        // to raw.imul is the log. Runs under the mutex so it cannot race a start() that follows.
-        scope.launch {
-            mutex.withLock {
-                runCatching { recoverStaleTrips() }.onFailure { Log.w(TAG, "stale trip recovery failed", it) }
-            }
+        // to raw.imul is the log. ImuMapperApp creates the controller at startup so this runs on every
+        // launch, not only when a screen happens to need the recorder.
+        recoverStaleTrips()
+    }
+
+    /**
+     * Marks trips left in RECORDING status by an earlier process as RECORDED, on the controller's own
+     * scope. Runs under the mutex so it cannot race a [start] that follows.
+     */
+    fun recoverStaleTrips(): Job = scope.launch {
+        mutex.withLock {
+            runCatching { sweepStaleTrips() }.onFailure { Log.w(TAG, "stale trip recovery failed", it) }
         }
     }
 
@@ -161,7 +167,7 @@ class RecordingController private constructor(context: Context) {
 
     fun writeEvent(kind: EventKind): Boolean = write(EventRecord(nowNs(), kind))
 
-    /** Places an annotation at the current time. Returns false when not recording. */
+    /** Places an annotation at the current time, also while paused. Returns false when not recording. */
     fun annotate(kind: AnnotationKind, note: String = ""): Boolean {
         val ok = synchronized(lock) {
             val s = session
@@ -185,32 +191,32 @@ class RecordingController private constructor(context: Context) {
         return ok
     }
 
+    /**
+     * Writes PAUSE once and freezes the elapsed time and step count. The pause only takes effect when
+     * the event reached the log, so the recorder never claims a pause the pipeline will not see.
+     */
     fun pause() {
         val changed = synchronized(lock) {
             val s = session
-            if (s == null || stopping || s.paused) {
+            if (s == null || stopping || s.pauses.paused) {
                 false
             } else {
-                s.paused = true
-                s.pauseStartNs = nowNs()
-                write(EventRecord(s.pauseStartNs, EventKind.PAUSE))
-                true
+                val now = nowNs()
+                write(EventRecord(now, EventKind.PAUSE)) && s.pauses.pause(now, sensorLogger.stats.value.stepCount)
             }
         }
         if (changed) publish()
     }
 
+    /** Writes RESUME once; the counterpart of [pause]. */
     fun resume() {
         val changed = synchronized(lock) {
             val s = session
-            if (s == null || stopping || !s.paused) {
+            if (s == null || stopping || !s.pauses.paused) {
                 false
             } else {
                 val now = nowNs()
-                s.pausedAccumNs += now - s.pauseStartNs
-                s.paused = false
-                write(EventRecord(now, EventKind.RESUME))
-                true
+                write(EventRecord(now, EventKind.RESUME)) && s.pauses.resume(now, sensorLogger.stats.value.stepCount)
             }
         }
         if (changed) publish()
@@ -235,7 +241,7 @@ class RecordingController private constructor(context: Context) {
         )
     }
 
-    private suspend fun recoverStaleTrips() {
+    private suspend fun sweepStaleTrips() {
         val trips = container.tripRepository.observeTrips().first()
         for (trip in trips) {
             if (trip.status == TripStatus.RECORDING) finalizeOrphanedTrip(trip.id)
@@ -257,7 +263,12 @@ class RecordingController private constructor(context: Context) {
         )
         val rawLog = container.tripFiles.rawLog(tripId)
         val photosDir = container.tripFiles.photosDir(tripId)
-        val w = withContext(Dispatchers.IO) { LogWriter(FileOutputStream(rawLog)) }
+        val w = try {
+            withContext(Dispatchers.IO) { LogWriter(FileOutputStream(rawLog)) }
+        } catch (e: Exception) {
+            discardFailedStart(tripId)
+            throw e
+        }
         val startedNs = nowNs()
         try {
             w.writeMeta(
@@ -275,6 +286,7 @@ class RecordingController private constructor(context: Context) {
             w.write(EventRecord(startedNs, EventKind.START))
         } catch (e: Exception) {
             runCatching { w.close() }
+            discardFailedStart(tripId)
             throw e
         }
         val s = Session(tripId, mode, carryPosition, startedNs, startedAtEpochMs, photosDir)
@@ -284,8 +296,9 @@ class RecordingController private constructor(context: Context) {
             stopping = false
         }
         sensorLogger.start(w)
-        s.serviceStarted = startService(tripId)
+        // Publish before the service starts so its first notification (and any screen) sees the live trip.
         publish()
+        s.serviceStarted = startService(tripId)
         ticker = scope.launch {
             while (isActive) {
                 publish()
@@ -295,13 +308,26 @@ class RecordingController private constructor(context: Context) {
         return tripId
     }
 
+    /**
+     * Nothing was recorded: drop the row (and its directory) rather than leave a RECORDING trip the UI
+     * can neither process nor delete.
+     */
+    private suspend fun discardFailedStart(tripId: Long) {
+        runCatching { container.tripRepository.deleteTrip(tripId) }
+            .onFailure { Log.w(TAG, "could not remove trip $tripId after a failed start", it) }
+    }
+
     private suspend fun stopLocked(): Long? {
+        // Stopping and the Stopping state are set together under the lock so a publish() that read the
+        // session a moment earlier cannot land on top of them.
         val s = synchronized(lock) {
             val current = session
-            if (current != null) stopping = true
+            if (current != null) {
+                stopping = true
+                _state.value = RecordingState.Stopping
+            }
             current
         } ?: return null
-        _state.value = RecordingState.Stopping
         ticker?.cancel()
         ticker = null
         // The logger thread must let go of the writer before it is closed; stop() blocks briefly.
@@ -316,7 +342,7 @@ class RecordingController private constructor(context: Context) {
             }
             writer = null
             session = null
-            s.activeElapsedNs(stopNs)
+            s.pauses.activeElapsedNs(stopNs)
         }
         try {
             val trip = container.tripRepository.getTrip(s.tripId)
@@ -336,32 +362,31 @@ class RecordingController private constructor(context: Context) {
         if (s.serviceStarted) {
             runCatching { RecordingService.stop(appContext) }.onFailure { Log.w(TAG, "service stop failed", it) }
         }
-        synchronized(lock) { stopping = false }
-        _state.value = RecordingState.Idle
+        synchronized(lock) {
+            stopping = false
+            _state.value = RecordingState.Idle
+        }
         return s.tripId
     }
 
+    /** Publishes a Recording snapshot. Assigned under [lock] so it cannot overtake a Stopping or Idle transition. */
     private fun publish() {
-        val next = synchronized(lock) {
-            val s = session
-            if (s == null || stopping) {
-                null
-            } else {
-                val now = nowNs()
-                RecordingState.Recording(
-                    tripId = s.tripId,
-                    mode = s.mode,
-                    carryPosition = s.carryPosition,
-                    startedNs = s.startedNs,
-                    elapsedNs = s.activeElapsedNs(now),
-                    paused = s.paused,
-                    stepCount = sensorLogger.stats.value.stepCount,
-                    annotationCount = s.annotationCount,
-                    photosDir = s.photosDir,
-                )
-            }
+        synchronized(lock) {
+            val s = session ?: return
+            if (stopping) return
+            val now = nowNs()
+            _state.value = RecordingState.Recording(
+                tripId = s.tripId,
+                mode = s.mode,
+                carryPosition = s.carryPosition,
+                startedNs = s.startedNs,
+                elapsedNs = s.pauses.activeElapsedNs(now),
+                paused = s.pauses.paused,
+                stepCount = s.pauses.activeSteps(sensorLogger.stats.value.stepCount),
+                annotationCount = s.annotationCount,
+                photosDir = s.photosDir,
+            )
         }
-        if (next != null) _state.value = next
     }
 
     /** Starts the foreground service; false when the health permission is missing (recording continues). */

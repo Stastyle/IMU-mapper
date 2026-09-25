@@ -332,6 +332,13 @@ private fun StatusPanel(recording: RecordingState.Recording) {
                     MaterialTheme.colorScheme.onSurfaceVariant
                 },
             )
+            if (recording.paused) {
+                Text(
+                    text = "Sensors keep logging; this stretch is left out of the path and the timer.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
         Column(horizontalAlignment = Alignment.End) {
             Text(text = recording.stepCount.toString(), style = MaterialTheme.typography.headlineMedium)

@@ -11,7 +11,9 @@ import com.stastyle.imumapper.data.TripImporter
 import com.stastyle.imumapper.data.TripRepository
 import com.stastyle.imumapper.data.db.TripEntity
 import com.stastyle.imumapper.pipeline.core.CarryPosition
+import com.stastyle.imumapper.pipeline.core.TripMode
 import com.stastyle.imumapper.process.TripProcessor
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -37,6 +39,8 @@ class TripListViewModel(
     private val processor: TripProcessor,
     private val exporter: TripExporter,
     private val importer: TripImporter,
+    /** The "Default trip mode" setting (`UpdatePreferences.defaultTripMode`), preselected in the new-trip dialog. */
+    defaultTripMode: Flow<TripMode>,
 ) : ViewModel() {
 
     /** Newest first, as the DAO orders them. */
@@ -45,6 +49,9 @@ class TripListViewModel(
 
     val carryPosition: StateFlow<CarryPosition> = calibration.observeCarryPosition()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), CarryPosition.HAND)
+
+    val defaultTripMode: StateFlow<TripMode> = defaultTripMode
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), TripMode.POCKET)
 
     private val _ui = MutableStateFlow(TripListUiState())
     val ui: StateFlow<TripListUiState> = _ui.asStateFlow()
@@ -61,8 +68,8 @@ class TripListViewModel(
         val name = newName.trim()
         if (name.isEmpty()) return
         viewModelScope.launch {
-            val trip = trips.getTrip(tripId) ?: return@launch
-            runCatching { trips.updateTrip(trip.copy(name = name)) }
+            // Name-only write: a processing run finishing at the same moment keeps its status update.
+            runCatching { trips.renameTrip(tripId, name) }
                 .onFailure { showMessage("Rename failed: ${it.describe()}") }
         }
     }

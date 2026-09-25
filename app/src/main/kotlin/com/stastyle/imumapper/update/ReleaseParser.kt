@@ -21,17 +21,34 @@ object ReleaseParser {
     /** The release plus, when the APK asset carries no digest, where a SHA256SUMS.txt asset lives. */
     data class Parsed(val release: ReleaseInfo, val sha256SumsUrl: String?)
 
+    /**
+     * What a release body turned out to be. A release without an APK is kept apart from garbage
+     * because the updater must report it as a failure rather than as "up to date".
+     */
+    sealed interface Outcome {
+        data class Release(val parsed: Parsed) : Outcome
+
+        /** A well-formed release (`tag_name` present) whose assets hold no downloadable `.apk`. */
+        data class NoApk(val tagName: String) : Outcome
+
+        /** Not JSON, not an object, or an object without a `tag_name`. */
+        data object NotARelease : Outcome
+    }
+
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
-    /** Null when the JSON is not a release object or the release has no APK asset. */
-    fun parse(body: String): Parsed? {
-        val root = runCatching { json.parseToJsonElement(body) }.getOrNull() as? JsonObject ?: return null
+    /** Null when the JSON is not a release object or the release has no APK asset; see [classify]. */
+    fun parse(body: String): Parsed? = (classify(body) as? Outcome.Release)?.parsed
+
+    fun classify(body: String): Outcome {
+        val root = runCatching { json.parseToJsonElement(body) }.getOrNull() as? JsonObject
+            ?: return Outcome.NotARelease
         val tag = root.string("tag_name")?.trim().orEmpty()
-        if (tag.isEmpty()) return null
+        if (tag.isEmpty()) return Outcome.NotARelease
         val assets = (root["assets"] as? JsonArray)?.mapNotNull { it as? JsonObject }.orEmpty()
-        val apk = pickApkAsset(assets) ?: return null
+        val apk = pickApkAsset(assets) ?: return Outcome.NoApk(tag)
         val apkUrl = apk.string("browser_download_url").orEmpty()
-        if (apkUrl.isEmpty()) return null
+        if (apkUrl.isEmpty()) return Outcome.NoApk(tag)
         val digest = parseDigest(apk.string("digest"))
         val sumsUrl = if (digest == null) {
             assets.firstOrNull { it.string("name").equals(SHA256SUMS_NAME, ignoreCase = true) }
@@ -50,7 +67,7 @@ object ReleaseParser {
             publishedAt = root.string("published_at").orEmpty(),
             htmlUrl = root.string("html_url").orEmpty(),
         )
-        return Parsed(release, sumsUrl)
+        return Outcome.Release(Parsed(release, sumsUrl))
     }
 
     /**

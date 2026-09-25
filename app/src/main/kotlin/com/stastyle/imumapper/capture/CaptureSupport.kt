@@ -149,6 +149,52 @@ class Decimator(targetHz: Double) {
     }
 }
 
+/**
+ * Bookkeeping for the pauses of one recording. The sensors keep logging through a pause so the raw log
+ * stays complete; the pipeline drops everything between PAUSE and RESUME. This ledger keeps what the
+ * user sees consistent with that: elapsed time and the step count leave out the paused stretches.
+ *
+ * Not thread-safe; the controller calls it under its lock.
+ */
+class PauseLedger(private val startedNs: Long) {
+    var paused = false
+        private set
+    private var pauseStartNs = 0L
+    private var pausedAccumNs = 0L
+    private var stepsAtPause = 0
+    private var pausedSteps = 0
+
+    /** Enters a pause at [nowNs]; [stepsSoFar] is the logger's step total. False when already paused. */
+    fun pause(nowNs: Long, stepsSoFar: Int): Boolean {
+        if (paused) return false
+        paused = true
+        pauseStartNs = nowNs
+        stepsAtPause = stepsSoFar
+        return true
+    }
+
+    /** Leaves the pause at [nowNs]. False when not paused. */
+    fun resume(nowNs: Long, stepsSoFar: Int): Boolean {
+        if (!paused) return false
+        paused = false
+        pausedAccumNs += (nowNs - pauseStartNs).coerceAtLeast(0L)
+        pausedSteps += (stepsSoFar - stepsAtPause).coerceAtLeast(0)
+        return true
+    }
+
+    /** Recording time up to [nowNs] excluding pauses, including one still open. */
+    fun activeElapsedNs(nowNs: Long): Long {
+        val pausedNow = if (paused) (nowNs - pauseStartNs).coerceAtLeast(0L) else 0L
+        return nowNs - startedNs - pausedAccumNs - pausedNow
+    }
+
+    /** Steps counted outside pauses, given the logger's step total so far. */
+    fun activeSteps(stepsSoFar: Int): Int {
+        val pausedNow = if (paused) (stepsSoFar - stepsAtPause).coerceAtLeast(0) else 0
+        return (stepsSoFar - pausedSteps - pausedNow).coerceAtLeast(0)
+    }
+}
+
 /** "m:ss" under an hour, "h:mm:ss" above. Negative input clamps to zero. */
 fun formatElapsed(elapsedNs: Long): String {
     val totalS = (elapsedNs / 1_000_000_000L).coerceAtLeast(0L)

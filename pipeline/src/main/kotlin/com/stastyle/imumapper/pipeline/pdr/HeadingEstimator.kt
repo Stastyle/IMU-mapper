@@ -13,7 +13,8 @@ import kotlin.math.sin
  * when the phone is carried close to vertical (typical pocket), +Y is nearly parallel to gravity and
  * its projection flips with every sway, so the camera axis (-Z) is used instead. The choice is made
  * once per heading segment (trip start and every REORIENT) from the mean tilt at the step times, so
- * the offset keeps one meaning throughout a segment.
+ * the offset keeps one meaning throughout a segment; the first segment takes the axis the offset
+ * was calibrated on when [com.stastyle.imumapper.pipeline.core.PipelineConfig.headingAxis] names one.
  */
 enum class HeadingAxis { FORWARD, CAMERA }
 

@@ -104,6 +104,25 @@ class NamesAndOrientationTest {
     }
 
     @Test
+    fun keyframeIndexIsParsedBackFromTheName() {
+        assertEquals(1, keyframeIndexOf("kf-0001.jpg"))
+        assertEquals(12345, keyframeIndexOf("kf-12345.jpg"))
+        assertEquals(7, keyframeIndexOf(keyframeFileName(7)))
+        assertEquals(null, keyframeIndexOf("kf-0007.jpg.tmp"))
+        assertEquals(null, keyframeIndexOf("photo.jpg"))
+        assertEquals(null, keyframeIndexOf("kf-.jpg"))
+    }
+
+    @Test
+    fun existingKeyframesSeedTheNextSession() {
+        val listing = listOf("kf-0003.jpg", "kf-0001.jpg", "kf-0002.jpg.tmp", "notes.txt")
+        val existing = existingKeyframeIndices(listing)
+        assertEquals(listOf(3, 1), existing)
+        assertEquals("kf-0004.jpg", keyframeFileName((existing.maxOrNull() ?: 0) + 1))
+        assertEquals("kf-0001.jpg", keyframeFileName((existingKeyframeIndices(emptyList()).maxOrNull() ?: 0) + 1))
+    }
+
+    @Test
     fun rotationAndExif() {
         assertEquals(90, jpegRotationDegrees(90, 0))
         assertEquals(0, jpegRotationDegrees(90, 90))

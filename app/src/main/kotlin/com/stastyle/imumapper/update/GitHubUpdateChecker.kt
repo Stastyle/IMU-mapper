@@ -28,7 +28,12 @@ class GitHubUpdateChecker(
     override suspend fun fetchLatest(): ReleaseInfo? = withContext(Dispatchers.IO) {
         val body = get("$apiBaseUrl/repos/$repo/releases/latest", accept = "application/vnd.github+json")
             ?: return@withContext null
-        val parsed = ReleaseParser.parse(body) ?: return@withContext null
+        val parsed = when (val outcome = ReleaseParser.classify(body)) {
+            is ReleaseParser.Outcome.Release -> outcome.parsed
+            is ReleaseParser.Outcome.NoApk ->
+                throw UpdateCheckException("The latest release (${outcome.tagName}) has no APK attached")
+            ReleaseParser.Outcome.NotARelease -> throw UpdateCheckException("GitHub returned an unexpected response")
+        }
         val release = parsed.release
         if (release.apkSha256 != null || parsed.sha256SumsUrl == null) return@withContext release
         coroutineContext.ensureActive()

@@ -176,6 +176,30 @@ class DefaultTripProcessorTest {
     }
 
     @Test
+    fun renameDuringRunIsKeptBySuccessAndFailure() = runBlocking<Unit> {
+        val id = recordedTrip()
+        val renaming = FakeProcessor(onProcess = { _, _ -> runBlocking { trips.renameTrip(id, "renamed") } })
+        subject(renaming).process(id)
+        var trip = trips.getTrip(id)!!
+        assertEquals("renamed", trip.name)
+        assertEquals(TripStatus.PROCESSED, trip.status)
+        assertEquals(1, trip.latestRunId)
+
+        val failing = FakeProcessor(
+            failure = IllegalStateException("boom"),
+            onProcess = { _, _ -> runBlocking { trips.renameTrip(id, "renamed again") } },
+        )
+        assertFailsWith<IllegalStateException> { subject(failing).process(id) }
+        trip = trips.getTrip(id)!!
+        assertEquals("renamed again", trip.name)
+        assertEquals(TripStatus.FAILED, trip.status)
+        assertEquals("boom", trip.lastError)
+        // A failed re-run keeps the earlier result reachable from the row.
+        assertEquals(1, trip.latestRunId)
+        assertEquals(12.5, trip.distanceM)
+    }
+
+    @Test
     fun missingLogFails() = runBlocking<Unit> {
         val id = trips.createTrip(
             TripEntity(

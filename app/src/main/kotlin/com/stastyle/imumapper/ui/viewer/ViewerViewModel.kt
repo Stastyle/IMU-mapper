@@ -20,6 +20,7 @@ import com.stastyle.imumapper.render.OrbitCamera
 import com.stastyle.imumapper.render.SceneMarker
 import com.stastyle.imumapper.render.SceneOptions
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -236,13 +237,22 @@ class ViewerViewModel(
 
     // --- photos ---
 
+    private var photoJob: Job? = null
+    /** Bumped by every open/close so a decode can tell whether its dialog is still the current one. */
+    private var photoRequest = 0
+
     fun openPhoto(marker: SceneMarker) {
         val name = marker.fileName ?: return
+        photoJob?.cancel()
+        val request = ++photoRequest
         _ui.update { it.copy(photoLoading = true, photoError = null, photo = null, photoTitle = name) }
-        viewModelScope.launch {
+        photoJob = viewModelScope.launch {
             val decoded = withContext(Dispatchers.IO) {
                 runCatching { decodeDownsampled(File(files.photosDir(tripId), name), MAX_PHOTO_PX) }
             }
+            // A decode that outlived its dialog (closed, or replaced by another keyframe) must not
+            // reopen it or put the wrong image under the new title.
+            if (request != photoRequest) return@launch
             val bitmap = decoded.getOrNull()
             val failure = decoded.exceptionOrNull()
             val message = when {
@@ -254,7 +264,12 @@ class ViewerViewModel(
         }
     }
 
-    fun closePhoto() = _ui.update { it.copy(photo = null, photoLoading = false, photoError = null, photoTitle = "") }
+    fun closePhoto() {
+        photoJob?.cancel()
+        photoJob = null
+        photoRequest++
+        _ui.update { it.copy(photo = null, photoLoading = false, photoError = null, photoTitle = "") }
+    }
 
     private fun describe(e: Throwable): String = e.message ?: e.javaClass.simpleName
 

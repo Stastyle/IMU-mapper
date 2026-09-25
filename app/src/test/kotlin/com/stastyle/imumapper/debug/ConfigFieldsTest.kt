@@ -1,5 +1,6 @@
 package com.stastyle.imumapper.debug
 
+import com.stastyle.imumapper.pipeline.core.HeadingAxisMode
 import com.stastyle.imumapper.pipeline.core.PipelineConfig
 import com.stastyle.imumapper.pipeline.core.Vec3
 import com.stastyle.imumapper.ui.debug.ConfigDraft
@@ -39,6 +40,15 @@ class ConfigFieldsTest {
         val back = assertNotNull(parsed.config)
         assertFalse(ConfigFields.differs(original, back))
         assertTrue(ConfigFields.differs(original, original.copy(smoothingWindow = 3)))
+    }
+
+    @Test
+    fun headingAxisSurvivesTheEditor() {
+        val original = PipelineConfig(headingAxis = HeadingAxisMode.CAMERA)
+        val edited = ConfigDraft.from(original).with(ConfigField.HEADING_OFFSET_DEG, "12")
+        val back = assertNotNull(ConfigFields.parse(edited).config)
+        assertEquals(HeadingAxisMode.CAMERA, back.headingAxis)
+        assertTrue(ConfigFields.differs(original, original.copy(headingAxis = HeadingAxisMode.FORWARD)))
     }
 
     @Test

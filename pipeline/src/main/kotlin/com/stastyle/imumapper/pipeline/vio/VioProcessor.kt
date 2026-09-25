@@ -6,6 +6,7 @@ import com.stastyle.imumapper.pipeline.core.KeyframeSample
 import com.stastyle.imumapper.pipeline.core.PathKeyframe
 import com.stastyle.imumapper.pipeline.core.PathPoint
 import com.stastyle.imumapper.pipeline.core.PathResult
+import com.stastyle.imumapper.pipeline.core.PauseIntervals
 import com.stastyle.imumapper.pipeline.core.PipelineConfig
 import com.stastyle.imumapper.pipeline.core.Processor
 import com.stastyle.imumapper.pipeline.core.Quat
@@ -13,6 +14,7 @@ import com.stastyle.imumapper.pipeline.core.Vec3
 import com.stastyle.imumapper.pipeline.log.RawLog
 import com.stastyle.imumapper.pipeline.pdr.Angles
 import com.stastyle.imumapper.pipeline.pdr.Diag
+import com.stastyle.imumapper.pipeline.pdr.OrientationEstimator
 import com.stastyle.imumapper.pipeline.pdr.PdrContext
 import com.stastyle.imumapper.pipeline.pdr.PdrProcessor
 import com.stastyle.imumapper.pipeline.pdr.PdrSolver
@@ -33,14 +35,21 @@ import kotlin.math.abs
  * the PDR estimate, and re-yawed as well when its heading disagrees with the IMU by more than
  * [yawRealignThresholdRad] (ARCore normally keeps its frame across a loss; a fresh session does not).
  *
- * A tracking loss is a PAUSED/STOPPED frame between tracking frames, a hole longer than [maxHoleS]
- * between tracking frames, or the log continuing for longer than that after the last tracking
- * frame. With [PipelineConfig.pdrFallbackWhenTrackingLost] the loss is bridged by
- * [PdrSolver.solveSegment] from the last good pose. The walking direction handed to PDR is its own
- * heading at that moment plus the difference between the VIO and the IMU camera headings there,
- * which is exactly the IMU's accumulated yaw drift: measured on the device axis it holds during
- * turns and while standing, unlike a velocity direction. Without the fallback the path simply has
- * a hole in time, the ARCore frame is trusted as it is, and smoothing does not bridge the hole.
+ * A tracking loss is a STOPPED frame between tracking frames, a hole longer than [maxHoleS]
+ * between tracking frames (PAUSED frames count as a hole, see [TrackingRuns]), or the log
+ * continuing for longer than that after the last tracking frame. With
+ * [PipelineConfig.pdrFallbackWhenTrackingLost] the loss is bridged by [PdrSolver.solveSegment]
+ * from the last good pose. The walking direction handed to PDR is its own heading at that moment
+ * plus the difference between the VIO and the IMU camera headings there, which is exactly the
+ * IMU's accumulated yaw drift: measured on the device axis it holds during turns and while
+ * standing, unlike a velocity direction. Without the fallback the path simply has a hole in time,
+ * the ARCore frame is trusted as it is, and smoothing does not bridge the hole.
+ *
+ * The recorder keeps logging while the user has paused the trip, so poses inside a [PAUSE, RESUME)
+ * interval are dropped here: whatever was walked during the pause is not part of the trip. The
+ * position is held at the last pose before the pause and the run after it is re-anchored there
+ * (re-yawed as after a loss when its heading disagrees with the IMU), without counting a loss or
+ * filling with PDR.
  *
  * Frames before the first TRACKING frame are not part of the path: the origin is the first
  * tracking pose, as the viewer and calibration screens expect.
@@ -60,7 +69,9 @@ class VioProcessor(
     override fun process(log: RawLog, config: PipelineConfig): PathResult {
         if (log.poses.isEmpty()) return delegate(log, config, "no pose records")
         val maxHoleNs = (maxHoleS * 1e9).toLong()
-        val runs = TrackingRuns.split(log.poses, maxHoleNs)
+        val pauses = PauseIntervals.of(log.events)
+        val poses = if (pauses.isEmpty) log.poses else log.poses.filter { !pauses.contains(it.tNs) }
+        val runs = TrackingRuns.split(poses, maxHoleNs)
         if (runs.isEmpty()) return delegate(log, config, "no TRACKING poses")
 
         val diag = LinkedHashMap<String, String>()
@@ -74,7 +85,7 @@ class VioProcessor(
         val ctx: PdrContext? =
             if (log.accel.isNotEmpty() || log.steps.isNotEmpty()) solver.prepare(log, config) else null
         val imu = ImuHeading.of(log, ctx)
-        diag["yawAlignmentSource"] = imu.source?.name ?: "NONE"
+        diag["yawAlignmentSource"] = imu.source.name
 
         val first = runs[0].first
         val rawHeading = FrameTransform.IDENTITY.cameraHeadingRad(first.orientation())
@@ -84,18 +95,25 @@ class VioProcessor(
             Diag.num(Math.toDegrees(if (imuHeading == null) 0.0 else Angles.diff(imuHeading, rawHeading)), 1)
         var transform = FrameTransform(yaw, Vec3.ZERO).anchoredAt(first.position(), Vec3.ZERO)
 
-        val fill = config.pdrFallbackWhenTrackingLost && ctx != null
+        // Without an orientation the PDR headings are all the bare offset: dead-reckoning with them
+        // would send every gap off in one arbitrary direction, so the gap is left as a hole instead.
+        val oriented = ctx != null && ctx.orientationSource != OrientationEstimator.Source.NONE
+        val fill = config.pdrFallbackWhenTrackingLost && oriented
         diag["trackingLostFill"] = when {
             fill -> "pdr"
             !config.pdrFallbackWhenTrackingLost -> "none: fallback disabled"
-            else -> "none: no IMU data"
+            ctx == null -> "none: no IMU data"
+            else -> "none: no orientation"
         }
         val periodNs = Math.round(config.vioResamplePeriodS * 1e9)
         val transforms = ArrayList<FrameTransform>(runs.size)
         val points = ArrayList<PathPoint>()
         val gaps = StringBuilder()
+        val pausedGaps = StringBuilder()
         var lossCount = 0
         var lostNs = 0L
+        var pauseCount = 0
+        var pausedNs = 0L
         var realigned = 0
         var vioPoints = 0
         var pdrPoints = 0
@@ -113,29 +131,44 @@ class VioProcessor(
             val regainAt = if (trailing) log.lastTimestampNs else runs[i + 1].firstNs
             if (trailing && regainAt - lostAt <= maxHoleNs) break
 
-            lossCount++
-            lostNs += regainAt - lostAt
             val lastGood = runPoints[runPoints.size - 1]
             var estimate = lastGood.p
-            var gapSteps = 0
-            if (fill && ctx != null) {
-                val toNs = if (trailing) Long.MAX_VALUE else regainAt
-                val gap = solver.solveSegment(ctx, lostAt, toNs, lastGood.p, handoverHeading(ctx, imu, lastGood))
-                if (gap.isNotEmpty()) estimate = gap[gap.size - 1].p
-                points.addAll(gap)
-                gapSteps = gap.size
-                pdrPoints += gap.size
+            val span = Diag.num((lostAt - t0) / 1e9, 1) + "s-" + Diag.num((regainAt - t0) / 1e9, 1) + "s"
+            // A gap the user spent paused (up to a frame at either end) is not a loss: nothing in it
+            // was walked, so the position is simply held.
+            val paused = !pauses.isEmpty && regainAt - lostAt - pauses.coveredNs(lostAt, regainAt) <= maxHoleNs
+            if (paused) {
+                pauseCount++
+                pausedNs += regainAt - lostAt
+                if (pausedGaps.isNotEmpty()) pausedGaps.append(';')
+                pausedGaps.append(span)
+                if (trailing) {
+                    pausedGaps.append(" (to end)")
+                    break
+                }
+            } else {
+                lossCount++
+                lostNs += regainAt - lostAt
+                var gapSteps = 0
+                if (fill && ctx != null) {
+                    val toNs = if (trailing) Long.MAX_VALUE else regainAt
+                    val gap = solver.solveSegment(ctx, lostAt, toNs, lastGood.p, handoverHeading(ctx, imu, lastGood))
+                    if (gap.isNotEmpty()) estimate = gap[gap.size - 1].p
+                    points.addAll(gap)
+                    gapSteps = gap.size
+                    pdrPoints += gap.size
+                }
+                if (gaps.isNotEmpty()) gaps.append(';')
+                gaps.append(span).append(':').append(gapSteps).append(" steps")
+                if (trailing) {
+                    gaps.append(" (to end)")
+                    break
+                }
+                if (!fill) continue
             }
-            if (gaps.isNotEmpty()) gaps.append(';')
-            gaps.append(Diag.num((lostAt - t0) / 1e9, 1)).append("s-").append(Diag.num((regainAt - t0) / 1e9, 1))
-                .append("s:").append(gapSteps).append(" steps")
-            if (trailing) {
-                gaps.append(" (to end)")
-                break
-            }
-            if (!fill) continue
 
-            // Re-anchor the resumed run on the PDR estimate; keep ARCore's yaw unless it clearly disagrees.
+            // Re-anchor the resumed run on the estimate (the PDR end, or the held position after a
+            // pause); keep ARCore's yaw unless it clearly disagrees with the IMU.
             val next = runs[i + 1].first
             var candidate = transform.anchoredAt(next.position(), estimate)
             val imuAtRegain = imu.cameraHeadingRad(next.tNs)
@@ -144,7 +177,7 @@ class VioProcessor(
                 if (abs(Angles.diff(resumed, imuAtRegain)) > yawRealignThresholdRad) {
                     candidate = candidate.realigned(next.orientation(), imuAtRegain, next.position(), estimate)
                     realigned++
-                    gaps.append(" yaw re-aligned")
+                    (if (paused) pausedGaps else gaps).append(" yaw re-aligned")
                 }
             }
             transform = candidate
@@ -152,6 +185,11 @@ class VioProcessor(
         diag["trackingLossCount"] = lossCount.toString()
         diag["trackingLostS"] = Diag.num(lostNs / 1e9, 1)
         if (gaps.isNotEmpty()) diag["trackingGaps"] = gaps.toString()
+        if (!pauses.isEmpty) {
+            diag["pauseCount"] = pauseCount.toString()
+            diag["pausedS"] = Diag.num(pausedNs / 1e9, 1)
+            if (pausedGaps.isNotEmpty()) diag["pausedGaps"] = pausedGaps.toString()
+        }
         diag["reanchorYawRealigned"] = realigned.toString()
         diag["vioPoints"] = vioPoints.toString()
         diag["pdrPoints"] = pdrPoints.toString()

@@ -19,9 +19,14 @@ class TrackingRun(val poses: List<PoseSample>) {
 }
 
 /**
- * Splits the pose stream into tracking runs. A run ends at a PAUSED or STOPPED frame, at a hole
- * longer than [maxHoleNs] between two TRACKING frames, or at a timestamp that goes backwards
- * (a corrupt record; the frame is dropped). Frames before the first TRACKING frame are ignored.
+ * Splits the pose stream into tracking runs. A run ends at a STOPPED frame (the session may come
+ * back in a new world frame), at a hole longer than [maxHoleNs] between two TRACKING frames, or
+ * at a timestamp that goes backwards (a corrupt record; the frame is dropped). PAUSED frames are
+ * skipped rather than splitting: ARCore keeps its world frame across a brief interruption (one or
+ * two frames of EXCESSIVE_MOTION during a head turn are common), so a pause shorter than
+ * [maxHoleNs] is a hole to interpolate over, while a longer one leaves a hole between the last and
+ * the next TRACKING frame that ends the run anyway. Frames before the first TRACKING frame are
+ * ignored.
  */
 object TrackingRuns {
 
@@ -30,6 +35,7 @@ object TrackingRuns {
         var current = ArrayList<PoseSample>()
         var lastNs = Long.MIN_VALUE
         for (pose in poses) {
+            if (pose.tracking == TrackingState.PAUSED) continue
             if (pose.tracking != TrackingState.TRACKING) {
                 if (current.isNotEmpty()) {
                     runs.add(TrackingRun(current))

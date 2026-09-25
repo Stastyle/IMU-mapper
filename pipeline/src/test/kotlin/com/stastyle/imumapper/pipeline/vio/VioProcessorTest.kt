@@ -2,6 +2,8 @@ package com.stastyle.imumapper.pipeline.vio
 
 import com.stastyle.imumapper.pipeline.core.AnnotationKind
 import com.stastyle.imumapper.pipeline.core.AnnotationRecord
+import com.stastyle.imumapper.pipeline.core.EventKind
+import com.stastyle.imumapper.pipeline.core.EventRecord
 import com.stastyle.imumapper.pipeline.core.KeyframeSample
 import com.stastyle.imumapper.pipeline.core.PathResult
 import com.stastyle.imumapper.pipeline.core.PipelineConfig
@@ -10,6 +12,7 @@ import com.stastyle.imumapper.pipeline.core.PositionSource
 import com.stastyle.imumapper.pipeline.core.Quat
 import com.stastyle.imumapper.pipeline.core.RotationSample
 import com.stastyle.imumapper.pipeline.core.RotationSource
+import com.stastyle.imumapper.pipeline.core.StepSample
 import com.stastyle.imumapper.pipeline.core.TrackingState
 import com.stastyle.imumapper.pipeline.core.Vec3
 import com.stastyle.imumapper.pipeline.log.RawLog
@@ -173,6 +176,95 @@ class VioProcessorTest {
     }
 
     @Test
+    fun briefPausedBlipIsInterpolatedNotCountedAsALoss() {
+        // One PAUSED frame at 9 s (a head turn): ARCore keeps its frame, so the run continues and the
+        // displacement across the blip is kept instead of being re-anchored away.
+        val w = square(walk())
+        val v = square(vio(headingDeg = 30.0)).lose(9.0, 9.02, paused = true)
+        val log = v.buildWith(w.buildRecords())
+        assertTrue(log.poses.count { it.tracking == TrackingState.PAUSED } == 1)
+        val r = run(log)
+        assertEquals("1", r.diagnostics["trackingRuns"])
+        assertEquals("0", r.diagnostics["trackingLossCount"])
+        assertTrue(r.points.none { it.source == PositionSource.PDR })
+        assertEquals(1.0, r.stats.vioFraction)
+        for (i in r.points.indices) {
+            assertNear(v.truthAt(secondsOf(r, i)), r.points[i].p, 0.1, "point $i at ${secondsOf(r, i)} s")
+        }
+        assertNear(Vec3.ZERO, r.points.last().p, 0.1, "back at the origin with no offset")
+    }
+
+    @Test
+    fun pausedStretchHoldsThePosition() {
+        // The user pauses at (0, 10), wanders 4 m east while the recorder keeps logging, and resumes.
+        // The walk after the pause continues from (0, 10): the path ends at (0, 20), not (4, 20).
+        val w = walk().still(2.0).walkTo(0.0, 10.0).pause().walkTo(4.0, 10.0).still(1.0).resume()
+            .walkTo(4.0, 20.0).still(1.0)
+        val v = vio(headingDeg = 30.0).still(2.0).walkTo(0.0, 10.0).walkTo(4.0, 10.0).still(1.0).walkTo(4.0, 20.0)
+            .still(1.0)
+        val log = v.buildWith(w.buildRecords())
+        val pauseNs = log.events.first { it.kind == EventKind.PAUSE }.tNs
+        val resumeNs = log.events.first { it.kind == EventKind.RESUME }.tNs
+        val r = run(log)
+        assertEquals("1", r.diagnostics["pauseCount"])
+        assertEquals("0", r.diagnostics["trackingLossCount"])
+        assertEquals("0", r.diagnostics["reanchorYawRealigned"])
+        assertTrue(r.points.none { it.tNs >= pauseNs && it.tNs < resumeNs }, "no path point inside the pause")
+        assertTrue(r.points.none { it.source == PositionSource.PDR })
+        assertNear(Vec3(0.0, 20.0, 0.0), r.points.last().p, 0.3, "end without the detour")
+        for (i in r.points.indices) {
+            val s = secondsOf(r, i)
+            val expected = if (r.points[i].tNs < pauseNs) v.truthAt(s) else v.truthAt(s) - Vec3(4.0, 0.0, 0.0)
+            assertNear(expected, r.points[i].p, 0.3, "point $i at $s s")
+        }
+        assertTrue(abs(r.stats.distanceM - 20.0) < 1.0, "distance without the detour: ${r.stats.distanceM}")
+        // Steps taken during the pause are not counted either.
+        assertTrue(abs(r.stats.stepCount - 20.0 / (speed / cadence)) < 6, "steps ${r.stats.stepCount}")
+        assertEquals(r.toJson(), run(log).toJson(), "processing must be deterministic")
+    }
+
+    @Test
+    fun madgwickOrientationIsSharedWithTheGapFill() {
+        // No rotation-vector samples: PDR runs on Madgwick, whose yaw is arbitrary. The ARCore frame
+        // must be aligned to that same yaw so the 6 s PDR fill continues the VIO line.
+        val w = SyntheticWalk(speedMps = speed, cadenceHz = cadence, includeRotation = false)
+            .still(2.0).walkTo(0.0, 20.0).still(1.0)
+        val v = vio(headingDeg = 120.0).still(2.0).walkTo(0.0, 20.0).still(1.0).lose(8.0, 14.0, paused = true)
+        val r = run(v.buildWith(w.buildRecords()))
+        assertEquals("MADGWICK", r.diagnostics["yawAlignmentSource"])
+        assertEquals("MADGWICK", r.diagnostics["pdr.orientationSource"])
+        assertEquals("1", r.diagnostics["trackingLossCount"])
+        assertEquals("pdr", r.diagnostics["trackingLostFill"])
+        assertTrue(r.points.count { it.source == PositionSource.PDR } in 8..16)
+        val end = r.points.last().p
+        assertTrue(abs(end.length - 20.0) < 2.0, "the walk is 20 m long whatever the yaw: $end")
+        // Every point lies close to the straight line from the origin to the end.
+        val ux = end.x / end.length
+        val uy = end.y / end.length
+        for (p in r.points) {
+            val across = abs(p.p.x * uy - p.p.y * ux)
+            assertTrue(across < 1.0, "point ${p.p} (${p.source}) is $across m off the line")
+        }
+        assertTrue(maxJump(r) <= 0.5, "largest jump ${maxJump(r)}")
+    }
+
+    @Test
+    fun withoutAnyOrientationTheGapStaysAHole() {
+        // Only hardware steps and ARCore poses: PDR has steps but no orientation, so dead-reckoning
+        // the gap would point it in an arbitrary direction. The gap is left open instead.
+        val w = square(walk())
+        val v = square(vio()).lose(13.0, 16.0, paused = true)
+        val imu = w.buildRecords().filter { it is StepSample || it is EventRecord }
+        val r = run(v.buildWith(imu))
+        assertEquals("NONE", r.diagnostics["yawAlignmentSource"])
+        assertEquals("NONE", r.diagnostics["pdr.orientationSource"])
+        assertEquals("none: no orientation", r.diagnostics["trackingLostFill"])
+        assertEquals("1", r.diagnostics["trackingLossCount"])
+        assertTrue(r.points.none { it.source == PositionSource.PDR })
+        assertTrue(r.stats.stepCount > 30, "steps are still counted: ${r.stats.stepCount}")
+    }
+
+    @Test
     fun freshSessionAfterGapIsReanchoredAndReyawed() {
         // After the loss ARCore comes back in a different world frame (150 degrees, shifted origin).
         val w = square(walk())
@@ -304,21 +396,28 @@ class TrackingRunsTest {
     }
 
     @Test
-    fun splitsAtPausedFramesHolesAndBackwardsTime() {
+    fun splitsAtLongPausesStoppedFramesHolesAndBackwardsTime() {
         val poses = listOf(
             pose(0.0, TrackingState.PAUSED), pose(0.1), pose(0.2), pose(0.3, TrackingState.PAUSED),
-            pose(0.4), pose(0.5), pose(1.5), pose(1.6), pose(1.0), pose(1.7), pose(1.7),
+            pose(0.4), pose(0.5), pose(0.6, TrackingState.PAUSED), pose(0.8, TrackingState.PAUSED),
+            pose(1.0, TrackingState.PAUSED), pose(1.1), pose(1.2), pose(1.3, TrackingState.STOPPED),
+            pose(1.4), pose(1.5), pose(2.5), pose(2.6), pose(2.0), pose(2.7), pose(2.7),
         )
         val runs = TrackingRuns.split(poses, 500_000_000L)
-        assertEquals(3, runs.size)
-        assertEquals(2, runs[0].poses.size)
+        assertEquals(4, runs.size)
+        // A single PAUSED frame does not end a run; the 0.6 s of PAUSED frames after 0.5 s does.
+        assertEquals(listOf(0.1, 0.2, 0.4, 0.5).map { SyntheticVio.ns(it) }, runs[0].poses.map { it.tNs })
         assertEquals(2, runs[1].poses.size)
-        assertEquals(3, runs[2].poses.size)
-        assertEquals(SyntheticVio.ns(1.5), runs[2].firstNs)
-        assertEquals(SyntheticVio.ns(1.7), runs[2].lastNs)
-        assertEquals(0L, runs[2].distanceNs(SyntheticVio.ns(1.6)))
-        assertEquals(100_000_000L, runs[2].distanceNs(SyntheticVio.ns(1.8)))
+        assertEquals(SyntheticVio.ns(1.1), runs[1].firstNs)
+        assertEquals(2, runs[2].poses.size)
+        assertEquals(SyntheticVio.ns(1.4), runs[2].firstNs)
+        assertEquals(3, runs[3].poses.size)
+        assertEquals(SyntheticVio.ns(2.5), runs[3].firstNs)
+        assertEquals(SyntheticVio.ns(2.7), runs[3].lastNs)
+        assertEquals(0L, runs[3].distanceNs(SyntheticVio.ns(2.6)))
+        assertEquals(100_000_000L, runs[3].distanceNs(SyntheticVio.ns(2.8)))
         assertTrue(TrackingRuns.split(listOf(pose(0.0, TrackingState.STOPPED)), 500_000_000L).isEmpty())
+        assertTrue(TrackingRuns.split(listOf(pose(0.0, TrackingState.PAUSED)), 500_000_000L).isEmpty())
     }
 }
 

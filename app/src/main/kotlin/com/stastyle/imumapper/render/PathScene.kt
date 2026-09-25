@@ -423,7 +423,29 @@ class ProjectedScene(val scene: SceneModel) {
         val lc = scene.lineCoords
         for (i in 0 until lineCount) {
             val o = i * 6
-            var visible = projector.project(lc[o], lc[o + 1], lc[o + 2], tmp, 0)
+            var ax0 = lc[o]
+            var ay0 = lc[o + 1]
+            var az0 = lc[o + 2]
+            var bx0 = lc[o + 3]
+            var by0 = lc[o + 4]
+            var bz0 = lc[o + 5]
+            val depthA = projector.depthOf(ax0, ay0, az0)
+            val depthB = projector.depthOf(bx0, by0, bz0)
+            // Clip against the near plane rather than dropping the line: grid lines and axes are metres
+            // long, so when the eye sits low over the grid one end is routinely behind the camera.
+            var visible = depthA >= Projector.NEAR_M || depthB >= Projector.NEAR_M
+            if (visible && depthA < Projector.NEAR_M) {
+                val t = clipFraction(depthA, depthB)
+                ax0 += (bx0 - ax0) * t
+                ay0 += (by0 - ay0) * t
+                az0 += (bz0 - az0) * t
+            } else if (visible && depthB < Projector.NEAR_M) {
+                val t = clipFraction(depthB, depthA)
+                bx0 += (ax0 - bx0) * t
+                by0 += (ay0 - by0) * t
+                bz0 += (az0 - bz0) * t
+            }
+            if (visible) visible = projector.project(ax0, ay0, az0, tmp, 0)
             var ax = 0f
             var ay = 0f
             var da = 0f
@@ -431,7 +453,7 @@ class ProjectedScene(val scene: SceneModel) {
                 ax = tmp[0]
                 ay = tmp[1]
                 da = tmp[2]
-                visible = projector.project(lc[o + 3], lc[o + 4], lc[o + 5], tmp, 0)
+                visible = projector.project(bx0, by0, bz0, tmp, 0)
             }
             if (visible) {
                 val bx = tmp[0]
@@ -529,6 +551,16 @@ class ProjectedScene(val scene: SceneModel) {
         const val MIN_WIDTH_SCALE = 0.35f
         const val MAX_WIDTH_SCALE = 1.6f
         const val OFFSCREEN = -100000f
+
+        /**
+         * Fraction along the segment from the endpoint at [behind] (< NEAR_M) towards the one at
+         * [inFront] (>= NEAR_M) where it crosses the near plane. Lands a hair in front of the plane so
+         * rounding in the projection cannot push the clipped end back behind it.
+         */
+        fun clipFraction(behind: Double, inFront: Double): Double =
+            ((Projector.NEAR_M + CLIP_EPSILON_M - behind) / (inFront - behind)).coerceIn(0.0, 1.0)
+
+        private const val CLIP_EPSILON_M = 1e-6
 
         /** Depth is always positive here, so its float bits order like the value itself. */
         fun pack(depth: Float, index: Int): Long = (depth.toBits().toLong() shl 32) or (index.toLong() and 0xFFFFFFFFL)

@@ -39,7 +39,9 @@ import kotlin.random.Random
  * (differentiated from the true orientation, plus bias), game and fused rotation vectors (the game
  * one with optional yaw drift), magnetometer, barometer and hardware step events.
  *
- * Steps happen at the cadence while walking, so the true stride is speed / cadence.
+ * Steps happen at the cadence while walking, so the true stride is speed / cadence. A [pause] /
+ * [resume] pair writes the recorder's PAUSE and RESUME events; the sensors keep being generated
+ * in between, exactly as the recorder keeps logging while the user has paused.
  */
 class SyntheticWalk(
     val rateHz: Int = 200,
@@ -59,6 +61,8 @@ class SyntheticWalk(
     val verticalBounce: Double = 2.5,
     val forwardBounce: Double = 1.2,
     val lateralBounce: Double = 0.5,
+    /** Slow linear pressure drift of the barometer, hPa/s (about -8.4 m per hPa of altitude). */
+    val baroDriftHpaPerS: Double = 0.0,
 ) {
     val strideM: Double get() = speedMps / cadenceHz
 
@@ -67,6 +71,7 @@ class SyntheticWalk(
     private class Walk(val to: Vec3) : Leg
     private class Annotate(val kind: AnnotationKind, val note: String) : Leg
     private class Offset(val rad: Double) : Leg
+    private class Event(val kind: EventKind) : Leg
 
     private val legs = ArrayList<Leg>()
     private var initialOffsetRad = 0.0
@@ -74,6 +79,8 @@ class SyntheticWalk(
     fun still(seconds: Double): SyntheticWalk = apply { legs.add(Still(seconds)) }
     fun walkTo(x: Double, y: Double, z: Double = 0.0): SyntheticWalk = apply { legs.add(Walk(Vec3(x, y, z))) }
     fun annotate(kind: AnnotationKind, note: String = ""): SyntheticWalk = apply { legs.add(Annotate(kind, note)) }
+    fun pause(): SyntheticWalk = apply { legs.add(Event(EventKind.PAUSE)) }
+    fun resume(): SyntheticWalk = apply { legs.add(Event(EventKind.RESUME)) }
 
     /** Changes how the phone is carried from now on: walking heading minus device heading. */
     fun deviceOffset(rad: Double): SyntheticWalk = apply {
@@ -93,6 +100,7 @@ class SyntheticWalk(
         val phases: List<Phase>,
         val annotations: List<Pair<Double, AnnotationRecord>>,
         val offsetChanges: List<Pair<Double, Double>>,
+        val events: List<Pair<Double, EventKind>>,
         val totalS: Double,
     )
 
@@ -100,6 +108,7 @@ class SyntheticWalk(
         val phases = ArrayList<Phase>()
         val annotations = ArrayList<Pair<Double, AnnotationRecord>>()
         val offsets = ArrayList<Pair<Double, Double>>()
+        val events = ArrayList<Pair<Double, EventKind>>()
         var t = 0.0
         var pos = Vec3.ZERO
         var heading = 0.0
@@ -120,9 +129,10 @@ class SyntheticWalk(
                 }
                 is Annotate -> annotations.add(t to AnnotationRecord(0L, leg.kind, leg.note))
                 is Offset -> offsets.add(t to leg.rad)
+                is Event -> events.add(t to leg.kind)
             }
         }
-        return Timeline(phases, annotations, offsets, t)
+        return Timeline(phases, annotations, offsets, events, t)
     }
 
     private fun phaseAt(phases: List<Phase>, s: Double): Phase {
@@ -254,7 +264,7 @@ class SyntheticWalk(
             }
             if (includeBaro && k % baroEvery == 0) {
                 val z = positionAt(ph, s).z
-                val p = P0 * (1.0 - z / 44330.0).pow(1.0 / 0.1903) + gaussian(rng) * 0.01
+                val p = P0 * (1.0 - z / 44330.0).pow(1.0 / 0.1903) + baroDriftHpaPerS * s + gaussian(rng) * 0.01
                 out.add(BaroSample(t, p.toFloat()))
             }
             // A hardware step event at every vertical-acceleration peak (gait phase pi/2 + 2 pi k).
@@ -267,6 +277,7 @@ class SyntheticWalk(
             }
         }
         for ((s, a) in tl.annotations) out.add(AnnotationRecord(ns(s), a.kind, a.note))
+        for ((s, kind) in tl.events) out.add(EventRecord(ns(s), kind))
         out.add(EventRecord(ns(tl.totalS), EventKind.STOP))
         return out
     }

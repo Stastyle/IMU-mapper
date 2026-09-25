@@ -29,9 +29,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import java.io.File
 
@@ -107,6 +109,13 @@ class DebugViewModel(
     private var logger: SensorLogger? = null
     private val accumulator = LiveAccumulator()
     private var liveJobs: List<Job> = emptyList()
+
+    /**
+     * Last start or stop handed to the logger. Each one waits for the previous, so a stop that runs
+     * on the IO dispatcher can never unregister the listeners of a start posted after it, and a
+     * start never slips in between a stop's unregister and its posted stopOnThread.
+     */
+    private var loggerJob: Job? = null
     private var tripJobs: List<Job> = emptyList()
 
     init {
@@ -149,7 +158,14 @@ class DebugViewModel(
         if (_ui.value.liveRunning) return
         val sensorLogger = logger ?: SensorLogger(appContext).also { logger = it }
         synchronized(accumulator) { accumulator.clear() }
-        sensorLogger.start(null)
+        val previous = loggerJob
+        loggerJob = viewModelScope.launch {
+            previous?.join()
+            sensorLogger.start(null)
+            // Wait until the logger thread has registered the listeners: a stop queued behind this job
+            // unregisters on its own thread and would otherwise run before the registration.
+            withTimeoutOrNull(START_WAIT_MS) { sensorLogger.stats.first { it.running } }
+        }
         _ui.update { it.copy(liveRunning = true, charts = LiveCharts.EMPTY) }
         val statsJob = viewModelScope.launch {
             sensorLogger.stats.collect { s -> _ui.update { it.copy(stats = s) } }
@@ -176,7 +192,9 @@ class DebugViewModel(
         liveJobs = emptyList()
         _ui.update { it.copy(liveRunning = false) }
         val l = logger ?: return
-        viewModelScope.launch(Dispatchers.IO) {
+        val previous = loggerJob
+        loggerJob = viewModelScope.launch(Dispatchers.IO) {
+            previous?.join()
             runCatching { l.stop() }.onFailure { Log.w(TAG, "live stop failed", it) }
         }
     }
@@ -393,5 +411,7 @@ class DebugViewModel(
     private companion object {
         const val TAG = "DebugViewModel"
         const val CHART_PERIOD_MS = 100L
+        /** Upper bound on waiting for the logger thread to confirm a start; it normally takes milliseconds. */
+        private const val START_WAIT_MS = 2_000L
     }
 }

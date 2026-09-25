@@ -167,6 +167,7 @@ fun StrideResult(r: FlowResult.Stride) {
 fun HeadingResult(r: FlowResult.Heading) {
     ValueRow("Path direction now", Fmt.degrees(r.endDirectionRad))
     ValueRow("New heading offset", Fmt.degrees(r.offsetRad), highlight = true)
+    ValueRow("Measured on axis", Fmt.axis(r.axis))
     ValueRow("Walked", Fmt.metres(r.walkedM) + " · ${r.steps} steps")
     Text(
         "The offset is relative to the walking direction: it turns the direction you just walked into " +

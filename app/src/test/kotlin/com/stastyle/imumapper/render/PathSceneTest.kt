@@ -178,6 +178,44 @@ class PathSceneTest {
     }
 
     @Test
+    fun linesCrossingTheNearPlaneAreClippedNotDropped() {
+        // One 20 m line along north through the origin, and one entirely behind the camera.
+        val scene = SceneModel(
+            bounds = Bounds.EMPTY, lineCount = 2,
+            lineCoords = doubleArrayOf(0.0, -10.0, 0.0, 0.0, 10.0, 0.0, 0.0, -10.0, 0.0, 0.0, -5.0, 0.0),
+            lineColors = intArrayOf(0, 0), lineWidths = floatArrayOf(1f, 1f),
+            cloudCount = 0, cloudCoords = DoubleArray(0), cloudColor = 0, markers = emptyList(), labels = emptyList(),
+        )
+        val projected = ProjectedScene(scene)
+        // Eye 1 m south of the origin at 0.3 m height, looking north: the line's south end is behind it.
+        val cam = OrbitCamera(target = Vec3(0.0, 0.0, 0.3), distance = 1.0, yawRad = 0.0, pitchRad = 0.0)
+        val projector = Projector(cam, 1080f, 1920f)
+        assertTrue(projector.depthOf(0.0, -10.0, 0.0) < 0.0)
+        assertTrue(projector.depthOf(0.0, 10.0, 0.0) > 0.0)
+        projected.update(cam, 1080f, 1920f)
+        assertTrue(projected.lineVisible[0], "line crossing the near plane must survive")
+        assertTrue(!projected.lineVisible[1], "line wholly behind the camera is culled")
+        assertEquals(1, projected.orderCount)
+        // The clipped end sits on the near plane, so the mean depth is halfway to the far end's depth.
+        val farDepth = projector.depthOf(0.0, 10.0, 0.0)
+        assertEquals((Projector.NEAR_M + farDepth) / 2, projected.lineDepth[0].toDouble(), 1e-3)
+        // Both screen endpoints are finite and the clipped one lies below the far one (floor seen from above).
+        val s = projected.lineScreen
+        for (k in 0 until 4) assertTrue(s[k].isFinite(), "screen coord $k")
+        assertTrue(s[1] > s[3], "near end of a floor line is lower on screen than the far end")
+        assertTrue(s[1] > 1920f, "near end projects well below the viewport")
+        assertEquals(540f, s[2], 1e-2f)
+    }
+
+    @Test
+    fun clipFractionLandsJustInFrontOfNearPlane() {
+        val t = ProjectedScene.clipFraction(-1.0, 3.0)
+        val depth = -1.0 + (3.0 - -1.0) * t
+        assertTrue(depth >= Projector.NEAR_M && depth < Projector.NEAR_M + 1e-5, "depth $depth")
+        assertEquals(1.0, ProjectedScene.clipFraction(-1.0, Projector.NEAR_M))
+    }
+
+    @Test
     fun packOrdersByDepthThenIndex() {
         assertTrue(ProjectedScene.pack(1.5f, 7) < ProjectedScene.pack(2.0f, 3))
         assertTrue(ProjectedScene.pack(2.0f, 3) < ProjectedScene.pack(2.0f, 4))

@@ -43,14 +43,19 @@ import com.stastyle.imumapper.data.db.TripStatus
 import com.stastyle.imumapper.pipeline.core.CarryPosition
 import com.stastyle.imumapper.pipeline.core.TripMode
 
-/** Mode and carry-position picker shown by the "New trip" button. */
+/**
+ * Mode and carry-position picker shown by the "New trip" button. [initialMode] is the Settings
+ * default; the selection resets if it changes while the dialog is open (only during the first
+ * DataStore read), otherwise the user's choice stays.
+ */
 @Composable
 fun NewTripDialog(
+    initialMode: TripMode,
     initialCarryPosition: CarryPosition,
     onDismiss: () -> Unit,
     onStart: (TripMode, CarryPosition) -> Unit,
 ) {
-    var mode by rememberSaveable { mutableStateOf(TripMode.POCKET) }
+    var mode by rememberSaveable(initialMode) { mutableStateOf(initialMode) }
     var carry by rememberSaveable { mutableStateOf(initialCarryPosition) }
     AlertDialog(
         onDismissRequest = onDismiss,

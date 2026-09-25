@@ -94,6 +94,19 @@ fun decimatePointCloud(xyzc: FloatArray, maxPoints: Int = MAX_POINTS_PER_CLOUD):
 /** File name of the [index]th keyframe (1-based), relative to the trip's photo directory. */
 fun keyframeFileName(index: Int): String = String.format(Locale.US, "kf-%04d.jpg", index)
 
+private val KEYFRAME_FILE_NAME = Regex("""kf-(\d+)\.jpg""")
+
+/** The index a [keyframeFileName] was made from, or null for any other file (temp files, other photos). */
+fun keyframeIndexOf(fileName: String): Int? =
+    KEYFRAME_FILE_NAME.matchEntire(fileName)?.groupValues?.get(1)?.toIntOrNull()
+
+/**
+ * Keyframe indices already present in a photo directory listing. A trip can span several ARCore sessions
+ * (screen left and re-entered, Retry after a failure); numbering continues after the highest one so no
+ * earlier photo is overwritten.
+ */
+fun existingKeyframeIndices(fileNames: Iterable<String>): List<Int> = fileNames.mapNotNull(::keyframeIndexOf)
+
 /**
  * Degrees a camera image must be rotated clockwise to appear upright for a back-facing camera whose
  * sensor is mounted at [sensorOrientation] degrees while the display is at [displayRotationDegrees].

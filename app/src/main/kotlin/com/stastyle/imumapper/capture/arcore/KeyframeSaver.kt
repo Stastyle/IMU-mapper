@@ -56,8 +56,13 @@ class KeyframeSaver(
         try {
             val width = image.width
             val height = image.height
+            val target = File(photosDir, fileName)
+            val tmp = File(photosDir, "$fileName.tmp")
             // Convert first and release the image immediately: ARCore only lends out a few at a time.
             val nv21 = try {
+                // Numbering continues across sessions of a trip; a clash means a bug upstream, and the
+                // earlier photo (already referenced by the log) must survive it.
+                if (target.exists()) throw IllegalStateException("$fileName already exists")
                 val planes = image.planes
                 yuv420ToNv21(
                     width, height,
@@ -68,8 +73,6 @@ class KeyframeSaver(
             } finally {
                 image.close()
             }
-            val target = File(photosDir, fileName)
-            val tmp = File(photosDir, "$fileName.tmp")
             FileOutputStream(tmp).use { out ->
                 val yuv = YuvImage(nv21, ImageFormat.NV21, width, height, null)
                 if (!yuv.compressToJpeg(Rect(0, 0, width, height), quality, out)) {
