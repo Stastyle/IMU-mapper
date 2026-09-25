@@ -1,0 +1,103 @@
+name: Release
+
+# Manual only. Builds a signed release APK, tags the commit and publishes a GitHub Release with
+# the APK attached. The in-app updater reads that release. Requires the four signing secrets;
+# see scripts/gen-keystore.sh.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, e.g. 1.0.0 (tag will be v1.0.0)"
+        required: true
+        type: string
+      notes:
+        description: "Release notes (markdown, optional)"
+        required: false
+        type: string
+      prerelease:
+        description: "Mark as pre-release"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate version
+        run: |
+          if ! [[ "${{ inputs.version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::version must be X.Y.Z, got '${{ inputs.version }}'"
+            exit 1
+          fi
+
+      - name: Check signing secrets
+        env:
+          KS: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KSP: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KA: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KP: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          missing=""
+          [ -z "$KS" ] && missing="$missing ANDROID_KEYSTORE_BASE64"
+          [ -z "$KSP" ] && missing="$missing ANDROID_KEYSTORE_PASSWORD"
+          [ -z "$KA" ] && missing="$missing ANDROID_KEY_ALIAS"
+          [ -z "$KP" ] && missing="$missing ANDROID_KEY_PASSWORD"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secrets:$missing. Run scripts/gen-keystore.sh and add them under Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Refuse to reuse a tag
+        run: |
+          if git rev-parse "v${{ inputs.version }}" >/dev/null 2>&1; then
+            echo "::error::tag v${{ inputs.version }} already exists"
+            exit 1
+          fi
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Decode keystore
+        run: echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/release.jks"
+
+      - name: Build signed release APK
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/release.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          ./gradlew :app:assembleRelease -PversionName=${{ inputs.version }} --no-daemon --stacktrace
+          mkdir -p dist
+          cp app/build/outputs/apk/release/app-release.apk "dist/imu-mapper-v${{ inputs.version }}.apk"
+          sha256sum "dist/imu-mapper-v${{ inputs.version }}.apk" | tee dist/SHA256SUMS.txt
+
+      - name: Tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "v${{ inputs.version }}" -m "Release v${{ inputs.version }}"
+          git push origin "v${{ inputs.version }}"
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ inputs.version }}
+          name: IMU Mapper v${{ inputs.version }}
+          body: ${{ inputs.notes }}
+          generate_release_notes: true
+          prerelease: ${{ inputs.prerelease }}
+          files: |
+            dist/imu-mapper-v${{ inputs.version }}.apk
+            dist/SHA256SUMS.txt

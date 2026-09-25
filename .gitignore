@@ -1,0 +1,27 @@
+# Gradle
+.gradle/
+build/
+**/build/
+!gradle/wrapper/gradle-wrapper.jar
+.kotlin/
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+local.properties
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Signing — never commit keystores
+*.jks
+*.keystore
+
+# OS / editors
+.DS_Store
+*.swp
+
+# Python (tools/)
+__pycache__/
+*.pyc
+.venv/

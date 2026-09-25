@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">IMU Mapper</string>
+    <string name="notification_channel_recording">Recording</string>
+    <string name="notification_channel_recording_desc">Shown while a trip is being recorded</string>
+    <string name="notification_recording_title">Recording trip</string>
+    <string name="notification_recording_text">IMU Mapper is logging sensors</string>
+    <string name="notification_stop">Stop</string>
+</resources>
