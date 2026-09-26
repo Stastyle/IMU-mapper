@@ -14,6 +14,7 @@ such as caves.
 ## Releases and updates
 
 Releases are made manually with the **Release** GitHub Actions workflow, which signs the APK
-with a key stored in repository secrets (create it with `scripts/gen-keystore.sh`) and
+with a key stored in repository secrets (create it with `scripts/gen-keystore.sh`, or
+`scripts/gen-keystore.ps1` on Windows) and
 publishes a GitHub Release. The app checks that release from **Settings → Check for updates**
 and installs the new APK itself.
