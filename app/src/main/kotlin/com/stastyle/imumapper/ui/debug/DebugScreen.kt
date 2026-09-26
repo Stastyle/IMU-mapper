@@ -1,5 +1,7 @@
 package com.stastyle.imumapper.ui.debug
 
+import android.content.Context
+import android.content.Intent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -13,16 +15,20 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -31,7 +37,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -109,6 +118,8 @@ fun DebugScreen(tripId: Long?, onBack: () -> Unit) {
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            val crash = ui.crashReport
+            if (crash != null) CrashCard(crash, onClear = vm::clearCrashReport)
             LiveCard(ui, onToggle = vm::setLiveEnabled)
             if (!vm.fixedTrip) {
                 if (ui.trips.isEmpty()) {
@@ -138,6 +149,42 @@ fun DebugScreen(tripId: Long?, onBack: () -> Unit) {
         }
     }
 }
+
+/** The last uncaught exception, kept by [com.stastyle.imumapper.debug.CrashLog], with Copy and Share for a bug report. */
+@Composable
+private fun CrashCard(report: String, onClear: () -> Unit) {
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Last crash", style = MaterialTheme.typography.titleMedium)
+            Text(
+                report.lineSequence().take(CRASH_PREVIEW_LINES).joinToString("\n"),
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace,
+            )
+            Text(
+                "Copy the whole report and paste it into the bug report.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { clipboard.setText(AnnotatedString(report)) }) { Text("Copy") }
+                OutlinedButton(onClick = { shareText(context, report) }) { Text("Share") }
+                TextButton(onClick = onClear) { Text("Clear") }
+            }
+        }
+    }
+}
+
+private fun shareText(context: Context, text: String) {
+    val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text)
+    runCatching { context.startActivity(Intent.createChooser(send, "Crash report")) }
+}
+
+private const val CRASH_PREVIEW_LINES = 6
 
 @Composable
 private fun LiveCard(ui: DebugUiState, onToggle: (Boolean) -> Unit) {

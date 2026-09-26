@@ -123,6 +123,11 @@ Key decisions
   (copied from the ARCore sample) rather than a full scene-graph library.
 - **Sensor rates.** IMU at `SENSOR_DELAY_FASTEST` (200–500 Hz on this device), no batching,
   timestamps from the sensor event (monotonic ns). ARCore poses at frame rate.
+- **Memory of a long trip.** Processing reads the whole raw log: at these rates a half-hour walk
+  is several million samples, which as boxed objects exceeded the default per-app heap once the
+  viewer re-ran the processing on a long trip. `RawLog` stores the streams as primitive
+  columns, processing skips the uncalibrated streams it never reads, the app declares
+  `largeHeap`, and a trip whose processing failed is not re-run automatically on open.
 - **CI compiles, but publishes nothing.** GitHub Actions runs the pipeline tests and compiles the
   app on every push so integration errors surface early. No APK is attached or released until all
   phases are complete; the first APK is produced by the manual release workflow (section 8).
@@ -200,6 +205,9 @@ Debug screen:
 - Export raw log + processed path as a ZIP (share sheet) for offline analysis.
 - Re-process any trip with the current pipeline version; results are versioned so old and
   new paths can be overlaid in the viewer.
+- The last crash: `debug/CrashLog` keeps the uncaught exception with the app version, device and
+  heap figures in `files/crash/last-crash.txt`; the screen shows it with Copy and Share so a
+  report can be pasted into a bug report without adb.
 
 ## 7. Viewer
 

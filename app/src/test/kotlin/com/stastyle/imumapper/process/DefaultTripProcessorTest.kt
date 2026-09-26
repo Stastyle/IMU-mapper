@@ -176,6 +176,41 @@ class DefaultTripProcessorTest {
     }
 
     @Test
+    fun outOfMemoryMarksTripFailedWithAMessage() = runBlocking<Unit> {
+        val id = recordedTrip()
+        processor.failure = OutOfMemoryError("Java heap space")
+
+        val e = assertFailsWith<IllegalStateException> { subject().process(id) }
+        assertTrue(e.message!!.contains("memory"), e.message)
+        assertTrue(e.cause is OutOfMemoryError)
+
+        val trip = trips.getTrip(id)!!
+        assertEquals(TripStatus.FAILED, trip.status)
+        assertTrue(trip.lastError!!.contains("Not enough memory"), trip.lastError)
+        assertTrue(trips.listResults(id).isEmpty())
+    }
+
+    @Test
+    fun uncalibratedStreamsAreNotLoadedForProcessing() = runBlocking<Unit> {
+        val id = trips.createTrip(
+            TripEntity(
+                name = "walk", mode = TripMode.POCKET, carryPosition = CarryPosition.POCKET, startedAtEpochMs = 1L,
+                status = TripStatus.RECORDED,
+            ),
+        )
+        writeSampleLog(files.rawLog(id), withUncalibrated = true)
+        var seenAccel = -1
+        var seenUncal = -1
+        val watching = FakeProcessor(onProcess = { log, _ ->
+            seenAccel = log.accel.size
+            seenUncal = log.accelUncal.size
+        })
+        subject(watching).process(id)
+        assertEquals(50, seenAccel)
+        assertEquals(0, seenUncal)
+    }
+
+    @Test
     fun renameDuringRunIsKeptBySuccessAndFailure() = runBlocking<Unit> {
         val id = recordedTrip()
         val renaming = FakeProcessor(onProcess = { _, _ -> runBlocking { trips.renameTrip(id, "renamed") } })

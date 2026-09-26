@@ -4,6 +4,7 @@ import com.stastyle.imumapper.data.db.PathResultEntity
 import com.stastyle.imumapper.data.db.TripEntity
 import com.stastyle.imumapper.data.db.TripStatus
 import com.stastyle.imumapper.pipeline.core.AccelSample
+import com.stastyle.imumapper.pipeline.core.AccelUncalSample
 import com.stastyle.imumapper.pipeline.core.CarryPosition
 import com.stastyle.imumapper.pipeline.core.EventKind
 import com.stastyle.imumapper.pipeline.core.EventRecord
@@ -158,8 +159,16 @@ fun sampleResult(distanceM: Double = 12.5, durationS: Double = 30.0): PathResult
     diagnostics = mapOf("note" to "fake"),
 )
 
-/** Writes a small but valid raw log: meta, START, a few accel samples, optionally a tracked pose, STOP. */
-fun writeSampleLog(file: File, withVio: Boolean = false, startedAtEpochMs: Long = 1_700_000_000_000L) {
+/**
+ * Writes a small but valid raw log: meta, START, a few accel samples (each followed by an
+ * uncalibrated twin when [withUncalibrated]), optionally a tracked pose, STOP.
+ */
+fun writeSampleLog(
+    file: File,
+    withVio: Boolean = false,
+    startedAtEpochMs: Long = 1_700_000_000_000L,
+    withUncalibrated: Boolean = false,
+) {
     file.parentFile?.mkdirs()
     LogWriter(file.outputStream()).use { w ->
         w.writeMeta(
@@ -176,6 +185,7 @@ fun writeSampleLog(file: File, withVio: Boolean = false, startedAtEpochMs: Long 
         for (i in 0 until 50) {
             val t = i * 10_000_000L
             w.write(AccelSample(t, 0f, 0f, 9.81f))
+            if (withUncalibrated) w.write(AccelUncalSample(t, 0f, 0f, 9.81f, 0f, 0f, 0f))
         }
         if (withVio) {
             w.write(PoseSample(100_000_000L, 100_000_000L, 0f, 0f, 0f, 0f, 0f, 0f, 1f, TrackingState.TRACKING, 0))

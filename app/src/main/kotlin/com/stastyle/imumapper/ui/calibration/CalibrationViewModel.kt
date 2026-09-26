@@ -330,7 +330,9 @@ class CalibrationViewModel(
         viewModelScope.launch {
             val outcome = runCatching {
                 val trip = trips.getTrip(tripId) ?: throw IllegalStateException("Trip not found")
-                val log = withContext(Dispatchers.IO) { LogReader.read(files.rawLog(tripId)) }
+                val log = withContext(Dispatchers.IO) {
+                    LogReader.read(files.rawLog(tripId), LogReader.UNCALIBRATED_TYPES)
+                }
                 if (!log.hasVio) throw IllegalStateException("This trip has no ARCore tracking samples")
                 val config = _ui.value.config
                 withContext(Dispatchers.Default) { compareProcessors(trip.name, log, config) }
@@ -433,7 +435,7 @@ class CalibrationViewModel(
         viewModelScope.launch {
             try {
                 closing.await()
-                val log = withContext(Dispatchers.IO) { LogReader.read(s.file) }
+                val log = withContext(Dispatchers.IO) { LogReader.read(s.file, LogReader.UNCALIBRATED_TYPES) }
                 val result = withContext(Dispatchers.Default) { compute(s, log, config) }
                 setPhase(s.kind, FlowPhase.Done(result))
             } catch (e: CancellationException) {

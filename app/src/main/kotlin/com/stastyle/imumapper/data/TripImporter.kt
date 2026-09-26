@@ -48,7 +48,8 @@ class TripImporter(
         try {
             val extracted = openInput(uri).use { input -> extract(input, staging) }
             val rawLog = extracted.rawLog ?: throw IOException("The archive holds no raw.imul log")
-            val log = LogReader.read(rawLog)
+            // Only the meta, the time span and "is there anything in it" are needed here.
+            val log = LogReader.read(rawLog, LogReader.UNCALIBRATED_TYPES)
             if (log.totalRecords == 0) throw IOException("The log is empty")
             val manifest = extracted.manifest
             val name = importedName(manifest, displayName, log.meta)

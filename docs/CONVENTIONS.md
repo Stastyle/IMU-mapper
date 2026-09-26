@@ -34,6 +34,13 @@ Short rules every contributor (human or agent) follows. See `PLAN.md` for the de
 of a log is `LogMeta` JSON. Add new record types only by extending `LogFormat` and both codecs
 together with a round-trip test.
 
+A `RawLog` holds the sensor streams as columns of primitives (`SampleColumns.kt`) and builds the
+sample data class on each `get`: ten streams at up to 500 Hz are millions of samples per
+half-hour, and as objects they do not fit the app's heap. Iterate or index the lists; do not
+copy a long stream into another collection. Readers that only process pass
+`LogReader.UNCALIBRATED_TYPES` as `skipTypes` so the uncalibrated streams, which no processor
+reads, are never loaded.
+
 ## Results
 
 A processing run produces a `PathResult` (JSON) stored as `results/run-<n>.json` next to the

@@ -26,9 +26,12 @@
     <uses-feature android:name="android.hardware.sensor.compass" android:required="false" />
     <uses-feature android:name="android.hardware.sensor.stepdetector" android:required="false" />
 
+    <!-- largeHeap: a trip is processed from its whole raw log in memory (ten sensor streams at up
+         to 500 Hz), so an hour-long walk needs more than the default per-app heap. -->
     <application
         android:name=".ImuMapperApp"
         android:allowBackup="false"
+        android:largeHeap="true"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:label="@string/app_name"
