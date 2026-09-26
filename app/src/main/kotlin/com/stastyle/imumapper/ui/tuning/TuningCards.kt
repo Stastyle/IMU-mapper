@@ -56,7 +56,7 @@ fun ProposalBody(p: Proposal) {
         Text("Proposed changes", style = MaterialTheme.typography.labelLarge)
         for (c in p.changes) {
             ValueRow(c.key, c.from + " → " + c.to, highlight = true)
-            if (c.reason != null) Text(c.reason, style = MaterialTheme.typography.bodySmall)
+            c.reason?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
         }
     }
     p.reasoning?.let {
