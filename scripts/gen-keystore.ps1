@@ -21,9 +21,21 @@ if (-not $keytool) {
         "$env:LOCALAPPDATA\Programs\Android Studio\jbr\bin\keytool.exe"
     ) | Where-Object { $_ -and (Test-Path $_) }
     if ($candidates.Count -eq 0) {
-        Write-Error "keytool not found. Install a JDK or Android Studio, or add its jbr\bin folder to PATH."
+        # Look through the usual JDK install roots (Temurin, Microsoft, Oracle, Zulu, Android Studio).
+        $roots = @("$env:ProgramFiles\Eclipse Adoptium", "$env:ProgramFiles\Microsoft", "$env:ProgramFiles\Java",
+                   "$env:ProgramFiles\Zulu", "$env:ProgramFiles\Android", "$env:LOCALAPPDATA\Programs") |
+            Where-Object { Test-Path $_ }
+        $candidates = @($roots | ForEach-Object {
+            Get-ChildItem $_ -Recurse -Filter keytool.exe -ErrorAction SilentlyContinue -Depth 4
+        } | ForEach-Object { $_.FullName })
+    }
+    if ($candidates.Count -eq 0) {
+        Write-Error ("keytool not found: it ships with a Java Development Kit. Install one with`n" +
+            "  winget install --id EclipseAdoptium.Temurin.17.JDK -e`n" +
+            "then open a new terminal and run this script again, or add your JDK's bin folder to PATH.")
     }
     $keytoolPath = $candidates[0]
+    Write-Host "Using $keytoolPath"
 } else {
     $keytoolPath = $keytool.Source
 }
