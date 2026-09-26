@@ -1,10 +1,26 @@
 name: Release
 
-# Manual only. Builds a signed release APK and publishes a GitHub Release with the APK attached;
-# the release action creates tag vX.Y.Z on the built commit as part of publishing, so a failed
-# publish leaves no tag behind and the same version can simply be re-run. The in-app updater reads
-# that release. Requires the four signing secrets; see scripts/gen-keystore.sh.
+# Builds a signed release APK and publishes a GitHub Release with the APK attached; the release
+# action creates tag vX.Y.Z on the built commit as part of publishing, so a failed publish leaves
+# no tag behind and the same version can simply be re-run. The in-app updater reads that release.
+# Requires the four signing secrets; see scripts/gen-keystore.sh.
+#
+# Two ways in:
+# - Every push to main that changes the app or the pipeline (a merged PR) releases the next minor
+#   version after the newest vX.Y.Z tag, with GitHub's generated notes. Docs, scripts, tools and
+#   workflow changes do not release, since the APK would be the same.
+# - Manual dispatch with an explicit version, for a patch release, a major bump or a pre-release.
 on:
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - "pipeline/**"
+      - "gradle/**"
+      - "*.gradle.kts"
+      - "gradle.properties"
+      - "gradlew"
+      - "gradlew.bat"
   workflow_dispatch:
     inputs:
       version:
@@ -24,7 +40,8 @@ on:
 permissions:
   contents: write
 
-# One release at a time, so two dispatches of the same version cannot both pass the tag check.
+# One release at a time, so two runs cannot both pass the tag check or compute the same next
+# version. Queued, not cancelled: every merge gets its release.
 concurrency:
   group: release
   cancel-in-progress: false
@@ -33,18 +50,6 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - name: Validate version
-        env:
-          VERSION: ${{ inputs.version }}
-        # app/build.gradle.kts derives versionCode = major*10000 + minor*100 + patch, so minor and
-        # patch must stay below 100 for codes to remain monotonic.
-        run: |
-          re='^[0-9]+\.[0-9]{1,2}\.[0-9]{1,2}$'
-          if ! [[ "$VERSION" =~ $re ]]; then
-            echo "::error::version must be X.Y.Z with Y and Z below 100, got '$VERSION'"
-            exit 1
-          fi
-
       - name: Check signing secrets
         env:
           KS: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -66,9 +71,42 @@ jobs:
         with:
           fetch-depth: 0
 
+      # The version is the dispatch input, or on a push the newest vX.Y.Z tag with the minor
+      # bumped and the patch reset. app/build.gradle.kts derives
+      # versionCode = major*10000 + minor*100 + patch, so minor and patch must stay below 100 for
+      # codes to remain monotonic; when the minor would reach 100, dispatch a major bump by hand.
+      - name: Resolve version
+        id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          re='^[0-9]+\.[0-9]{1,2}\.[0-9]{1,2}$'
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            version="$INPUT_VERSION"
+            if ! [[ "$version" =~ $re ]]; then
+              echo "::error::version must be X.Y.Z with Y and Z below 100, got '$version'"
+              exit 1
+            fi
+          else
+            latest=$(git ls-remote --tags --refs origin 'v*' | awk -F/ '{print $NF}' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)
+            if [ -z "$latest" ]; then
+              version="0.1.0"
+            else
+              IFS=. read -r major minor _ <<< "${latest#v}"
+              minor=$((minor + 1))
+              if [ "$minor" -ge 100 ]; then
+                echo "::error::minor version would reach $minor after $latest; dispatch a major bump (e.g. $((major + 1)).0.0) by hand"
+                exit 1
+              fi
+              version="$major.$minor.0"
+            fi
+            echo "Newest tag: ${latest:-none}; releasing $version"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
       - name: Refuse to reuse a tag
         env:
-          VERSION: ${{ inputs.version }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           if git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" >/dev/null 2>&1; then
             echo "::error::tag v$VERSION already exists"
@@ -81,6 +119,15 @@ jobs:
           java-version: "17"
       - uses: gradle/actions/setup-gradle@v4
 
+      # The PR's CI ran on the branch head, not on the merge commit; a release that the updater
+      # will push to every phone gets its own test run on exactly what is being built.
+      - name: Test pipeline
+        working-directory: pipeline
+        run: ../gradlew test --no-daemon --stacktrace
+
+      - name: Test app
+        run: ./gradlew :app:testDebugUnitTest --no-daemon --stacktrace
+
       - name: Decode keystore
         run: echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/release.jks"
 
@@ -90,24 +137,25 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          ./gradlew :app:assembleRelease -PversionName=${{ inputs.version }} --no-daemon --stacktrace
+          ./gradlew :app:assembleRelease -PversionName="$VERSION" --no-daemon --stacktrace
           mkdir -p dist
-          cp app/build/outputs/apk/release/app-release.apk "dist/imu-mapper-v${{ inputs.version }}.apk"
-          sha256sum "dist/imu-mapper-v${{ inputs.version }}.apk" | tee dist/SHA256SUMS.txt
+          cp app/build/outputs/apk/release/app-release.apk "dist/imu-mapper-v$VERSION.apk"
+          sha256sum "dist/imu-mapper-v$VERSION.apk" | tee dist/SHA256SUMS.txt
 
       # Creates tag vX.Y.Z on this commit together with the release. No separate tag push: if
       # publishing fails there is no orphan tag, and re-running the same version still works.
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ inputs.version }}
+          tag_name: v${{ steps.version.outputs.version }}
           target_commitish: ${{ github.sha }}
-          name: IMU Mapper v${{ inputs.version }}
+          name: IMU Mapper v${{ steps.version.outputs.version }}
           body: ${{ inputs.notes }}
           generate_release_notes: true
-          prerelease: ${{ inputs.prerelease }}
+          prerelease: ${{ inputs.prerelease || false }}
           fail_on_unmatched_files: true
           files: |
-            dist/imu-mapper-v${{ inputs.version }}.apk
+            dist/imu-mapper-v${{ steps.version.outputs.version }}.apk
             dist/SHA256SUMS.txt
