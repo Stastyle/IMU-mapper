@@ -378,7 +378,7 @@ class TuningViewModel(
         val log = withContext(Dispatchers.IO) {
             val file = files.rawLog(tripId)
             if (!file.isFile) throw IllegalStateException("Raw log missing")
-            LogReader.read(file)
+            LogReader.read(file, LogReader.UNCALIBRATED_TYPES)
         }
         if (log.totalRecords == 0) throw IllegalStateException("Raw log is empty")
         cachedLog = tripId to log

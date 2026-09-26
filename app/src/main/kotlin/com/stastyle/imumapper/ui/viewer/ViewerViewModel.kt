@@ -130,11 +130,17 @@ class ViewerViewModel(
         if (overlay == null && _ui.value.overlayResult != null) _ui.update { it.copy(overlayResult = null) }
     }
 
-    /** Processes the trip once when it has been recorded but never processed. */
+    /**
+     * Processes the trip once when it has been recorded but never processed. A trip whose last run
+     * failed is left alone: the recording screen has already tried once, and repeating a run that
+     * ran out of memory on every open of the viewer is what used to crash the app. The stored error
+     * is shown with a Retry button instead ([retryProcessing]).
+     */
     private fun maybeProcess() {
         if (processingStarted || !runsLoaded || !tripLoaded) return
         val trip = _ui.value.trip ?: return
-        if (_ui.value.runs.isNotEmpty() || trip.status == TripStatus.RECORDING) return
+        if (_ui.value.runs.isNotEmpty()) return
+        if (trip.status == TripStatus.RECORDING || trip.status == TripStatus.FAILED) return
         startProcessing()
     }
 

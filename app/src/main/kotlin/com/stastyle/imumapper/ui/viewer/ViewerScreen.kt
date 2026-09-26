@@ -168,6 +168,7 @@ fun ViewerScreen(
 
 @Composable
 private fun StatusOverlay(ui: ViewerUiState, vm: ViewerViewModel, modifier: Modifier = Modifier) {
+    val trip = ui.trip
     Column(modifier = modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         when {
             ui.processing -> {
@@ -180,10 +181,21 @@ private fun StatusOverlay(ui: ViewerUiState, vm: ViewerViewModel, modifier: Modi
                 Spacer(Modifier.height(12.dp))
                 Button(onClick = vm::retryProcessing) { Text("Retry") }
             }
-            ui.trip?.status == TripStatus.RECORDING -> {
+            trip?.status == TripStatus.RECORDING -> {
                 Text("This trip is still being recorded.", style = MaterialTheme.typography.bodyLarge)
             }
             ui.loading || ui.runs.isNotEmpty() -> CircularProgressIndicator()
+            trip != null && trip.status == TripStatus.FAILED -> {
+                // The run the recording screen started failed; the view model does not repeat it on
+                // its own (see ViewerViewModel.maybeProcess), so the stored reason is shown here.
+                Text(
+                    "Processing failed: " + (trip.lastError ?: "no error message was recorded"),
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Spacer(Modifier.height(12.dp))
+                Button(onClick = vm::retryProcessing) { Text("Retry") }
+            }
             else -> {
                 Text("No processed path yet.", style = MaterialTheme.typography.bodyLarge)
                 Spacer(Modifier.height(12.dp))

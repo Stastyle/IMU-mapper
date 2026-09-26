@@ -22,6 +22,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.io.FileNotFoundException
+import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -116,6 +117,14 @@ class DefaultTripProcessor(
             entity
         } catch (e: CancellationException) {
             throw e
+        } catch (e: OutOfMemoryError) {
+            // Reached once the frames holding the log have unwound, so the heap is free again and the
+            // row can be written. The trip is marked FAILED with a message that says what happened:
+            // the viewer shows it instead of re-running the same processing on every open, which is
+            // what took the whole app down before (see ViewerViewModel.maybeProcess).
+            val message = outOfMemoryMessage(files.rawLog(tripId))
+            trips.markFailed(tripId, message)
+            throw IllegalStateException(message, e)
         } catch (e: Exception) {
             trips.markFailed(tripId, describe(e))
             throw e
@@ -126,9 +135,16 @@ class DefaultTripProcessor(
 
     private fun readLog(rawFile: File): RawLog {
         if (!rawFile.isFile) throw FileNotFoundException("Raw log missing: ${rawFile.name}")
-        val log = LogReader.read(rawFile)
+        // The processors read the calibrated streams only; the uncalibrated ones are close to half
+        // of a log's records and would sit in memory for nothing.
+        val log = LogReader.read(rawFile, LogReader.UNCALIBRATED_TYPES)
         if (log.totalRecords == 0) throw IllegalStateException("Raw log is empty")
         return log
+    }
+
+    private fun outOfMemoryMessage(rawFile: File): String {
+        val mb = rawFile.length() / 1_000_000.0
+        return String.format(Locale.US, "Not enough memory to process this trip (raw log %.0f MB)", mb)
     }
 
     /** Write to a sibling temp file then rename so a half-written result never carries a run name. */

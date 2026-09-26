@@ -24,6 +24,10 @@ import kotlinx.serialization.json.Json
 /**
  * A fully parsed log, one list per record type, each in file (time) order.
  * This is the input of every [com.stastyle.imumapper.pipeline.core.Processor].
+ *
+ * The high-rate sensor streams are column stores (see SampleColumns.kt): a few bytes per sample,
+ * with the data class built on each `get`. Iterate them or index them, but do not hold on to the
+ * elements of a long log in another collection, which brings the boxed cost back.
  */
 class RawLog(
     val meta: LogMeta?,
@@ -47,8 +51,8 @@ class RawLog(
     val truncated: Boolean = false,
     val unknownRecords: Int = 0,
 ) {
-    val gameRotation: List<RotationSample> by lazy { rotation.filter { it.source == RotationSource.GAME } }
-    val fusedRotation: List<RotationSample> by lazy { rotation.filter { it.source == RotationSource.FUSED } }
+    val gameRotation: List<RotationSample> by lazy { RotationList.withSource(rotation, RotationSource.GAME) }
+    val fusedRotation: List<RotationSample> by lazy { RotationList.withSource(rotation, RotationSource.FUSED) }
 
     val hasVio: Boolean get() = poses.any { it.tracking == TrackingState.TRACKING }
 
@@ -69,19 +73,27 @@ class RawLog(
             baro.size + rotation.size + steps.size + poses.size + pointClouds.size + keyframes.size +
             annotations.size + events.size + (if (metaJson != null) 1 else 0)
 
-    class Builder {
+    /**
+     * Collects records into a log. [expectedCounts], records per record type indexed by the
+     * [LogFormat] type byte, sizes every column up front so nothing is copied while building;
+     * without it the columns grow as records arrive.
+     */
+    class Builder(private val expectedCounts: IntArray? = null) {
+        private fun expected(type: Int): Int =
+            expectedCounts?.getOrNull(type)?.takeIf { it > 0 } ?: ColumnBuilder.DEFAULT_CAPACITY
+
         private var metaJson: String? = null
-        private val accel = ArrayList<AccelSample>()
-        private val gyro = ArrayList<GyroSample>()
-        private val mag = ArrayList<MagSample>()
-        private val accelUncal = ArrayList<AccelUncalSample>()
-        private val gyroUncal = ArrayList<GyroUncalSample>()
-        private val magUncal = ArrayList<MagUncalSample>()
-        private val baro = ArrayList<BaroSample>()
-        private val rotation = ArrayList<RotationSample>()
-        private val steps = ArrayList<StepSample>()
-        private val poses = ArrayList<PoseSample>()
-        private val pointClouds = ArrayList<PointCloudSample>()
+        private val accel = ColumnBuilder(3, expected(LogFormat.T_ACCEL))
+        private val gyro = ColumnBuilder(3, expected(LogFormat.T_GYRO))
+        private val mag = ColumnBuilder(3, expected(LogFormat.T_MAG))
+        private val accelUncal = ColumnBuilder(6, expected(LogFormat.T_ACCEL_UNCAL))
+        private val gyroUncal = ColumnBuilder(6, expected(LogFormat.T_GYRO_UNCAL))
+        private val magUncal = ColumnBuilder(6, expected(LogFormat.T_MAG_UNCAL))
+        private val baro = ColumnBuilder(1, expected(LogFormat.T_BARO))
+        private val rotation = RotationList.Builder(expected(LogFormat.T_GAME_ROT) + expected(LogFormat.T_ROT_VEC))
+        private val steps = ColumnBuilder(0, expected(LogFormat.T_STEP))
+        private val poses = ArrayList<PoseSample>(expected(LogFormat.T_POSE))
+        private val pointClouds = ArrayList<PointCloudSample>(expected(LogFormat.T_POINT_CLOUD))
         private val keyframes = ArrayList<KeyframeSample>()
         private val annotations = ArrayList<AnnotationRecord>()
         private val events = ArrayList<EventRecord>()
@@ -89,15 +101,15 @@ class RawLog(
         fun add(r: LogRecord): Builder {
             when (r) {
                 is MetaRecord -> if (metaJson == null) metaJson = r.json
-                is AccelSample -> accel += r
-                is GyroSample -> gyro += r
-                is MagSample -> mag += r
-                is AccelUncalSample -> accelUncal += r
-                is GyroUncalSample -> gyroUncal += r
-                is MagUncalSample -> magUncal += r
-                is BaroSample -> baro += r
-                is RotationSample -> rotation += r
-                is StepSample -> steps += r
+                is AccelSample -> accel.add(r.tNs, r.x, r.y, r.z)
+                is GyroSample -> gyro.add(r.tNs, r.x, r.y, r.z)
+                is MagSample -> mag.add(r.tNs, r.x, r.y, r.z)
+                is AccelUncalSample -> accelUncal.add(r.tNs, r.x, r.y, r.z, r.bx, r.by, r.bz)
+                is GyroUncalSample -> gyroUncal.add(r.tNs, r.x, r.y, r.z, r.bx, r.by, r.bz)
+                is MagUncalSample -> magUncal.add(r.tNs, r.x, r.y, r.z, r.bx, r.by, r.bz)
+                is BaroSample -> baro.add(r.tNs, r.hPa)
+                is RotationSample -> rotation.add(r)
+                is StepSample -> steps.add(r.tNs)
                 is PoseSample -> poses += r
                 is PointCloudSample -> pointClouds += r
                 is KeyframeSample -> keyframes += r
@@ -110,8 +122,24 @@ class RawLog(
         fun build(truncated: Boolean = false, unknownRecords: Int = 0): RawLog {
             val meta = metaJson?.let { runCatching { json.decodeFromString(LogMeta.serializer(), it) }.getOrNull() }
             return RawLog(
-                meta, metaJson, accel, gyro, mag, accelUncal, gyroUncal, magUncal, baro, rotation, steps,
-                poses, pointClouds, keyframes, annotations, events, truncated, unknownRecords,
+                meta = meta,
+                metaJson = metaJson,
+                accel = TripletList(accel.times(), accel.values(), ::AccelSample),
+                gyro = TripletList(gyro.times(), gyro.values(), ::GyroSample),
+                mag = TripletList(mag.times(), mag.values(), ::MagSample),
+                accelUncal = SextetList(accelUncal.times(), accelUncal.values(), ::AccelUncalSample),
+                gyroUncal = SextetList(gyroUncal.times(), gyroUncal.values(), ::GyroUncalSample),
+                magUncal = SextetList(magUncal.times(), magUncal.values(), ::MagUncalSample),
+                baro = BaroList(baro.times(), baro.values()),
+                rotation = rotation.build(),
+                steps = StepList(steps.times()),
+                poses = poses,
+                pointClouds = pointClouds,
+                keyframes = keyframes,
+                annotations = annotations,
+                events = events,
+                truncated = truncated,
+                unknownRecords = unknownRecords,
             )
         }
     }

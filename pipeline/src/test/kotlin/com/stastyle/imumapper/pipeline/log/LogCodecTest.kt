@@ -108,6 +108,54 @@ class LogCodecTest {
     }
 
     @Test
+    fun skippedTypesLeaveTheirStreamsEmpty() {
+        val log = LogReader.read(ByteArrayInputStream(encodeAll()), LogReader.UNCALIBRATED_TYPES)
+
+        assertTrue(log.accelUncal.isEmpty())
+        assertTrue(log.gyroUncal.isEmpty())
+        assertTrue(log.magUncal.isEmpty())
+        // Nothing else is affected, including the record count and the time span.
+        assertEquals(listOf(AccelSample(1_000L, 0.1f, 9.8f, -0.2f)), log.accel)
+        assertEquals(2, log.rotation.size)
+        assertEquals(0, log.unknownRecords)
+        assertFalse(log.truncated)
+        assertEquals(1_000L, log.firstTimestampNs)
+        assertEquals(9_000L, log.lastTimestampNs)
+    }
+
+    @Test
+    fun sampleStreamsBehaveAsLists() {
+        val bytes = ByteArrayOutputStream()
+        LogWriter(bytes).use { w ->
+            for (i in 0 until 3000) {
+                w.write(AccelSample(i.toLong(), i.toFloat(), -i.toFloat(), 9.8f))
+                w.write(BaroSample(i.toLong(), 1000f + i))
+                w.write(StepSample(i.toLong()))
+                w.write(RotationSample(i.toLong(), 0f, 0f, 0f, 1f, 0.1f, if (i % 3 == 0) RotationSource.FUSED else RotationSource.GAME))
+                w.write(GyroUncalSample(i.toLong(), 1f, 2f, 3f, 4f, 5f, 6f))
+            }
+        }
+        val log = LogReader.read(ByteArrayInputStream(bytes.toByteArray()))
+
+        // Column stores grow past their initial capacity here; every element must survive the growth.
+        assertEquals(3000, log.accel.size)
+        assertEquals(AccelSample(2999L, 2999f, -2999f, 9.8f), log.accel.last())
+        assertEquals(AccelSample(1024L, 1024f, -1024f, 9.8f), log.accel[1024])
+        assertEquals(BaroSample(1500L, 2500f), log.baro[1500])
+        assertEquals(StepSample(2048L), log.steps[2048])
+        assertEquals(GyroUncalSample(1023L, 1f, 2f, 3f, 4f, 5f, 6f), log.gyroUncal[1023])
+        assertEquals(1000, log.fusedRotation.size)
+        assertEquals(2000, log.gameRotation.size)
+        assertTrue(log.fusedRotation.all { it.source == RotationSource.FUSED && it.tNs % 3 == 0L })
+        assertEquals(3L, log.fusedRotation[1].tNs)
+        // Plain List behaviour: indexOf, subList, equality with an ordinary list.
+        assertEquals(7, log.accel.indexOf(AccelSample(7L, 7f, -7f, 9.8f)))
+        assertEquals(listOf(StepSample(10L), StepSample(11L)), log.steps.subList(10, 12))
+        assertEquals(log.accel.take(5), log.accel.subList(0, 5))
+        assertFailsWith<IndexOutOfBoundsException> { log.accel[3000] }
+    }
+
+    @Test
     fun truncatedTailIsDroppedNotFatal() {
         val full = encodeAll()
         // Cut in the middle of the last record (EVENT: 5 header + 9 payload bytes).
