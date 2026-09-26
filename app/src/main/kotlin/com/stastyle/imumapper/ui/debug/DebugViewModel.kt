@@ -12,6 +12,7 @@ import com.stastyle.imumapper.data.TripRepository
 import com.stastyle.imumapper.data.db.PathResultEntity
 import com.stastyle.imumapper.data.db.TripEntity
 import com.stastyle.imumapper.data.db.TripStatus
+import com.stastyle.imumapper.debug.CrashLog
 import com.stastyle.imumapper.pipeline.core.LogMeta
 import com.stastyle.imumapper.pipeline.core.PathStats
 import com.stastyle.imumapper.pipeline.core.PipelineConfig
@@ -84,6 +85,8 @@ data class DebugUiState(
     val draftDirty: Boolean = false,
     val processing: Boolean = false,
     val message: String? = null,
+    /** The report of the last uncaught exception ([CrashLog]), until the user clears it. */
+    val crashReport: String? = null,
 )
 
 /**
@@ -134,6 +137,17 @@ class DebugViewModel(
             }
         }
         if (initialTripId != null) selectTrip(initialTripId)
+        viewModelScope.launch {
+            val report = withContext(Dispatchers.IO) { runCatching { CrashLog.from(appContext).read() }.getOrNull() }
+            if (report != null) _ui.update { it.copy(crashReport = report) }
+        }
+    }
+
+    fun clearCrashReport() {
+        _ui.update { it.copy(crashReport = null) }
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { runCatching { CrashLog.from(appContext).clear() } }
+        }
     }
 
     fun dismissMessage() {

@@ -205,6 +205,9 @@ Debug screen:
 - Export raw log + processed path as a ZIP (share sheet) for offline analysis.
 - Re-process any trip with the current pipeline version; results are versioned so old and
   new paths can be overlaid in the viewer.
+- The last crash: `debug/CrashLog` keeps the uncaught exception with the app version, device and
+  heap figures in `files/crash/last-crash.txt`; the screen shows it with Copy and Share so a
+  report can be pasted into a bug report without adb.
 
 ## 7. Viewer
 
