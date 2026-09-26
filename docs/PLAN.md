@@ -82,6 +82,7 @@ app/             Android application module
     RecordScreen          per-mode recording UI, annotation buttons, live stats
     ViewerScreen          3D path viewer (orbit/zoom/pan), markers, photo popup
     CalibrationScreen     stride, heading offset, still-bias, loop test
+    TuningScreen          assisted tuning: describe a walk, prompt a chat model, check and save its proposal
     DebugScreen           live sensor plots, log export, re-process
     SettingsScreen        carry position, units, check for updates, about
   update/
@@ -164,6 +165,25 @@ Calibration screen (values stored per user, applied to every trip):
 - **ARCore vs PDR:** run Mode B in a lit corridor; the app computes PDR from the same log
   and reports the distance and heading error between the two.
 
+Assisted tuning screen (for the thresholds no guided flow measures: step detection, magnetometer
+gate, barometer smoothing, smoothing window):
+
+1. Record a walk you can describe exactly as a normal trip, pick it, and fill in the ground truth
+   (shape, distance, number of turns, height change, free text).
+2. The app runs the pipeline with the current calibration and renders a Markdown prompt
+   (`pipeline/tuning/PromptBundle`): the master prompt from `app/src/main/assets/tuning/`, the
+   ground truth, the config JSON with a parameter table, the run's metrics (steps, cadence, step
+   interval and swing distributions, closure, turns and legs, height, diagnostics) and the path
+   before loop closure decimated to ~120 points. No raw samples: a chat model cannot do signal
+   processing, but it can reason about these numbers.
+3. The user copies or shares the prompt to Claude, Gemini or ChatGPT and pastes the answer back.
+   `ProposalParser` picks the JSON out of the reply, applies only known keys on top of the current
+   config and range-checks every value (one bad value rejects the whole answer).
+4. The trip is re-processed with the proposal (stored as a run, so it opens in the viewer) and
+   scored against the ground truth next to the baseline (`TuningScore`). Only then can it be
+   saved as the calibration; earlier attempts are listed in the next prompt so the model does not
+   repeat them.
+
 Debug screen:
 
 - Live plots of accel magnitude, vertical accel, detected steps, heading, pressure.
@@ -241,7 +261,7 @@ app start that shows a banner when a newer version exists):
 | app-arcore | `app/…/capture/arcore`, `ui/record` (camera part) | ARCore session, torch, pose/point-cloud/keyframe logging, tracking-state UI, fallback hooks |
 | app-viewer | `app/…/render`, `ui/viewer` | Canvas 3D renderer, gestures, grid, markers, overlays, photo popup, stats |
 | app-data | `app/…/data`, `process`, `ui/triplist` | Room implementation, file layout, ProcessTrip, versioned results, ZIP export, trip list |
-| app-calib-debug | `ui/calibration`, `ui/debug` | Calibration flows, square test, ARCore-vs-PDR comparison, live plots, re-process |
+| app-calib-debug | `ui/calibration`, `ui/debug`, `ui/tuning`, `pipeline/…/tuning` | Calibration flows, square test, ARCore-vs-PDR comparison, live plots, re-process, assisted tuning |
 | app-updater | `app/…/update`, `ui/settings` | GitHub Releases updater end to end, settings screen |
 | tools | `tools/` | `replay.py` mirroring the pipeline, plots, error metrics (runs after pipeline-pdr) |
 

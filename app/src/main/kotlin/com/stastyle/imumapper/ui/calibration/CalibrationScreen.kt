@@ -50,10 +50,10 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.stastyle.imumapper.data.db.TripEntity
 import com.stastyle.imumapper.ui.common.appContainer
 
-/** Calibration flows: still bias, stride walk, heading offset, square test, ARCore vs PDR. */
+/** Calibration flows: still bias, stride walk, heading offset, square test, ARCore vs PDR, assisted tuning. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CalibrationScreen(onBack: () -> Unit) {
+fun CalibrationScreen(onBack: () -> Unit, onOpenTuning: () -> Unit) {
     val context = LocalContext.current
     val container = appContainer()
     val vm: CalibrationViewModel = viewModel {
@@ -120,6 +120,23 @@ fun CalibrationScreen(onBack: () -> Unit) {
             HeadingOffsetCard(ui, vm)
             SquareTestCard(ui, vm)
             VioCard(ui, vm)
+            TuningCard(onOpenTuning)
+        }
+    }
+}
+
+@Composable
+private fun TuningCard(onOpen: () -> Unit) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Assisted tuning", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "For the thresholds no guided flow measures (step detection, magnetometer gate, smoothing): " +
+                    "record a walk you can describe, let a chat model read the pipeline's numbers for it and " +
+                    "propose values, then check the proposal on the same walk before saving it.",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Button(onClick = onOpen) { Text("Open") }
         }
     }
 }
