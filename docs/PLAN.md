@@ -179,6 +179,9 @@ Debug screen:
 - Path coloured by elapsed time (default) or by altitude.
 - Markers: start, end, annotations, photo keyframes. Tap a marker for details / photo.
 - Toggle overlays: previous processing versions, ARCore point cloud, raw PDR vs fused.
+- Raw path toggle: the path before loop closure and smoothing (stored with every result as
+  `rawPoints`), drawn with the corrected path dimmed underneath. Stride and heading offset still
+  apply, so metres and shape are the pipeline's; only the corrections are undone.
 - Top-down and side presets. Numbers panel: distance, duration, vertical range, closure error.
 
 ## 8. Updates and releases

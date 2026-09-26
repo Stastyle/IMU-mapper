@@ -1326,7 +1326,8 @@ class PdrSolver:
 # ----------------------------------------------------------------------------------------------
 
 class PathBuilder:
-    PIPELINE_VERSION = 1
+    # 2: results carry rawPoints, the path before loop closure and smoothing.
+    PIPELINE_VERSION = 2
 
     @staticmethod
     def nearest_index(points, t_ns):
@@ -1384,7 +1385,9 @@ class PathBuilder:
 
     @staticmethod
     def build(config, points, log, step_count, closure_error_m, diagnostics, point_cloud=None,
-              pipeline_version=PIPELINE_VERSION):
+              pipeline_version=PIPELINE_VERSION, raw_points=None):
+        # rawPoints is stored only when post-processing moved something (same rule as the Kotlin builder).
+        raw = [] if raw_points is None or raw_points is points else raw_points
         return {
             "pipelineVersion": pipeline_version,
             "config": config.to_dict(),
@@ -1394,6 +1397,7 @@ class PathBuilder:
             "pointCloud": point_cloud or [],
             "stats": PathBuilder.stats(points, log.duration_s(), step_count, closure_error_m),
             "diagnostics": dict(diagnostics),
+            "rawPoints": [p.to_dict() for p in raw],
         }
 
 
@@ -1479,7 +1483,8 @@ class PdrProcessor:
             diagnostics["loopClosure"] = "disabled"
         self.closed_points = points
         points = Smoothing.moving_average(points, config.smoothingWindow)
-        return PathBuilder.build(config, points, log, ctx.steps.size, closure_error_m, diagnostics)
+        return PathBuilder.build(config, points, log, ctx.steps.size, closure_error_m, diagnostics,
+                                 raw_points=self.raw_points)
 
 
 # ----------------------------------------------------------------------------------------------

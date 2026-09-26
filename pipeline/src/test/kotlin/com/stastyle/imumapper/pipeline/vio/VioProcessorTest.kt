@@ -132,6 +132,11 @@ class VioProcessorTest {
         val perimeter = 36.0 * 2.0 * radius * sin(PI / 36.0)
         assertTrue(abs(r.stats.distanceM - perimeter) < 0.3, "distance ${r.stats.distanceM} vs $perimeter")
         assertEquals(r.toJson(), run(log).toJson(), "processing must be deterministic")
+
+        // Smoothing is on by default, so the unsmoothed resampled poses are kept alongside.
+        assertEquals(r.points.size, r.rawPoints.size)
+        assertTrue(r.rawPoints.indices.all { r.rawPoints[it].tNs == r.points[it].tNs })
+        assertTrue(run(log, config().copy(smoothingWindow = 1)).rawPoints.isEmpty())
     }
 
     @Test

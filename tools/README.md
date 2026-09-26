@@ -52,7 +52,7 @@ replay reproduces the app's result; `--set` is then the knob for algorithm exper
 
 | File | Content |
 |---|---|
-| `path.json` | The `PathResult` with the same field names as the Kotlin JSON (`pipelineVersion`, `config`, `points[{tNs, p{x,y,z}, source, headingRad, stepIndex}]`, `annotations`, `keyframes`, `pointCloud`, `stats`, `diagnostics`). |
+| `path.json` | The `PathResult` with the same field names as the Kotlin JSON (`pipelineVersion`, `config`, `points[{tNs, p{x,y,z}, source, headingRad, stepIndex}]`, `annotations`, `keyframes`, `pointCloud`, `stats`, `diagnostics`, `rawPoints`). `rawPoints` is the path before loop closure and smoothing, empty when neither moved anything. |
 | `path.csv` | One row per path point: `tNs, x, y, z, source, headingRad, stepIndex`. |
 | `path_top.png` | Top-down path (east/north) with start, end, annotations, keyframes, the PDR path before loop closure (dashed) and the `--compare` overlay. |
 | `path_side.png` | Side view: z against distance along the path. |

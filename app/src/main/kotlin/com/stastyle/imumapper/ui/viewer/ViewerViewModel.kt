@@ -12,6 +12,7 @@ import com.stastyle.imumapper.data.db.PathResultEntity
 import com.stastyle.imumapper.data.db.TripEntity
 import com.stastyle.imumapper.data.db.TripStatus
 import com.stastyle.imumapper.pipeline.core.PathResult
+import com.stastyle.imumapper.pipeline.post.RawPath
 import com.stastyle.imumapper.process.TripProcessor
 import com.stastyle.imumapper.render.Bounds
 import com.stastyle.imumapper.render.CameraPreset
@@ -37,6 +38,10 @@ data class ViewerUiState(
     val overlayRunId: Int? = null,
     val overlayResult: PathResult? = null,
     val options: SceneOptions = SceneOptions(),
+    /** Draw the selected run's path before loop closure and smoothing instead of the corrected one. */
+    val showRaw: Boolean = false,
+    /** The raw view of [result], null while [showRaw] is off or the run stores no separate raw path. */
+    val rawResult: PathResult? = null,
     /** True until the trip row and run list have both arrived. */
     val loading: Boolean = true,
     /** A processing run started by this screen is in progress. */
@@ -48,7 +53,24 @@ data class ViewerUiState(
     val photoTitle: String = "",
     val photoLoading: Boolean = false,
     val photoError: String? = null,
-)
+) {
+    /** What the canvas draws as the main path and what the stats panel describes. */
+    val shownResult: PathResult? get() = if (showRaw) rawResult ?: result else result
+
+    /**
+     * The dimmed path under the main one: the chosen overlay run, or, in raw view with no overlay
+     * run, the corrected path of the same run so the two can be compared in place.
+     */
+    val shownOverlay: PathResult? get() = overlayResult ?: if (showRaw && rawResult != null) result else null
+
+    /** True when the selected run predates stored raw paths, so the raw toggle can say why it changes nothing. */
+    val rawUnavailable: Boolean get() = result != null && result.pipelineVersion < RAW_POINTS_VERSION
+
+    companion object {
+        /** First pipeline version whose results store [PathResult.rawPoints]. */
+        const val RAW_POINTS_VERSION = 2
+    }
+}
 
 /**
  * Loads a trip and its processing runs for [ViewerScreen] and owns the camera so it survives
@@ -69,6 +91,8 @@ class ViewerViewModel(
     val camera: StateFlow<OrbitCamera> = _camera.asStateFlow()
 
     private val cache = HashMap<Int, PathResult>()
+    /** Raw views by run, built on first use: re-placing markers walks the whole path once. */
+    private val rawCache = HashMap<Int, PathResult>()
     private var runsLoaded = false
     private var tripLoaded = false
     private var processingStarted = false
@@ -138,7 +162,7 @@ class ViewerViewModel(
     fun selectRun(runId: Int) {
         if (runId == _ui.value.selectedRunId) return
         val overlay = _ui.value.overlayRunId?.takeIf { it != runId }
-        _ui.update { it.copy(selectedRunId = runId, overlayRunId = overlay, selectedMarker = null) }
+        _ui.update { it.copy(selectedRunId = runId, overlayRunId = overlay, selectedMarker = null, rawResult = null) }
         if (overlay == null) _ui.update { it.copy(overlayResult = null) }
         loadRun(runId, overlay = false)
     }
@@ -176,10 +200,23 @@ class ViewerViewModel(
             _ui.update { it.copy(overlayResult = result) }
         } else {
             if (_ui.value.selectedRunId != runId) return
-            _ui.update { it.copy(result = result, error = null) }
-            currentBounds = Bounds.of(result.points.map { p -> p.p })
+            val raw = if (_ui.value.showRaw) rawViewOf(runId, result) else null
+            _ui.update { it.copy(result = result, rawResult = raw, error = null) }
+            updateBounds()
             if (needsFit) fitIfPossible()
         }
+    }
+
+    /** The raw view of [result], or null when it stores no raw path distinct from the final one. */
+    private fun rawViewOf(runId: Int, result: PathResult): PathResult? {
+        if (!RawPath.isAvailable(result)) return null
+        return rawCache.getOrPut(runId) { RawPath.view(result) }
+    }
+
+    /** Fit and presets frame the path on screen, so they follow the raw toggle. */
+    private fun updateBounds() {
+        val shown = _ui.value.shownResult ?: return
+        currentBounds = Bounds.of(shown.points.map { p -> p.p })
     }
 
     // --- view options ---
@@ -192,6 +229,20 @@ class ViewerViewModel(
     fun toggleMarkers() = _ui.update {
         val show = !it.options.showMarkers
         it.copy(options = it.options.copy(showMarkers = show), selectedMarker = if (show) it.selectedMarker else null)
+    }
+
+    /**
+     * Switches between the corrected path and the one before loop closure and smoothing. The
+     * selected marker is dropped because its position belongs to the other path.
+     */
+    fun toggleRaw() {
+        val state = _ui.value
+        val show = !state.showRaw
+        val runId = state.selectedRunId
+        val result = state.result
+        val raw = if (show && runId != null && result != null) rawViewOf(runId, result) else null
+        _ui.update { it.copy(showRaw = show, rawResult = raw, selectedMarker = null) }
+        updateBounds()
     }
 
     fun selectMarker(marker: SceneMarker?) = _ui.update { it.copy(selectedMarker = marker) }

@@ -50,6 +50,13 @@ data class PathResult(
     /** Sparse feature points in ENU metres, decimated for display. */
     val pointCloud: List<Vec3> = emptyList(),
     val stats: PathStats,
+    /**
+     * The path as dead-reckoned or tracked, before loop closure and smoothing moved any point:
+     * same stride, heading and altitude as [points], one entry per step or pose, nothing spread or
+     * averaged. Empty when neither post-processing step changed anything (then [points] is already
+     * raw) and in results written by pipeline versions before 2.
+     */
+    val rawPoints: List<PathPoint> = emptyList(),
     /** Free-form numbers and notes from the pipeline for the debug screen. */
     val diagnostics: Map<String, String> = emptyMap(),
 ) {

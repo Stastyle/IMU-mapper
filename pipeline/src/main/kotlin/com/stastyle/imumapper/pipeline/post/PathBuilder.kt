@@ -30,6 +30,8 @@ object PathBuilder {
         diagnostics: Map<String, String>,
         pointCloud: List<Vec3> = emptyList(),
         pipelineVersion: Int = PIPELINE_VERSION,
+        /** The points before loop closure and smoothing; pass the same list as [points] (or nothing) when they are equal. */
+        rawPoints: List<PathPoint> = points,
     ): PathResult = PathResult(
         pipelineVersion = pipelineVersion,
         config = config,
@@ -39,6 +41,8 @@ object PathBuilder {
         pointCloud = pointCloud,
         stats = stats(points, log.durationS, stepCount, closureErrorM),
         diagnostics = diagnostics,
+        // Stored only when post-processing moved something, so an untouched path is not written twice.
+        rawPoints = if (rawPoints === points) emptyList() else rawPoints,
     )
 
     fun placeAnnotations(points: List<PathPoint>, annotations: List<AnnotationRecord>): List<PathAnnotation> =

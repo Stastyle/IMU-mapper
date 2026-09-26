@@ -69,6 +69,32 @@ class PdrProcessorTest {
     }
 
     @Test
+    fun rawPointsKeepThePathBeforeClosureAndSmoothing() {
+        val w = SyntheticWalk(gameYawDriftRadPerS = 0.003)
+            .still(2.0).walkTo(0.0, 5.0).walkTo(5.0, 5.0).walkTo(5.0, 0.0).walkTo(0.0, 0.0)
+            .annotate(AnnotationKind.LOOP_CLOSED, "back").still(1.0)
+        val cfg = PipelineConfig(strideLengthM = w.strideM * 1.04, useMagnetometer = false)
+        val log = w.build(cfg)
+        val r = PdrProcessor().process(log, cfg)
+        assertEquals(2, r.pipelineVersion)
+        assertEquals(r.points.size, r.rawPoints.size, "post-processing moves points, never adds or drops them")
+        for (i in r.points.indices) {
+            assertEquals(r.points[i].tNs, r.rawPoints[i].tNs)
+            assertEquals(r.points[i].stepIndex, r.rawPoints[i].stepIndex)
+            assertEquals(r.points[i].headingRad, r.rawPoints[i].headingRad)
+        }
+        // The raw end is where dead reckoning left it: the closure error the stats report.
+        val err = assertNotNull(r.stats.closureErrorM)
+        assertTrue(abs(r.rawPoints.last().p.length - err) < 0.05, "raw end ${r.rawPoints.last().p} vs closure $err")
+        assertTrue(r.points.last().p.length < 0.3, "the final path is closed")
+
+        // The raw path is exactly what the pipeline produces with both corrections switched off.
+        val plain = PdrProcessor().process(log, cfg.copy(loopClosure = false, smoothingWindow = 1))
+        assertTrue(plain.rawPoints.isEmpty(), "nothing was moved, so nothing is stored twice")
+        assertEquals(plain.points.map { it.p }, r.rawPoints.map { it.p })
+    }
+
+    @Test
     fun stairsShowInAltitude() {
         val w = walk().still(2.0).walkTo(0.0, 8.0).walkTo(0.0, 12.0, 2.5).walkTo(0.0, 20.0, 2.5).still(2.0)
         val r = run(w)

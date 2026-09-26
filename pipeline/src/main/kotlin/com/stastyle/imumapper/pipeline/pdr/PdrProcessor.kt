@@ -19,7 +19,8 @@ class PdrProcessor(private val solver: PdrSolver = PdrSolver()) : Processor {
     override fun process(log: RawLog, config: PipelineConfig): PathResult {
         val solution = solver.solve(log, config)
         val diagnostics = LinkedHashMap<String, String>(solution.context.diagnostics)
-        var points = solution.points
+        val rawPoints = solution.points
+        var points = rawPoints
         var closureErrorM: Double? = null
         val closures = log.annotations.filter { it.kind == AnnotationKind.LOOP_CLOSED }.map { it.tNs }
         if (config.loopClosure && closures.isNotEmpty()) {
@@ -42,6 +43,7 @@ class PdrProcessor(private val solver: PdrSolver = PdrSolver()) : Processor {
             stepCount = solution.context.steps.size,
             closureErrorM = closureErrorM,
             diagnostics = diagnostics,
+            rawPoints = rawPoints,
         )
     }
 }
