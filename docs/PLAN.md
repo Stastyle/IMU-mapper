@@ -232,10 +232,16 @@ app start that shows a banner when a newer version exists):
 6. Failures (offline, rate limit, no asset, checksum mismatch) are reported in plain language and
    never leave a partial file behind.
 
-**Release workflow** (`release.yml`, `workflow_dispatch` only, input: version `X.Y.Z`):
+**Release workflow** (`release.yml`):
 
+- Runs on every push to `main` that touches `app/`, `pipeline/` or the Gradle files (a merged PR):
+  the version is the newest `vX.Y.Z` tag with the minor bumped and the patch reset, so one merge is
+  one minor version. Docs, scripts, tools and workflow changes do not release. `workflow_dispatch`
+  with an explicit version `X.Y.Z` covers patch releases, major bumps and pre-releases.
+- Re-runs the pipeline and app unit tests on the exact commit before building.
 - Computes `versionCode = major*10000 + minor*100 + patch` so codes stay monotonic; minor and patch
-  must stay below 100, which both the build and the workflow enforce.
+  must stay below 100, which both the build and the workflow enforce (when the minor would reach
+  100, the automatic release fails and asks for a manual major bump).
 - Builds a signed release APK and publishes a GitHub Release with the APK attached and the changelog
   in the body; the release action creates tag `vX.Y.Z` on publish, so a failed run leaves no tag behind.
 - Android only updates an installed app if the new APK is signed with the same key, so the signing
