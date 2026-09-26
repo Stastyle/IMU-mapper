@@ -2,8 +2,12 @@ package com.stastyle.imumapper.pipeline.core
 
 import com.stastyle.imumapper.pipeline.log.RawLog
 
-/** Bump when the output of the pipeline changes so stored results can be told apart. */
-const val PIPELINE_VERSION: Int = 1
+/**
+ * Bump when the output of the pipeline changes so stored results can be told apart.
+ *
+ * 2: results carry [PathResult.rawPoints], the path before loop closure and smoothing.
+ */
+const val PIPELINE_VERSION: Int = 2
 
 /**
  * Turns a raw log into a path. Implementations must be deterministic: the same log and config

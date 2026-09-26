@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.BugReport
@@ -62,10 +63,12 @@ fun ViewerScreen(
     val ui by vm.ui.collectAsStateWithLifecycle()
     val camera by vm.camera.collectAsStateWithLifecycle()
 
-    val result = ui.result
+    // In raw view the main path is the run's path before loop closure and smoothing.
+    val result = ui.shownResult
+    val overlay = ui.shownOverlay
     // Building the scene walks every point once; only toggles and run changes invalidate it.
-    val scene: SceneModel? = remember(result, ui.overlayResult, ui.options) {
-        result?.let { PathScene.build(it, ui.options, ui.overlayResult) }
+    val scene: SceneModel? = remember(result, overlay, ui.options) {
+        result?.let { PathScene.build(it, ui.options, overlay) }
     }
     val selectedMarker = ui.selectedMarker
     val selectedIndex = if (scene == null || selectedMarker == null) -1 else scene.markers.indexOf(selectedMarker)
@@ -95,7 +98,7 @@ fun ViewerScreen(
                         val run = ui.runs.firstOrNull { it.runId == ui.selectedRunId }
                         if (run != null) {
                             Text(
-                                runLabel(run),
+                                runLabel(run) + if (ui.showRaw && ui.rawResult != null) " · raw" else "",
                                 style = MaterialTheme.typography.labelSmall,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
@@ -276,6 +279,19 @@ private fun ViewMenu(ui: ViewerUiState, vm: ViewerViewModel) {
         ToggleItem("Floor grid", ui.options.showGrid, vm::toggleGrid)
         ToggleItem("Point cloud", ui.options.showPointCloud, vm::togglePointCloud)
         ToggleItem("Markers", ui.options.showMarkers, vm::toggleMarkers)
+        HorizontalDivider()
+        ToggleItem("Raw path", ui.showRaw, vm::toggleRaw)
+        val hint = when {
+            ui.rawUnavailable -> "Re-process this run to store its raw path"
+            ui.showRaw && ui.rawResult == null && ui.result != null -> "Nothing was corrected in this run"
+            else -> "Before loop closure and smoothing; the corrected path is dimmed"
+        }
+        Text(
+            hint,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp).widthIn(max = 260.dp),
+        )
     }
 }
 

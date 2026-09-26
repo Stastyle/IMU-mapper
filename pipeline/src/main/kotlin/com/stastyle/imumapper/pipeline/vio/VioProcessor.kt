@@ -233,6 +233,7 @@ class VioProcessor(
             closureErrorM = closureErrorM,
             diagnostics = diag,
             pointCloud = pointCloud,
+            rawPoints = rawPoints,
         ).copy(keyframes = keyframes)
     }
 
