@@ -39,6 +39,18 @@ data class PipelineConfig(
     /** Gyro bias to subtract, rad/s, sensor frame (from the still-bias calibration). */
     val gyroBias: Vec3 = Vec3.ZERO,
 
+    // --- carry changes ---
+    /**
+     * Detect moves of the phone to another carry position (hand to pocket, pocket to vest) from the
+     * tilt, hold the walking heading while the phone is moving, and re-estimate the heading offset
+     * from the steps after the move, exactly as after a REORIENT annotation.
+     */
+    val autoReorient: Boolean = true,
+    /** Change of the gravity direction in the device frame that counts as a carry change, radians. */
+    val carryChangeTiltRad: Double = 0.5236,
+    /** Seconds the tilt must stay steady after a move before the new carry position counts as settled. */
+    val carryChangeSettleS: Double = 1.5,
+
     // --- steps ---
     /** Minimum time between two steps in seconds. */
     val stepMinIntervalS: Double = 0.30,

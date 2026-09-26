@@ -204,12 +204,46 @@ class PdrSolver(
         headings: DoubleArray,
         diag: MutableMap<String, String>,
     ) {
+        val changes = if (config.autoReorient) {
+            CarryChangeDetector.detect(
+                track, log.firstTimestampNs, log.lastTimestampNs, config.carryChangeTiltRad, config.carryChangeSettleS,
+            )
+        } else {
+            emptyList()
+        }
         val boundaries = ArrayList<Long>()
         boundaries.add(log.firstTimestampNs)
+        var superseded = 0
+        val marginNs = (config.carryChangeSettleS * 1e9).toLong()
         for (a in log.annotations) {
-            if (a.kind == AnnotationKind.REORIENT && a.tNs > boundaries[boundaries.size - 1]) boundaries.add(a.tNs)
+            if (a.kind != AnnotationKind.REORIENT) continue
+            // A tap during the move itself (the natural moment to tap, and the tap tends to come a
+            // little before the tilt has visibly left) is served by the detected change: its own
+            // boundary would start a segment on steps taken while the phone moved.
+            if (changes.any { a.tNs >= it.startNs - marginNs && a.tNs < it.endNs }) {
+                superseded++
+                continue
+            }
+            boundaries.add(a.tNs)
         }
+        // A change that settled back where it started keeps the offset: it is bridged, not a new segment.
+        for (c in changes) if (!c.returned) boundaries.add(c.endNs)
+        boundaries.sort()
+        var w = 1
+        for (i in 1 until boundaries.size) {
+            if (boundaries[i] > boundaries[w - 1]) boundaries[w++] = boundaries[i]
+        }
+        while (boundaries.size > w) boundaries.removeAt(boundaries.size - 1)
         diag["reorientCount"] = (boundaries.size - 1).toString()
+        diag["carryChanges"] = changes.size.toString()
+        if (changes.isNotEmpty()) {
+            val t0 = log.firstTimestampNs
+            diag["carryChangeTimesS"] = changes.joinToString(";") {
+                Diag.num((it.startNs - t0) / 1e9, 1) + "-" + Diag.num((it.endNs - t0) / 1e9, 1) +
+                    (if (it.returned) " returned" else "")
+            }
+        }
+        if (superseded > 0) diag["reorientSuperseded"] = superseded.toString()
 
         var offset = config.headingOffsetRad
         val cursor = track.cursor()
@@ -251,11 +285,26 @@ class PdrSolver(
             for (i in first until last) {
                 headings[i] = Angles.wrap(DeviceHeading.headingRad(cursor.at(steps.tNs[i]), axis) + offset)
             }
+            // Steps taken while the phone was being moved get the heading from just before the move:
+            // the device heading means nothing mid-move, and the walker was told to keep going straight.
+            // Done before the next segment reads these headings as its reference for the front/back choice.
+            for (c in changes) {
+                if (c.endNs <= fromNs || c.endNs > toNs) continue
+                holdHeadings(steps, headings, c.startNs, c.endNs)
+            }
         }
         diag["headingAxisMode"] = config.headingAxis.name
         diag["headingAxis"] = segments.joinToString(";") { it.axis.name }
         diag["headingOffsetDeg"] = Diag.num(Math.toDegrees(config.headingOffsetRad), 1)
         if (estimated.isNotEmpty()) diag["reorientOffsetsDeg"] = estimated.toString()
+    }
+
+    /** Gives the steps inside [fromNs, toNs) the heading of the last step before it; a move before any step is left alone. */
+    private fun holdHeadings(steps: DetectedSteps, headings: DoubleArray, fromNs: Long, toNs: Long) {
+        val first = steps.lowerBound(fromNs)
+        val last = steps.lowerBound(toNs)
+        if (first == 0 || first >= last) return
+        for (i in first until last) headings[i] = headings[first - 1]
     }
 
     private fun excludePaused(steps: DetectedSteps, pauses: PauseIntervals): DetectedSteps {

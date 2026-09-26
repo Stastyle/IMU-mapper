@@ -21,6 +21,9 @@ enum class ConfigField(val label: String, val type: FieldType, val hint: String)
     GYRO_BIAS_X("Gyro bias x (rad/s)", FieldType.DOUBLE, "-1 to 1"),
     GYRO_BIAS_Y("Gyro bias y (rad/s)", FieldType.DOUBLE, "-1 to 1"),
     GYRO_BIAS_Z("Gyro bias z (rad/s)", FieldType.DOUBLE, "-1 to 1"),
+    AUTO_REORIENT("Detect carry changes (auto re-orient)", FieldType.BOOL, ""),
+    CARRY_CHANGE_TILT_DEG("Carry change tilt (deg)", FieldType.DOUBLE, "5 to 90"),
+    CARRY_CHANGE_SETTLE_S("Carry change settle time (s)", FieldType.DOUBLE, "0.2 to 10"),
     STEP_MIN_INTERVAL_S("Min step interval (s)", FieldType.DOUBLE, "0.05 to 2"),
     STEP_MIN_SWING("Min step swing (m/s²)", FieldType.DOUBLE, "0 to 20"),
     STEP_BAND_LOW_HZ("Step band low (Hz)", FieldType.DOUBLE, "0.05 to 10"),
@@ -61,6 +64,9 @@ data class ConfigDraft(
                 ConfigField.GYRO_BIAS_X to num(c.gyroBias.x),
                 ConfigField.GYRO_BIAS_Y to num(c.gyroBias.y),
                 ConfigField.GYRO_BIAS_Z to num(c.gyroBias.z),
+                ConfigField.AUTO_REORIENT to c.autoReorient.toString(),
+                ConfigField.CARRY_CHANGE_TILT_DEG to num(Math.toDegrees(c.carryChangeTiltRad)),
+                ConfigField.CARRY_CHANGE_SETTLE_S to num(c.carryChangeSettleS),
                 ConfigField.STEP_MIN_INTERVAL_S to num(c.stepMinIntervalS),
                 ConfigField.STEP_MIN_SWING to num(c.stepMinSwing),
                 ConfigField.STEP_BAND_LOW_HZ to num(c.stepBandLowHz),
@@ -124,6 +130,8 @@ object ConfigFields {
         val bx = double(ConfigField.GYRO_BIAS_X, -1.0, 1.0)
         val by = double(ConfigField.GYRO_BIAS_Y, -1.0, 1.0)
         val bz = double(ConfigField.GYRO_BIAS_Z, -1.0, 1.0)
+        val carryTiltDeg = double(ConfigField.CARRY_CHANGE_TILT_DEG, 5.0, 90.0)
+        val carrySettle = double(ConfigField.CARRY_CHANGE_SETTLE_S, 0.2, 10.0)
         val minInterval = double(ConfigField.STEP_MIN_INTERVAL_S, 0.05, 2.0)
         val minSwing = double(ConfigField.STEP_MIN_SWING, 0.0, 20.0)
         val bandLow = double(ConfigField.STEP_BAND_LOW_HZ, 0.05, 10.0)
@@ -144,6 +152,9 @@ object ConfigFields {
             useMagnetometer = draft.bool(ConfigField.USE_MAGNETOMETER),
             magGateTolerance = magTol!!,
             gyroBias = Vec3(bx!!, by!!, bz!!),
+            autoReorient = draft.bool(ConfigField.AUTO_REORIENT),
+            carryChangeTiltRad = Math.toRadians(carryTiltDeg!!),
+            carryChangeSettleS = carrySettle!!,
             stepMinIntervalS = minInterval!!,
             stepMinSwing = minSwing!!,
             stepBandLowHz = bandLow!!,
@@ -167,6 +178,8 @@ object ConfigFields {
             a.useMagnetometer != b.useMagnetometer ||
             d(a.magGateTolerance, b.magGateTolerance) || d(a.gyroBias.x, b.gyroBias.x) ||
             d(a.gyroBias.y, b.gyroBias.y) || d(a.gyroBias.z, b.gyroBias.z) ||
+            a.autoReorient != b.autoReorient || d(a.carryChangeTiltRad, b.carryChangeTiltRad) ||
+            d(a.carryChangeSettleS, b.carryChangeSettleS) ||
             d(a.stepMinIntervalS, b.stepMinIntervalS) || d(a.stepMinSwing, b.stepMinSwing) ||
             d(a.stepBandLowHz, b.stepBandLowHz) || d(a.stepBandHighHz, b.stepBandHighHz) ||
             a.preferHardwareSteps != b.preferHardwareSteps || d(a.baroSmoothingS, b.baroSmoothingS) ||

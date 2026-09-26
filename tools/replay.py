@@ -290,6 +290,9 @@ CONFIG_DEFAULTS = [
     ("useMagnetometer", True),
     ("magGateTolerance", 0.15),
     ("gyroBias", {"x": 0.0, "y": 0.0, "z": 0.0}),
+    ("autoReorient", True),
+    ("carryChangeTiltRad", 0.5236),
+    ("carryChangeSettleS", 1.5),
     ("stepMinIntervalS", 0.30),
     ("stepMinSwing", 1.0),
     ("stepBandLowHz", 0.5),
@@ -1024,6 +1027,82 @@ class DeviceHeading:
         return CAMERA if float(np.sum(up)) / (end - start) > DeviceHeading.UPRIGHT_COS else FORWARD
 
 
+class CarryChange:
+    def __init__(self, start_ns, end_ns, returned):
+        self.start_ns = int(start_ns)
+        self.end_ns = int(end_ns)
+        self.returned = bool(returned)
+
+
+class CarryChangeDetector:
+    """Carry changes from the low-passed gravity direction in the device frame (pdr/CarryChangeDetector.kt)."""
+    SAMPLE_PERIOD_NS = 100_000_000
+    SETTLE_FRACTION = 1.0 / 3.0
+
+    @staticmethod
+    def detect(track, from_ns, to_ns, min_tilt_rad, settle_s, smoothing_s=1.0):
+        period = CarryChangeDetector.SAMPLE_PERIOD_NS
+        if track.is_empty or to_ns <= from_ns or min_tilt_rad <= 0.0:
+            return []
+        n = int((to_ns - from_ns) // period) + 1
+        window = max(2, int(round(settle_s * 1e9 / period)))
+        if n < 2 * window:
+            return []
+        times = from_ns + np.arange(n, dtype=np.int64) * period
+        raw = quat_rotate(quat_conjugate(track.at(times)), UNIT_Z)
+        # First-order low-pass, sample by sample like the Kotlin loop, then unit length.
+        alpha = period / (smoothing_s * 1e9 + period)
+        g = np.zeros_like(raw)
+        g[0] = raw[0]
+        for k in range(1, n):
+            g[k] = g[k - 1] + alpha * (raw[k] - g[k - 1])
+        g /= np.linalg.norm(g, axis=1)[:, None]
+
+        def angle(a, b):
+            return math.acos(max(-1.0, min(1.0, float(np.dot(a, b)))))
+
+        def mean(start, end):
+            m = g[start:end].sum(axis=0)
+            length = float(np.linalg.norm(m))
+            return m / length if length > 0.0 else m
+
+        def max_deviation(start, end, m):
+            dots = np.clip(g[start:end] @ m, -1.0, 1.0)
+            return float(np.max(np.arccos(dots)))
+
+        settle_tol = min_tilt_rad * CarryChangeDetector.SETTLE_FRACTION
+        lag = int(round(smoothing_s * 1e9 / period))
+        out = []
+        ref = mean(0, window)
+        k = window
+        while k < n:
+            if angle(g[k], ref) <= min_tilt_rad:
+                k += 1
+                continue
+            start = k
+            while start > 0 and angle(g[start - 1], ref) > settle_tol:
+                start -= 1
+            start = max(0, start - lag)
+            end = -1
+            m = k
+            new_ref = None
+            while m + window <= n:
+                candidate = mean(m, m + window)
+                if max_deviation(m, m + window, candidate) <= settle_tol:
+                    end = m
+                    break
+                m += 1
+            if end < 0:
+                out.append(CarryChange(from_ns + start * period, from_ns + n * period, False))
+                break
+            # The last third of the settle window, where the filter has caught up furthest.
+            new_ref = mean(end + window - window // 3, end + window)
+            out.append(CarryChange(from_ns + start * period, from_ns + end * period, angle(new_ref, ref) <= settle_tol))
+            ref = new_ref
+            k = end + window
+        return out
+
+
 class HeadingOffsetEstimator:
     MIN_SAMPLES = 50
     MIN_AXIS_RATIO = 1.3
@@ -1281,11 +1360,35 @@ class PdrSolver:
         return [PathPoint(start_ns, np.zeros(3), "PDR", start_heading, -1)] + steps, ctx
 
     def build_headings(self, log, config, track, world, steps, segments, headings, diag):
+        changes = []
+        if config.autoReorient:
+            changes = CarryChangeDetector.detect(track, log.first_timestamp_ns(), log.last_timestamp_ns(),
+                                                 config.carryChangeTiltRad, config.carryChangeSettleS)
         boundaries = [log.first_timestamp_ns()]
+        superseded = 0
+        margin_ns = int(config.carryChangeSettleS * 1e9)
         for a in log.annotations:
-            if a["kind"] == "REORIENT" and a["tNs"] > boundaries[-1]:
-                boundaries.append(a["tNs"])
+            if a["kind"] != "REORIENT":
+                continue
+            # A tap during the move itself is served by the detected change.
+            if any(c.start_ns - margin_ns <= a["tNs"] < c.end_ns for c in changes):
+                superseded += 1
+                continue
+            boundaries.append(a["tNs"])
+        # A change that settled back where it started keeps the offset: bridged, not a new segment.
+        for c in changes:
+            if not c.returned:
+                boundaries.append(c.end_ns)
+        boundaries = sorted(set(boundaries))
         diag["reorientCount"] = str(len(boundaries) - 1)
+        diag["carryChanges"] = str(len(changes))
+        if changes:
+            t0 = log.first_timestamp_ns()
+            diag["carryChangeTimesS"] = ";".join(
+                Diag.num((c.start_ns - t0) / 1e9, 1) + "-" + Diag.num((c.end_ns - t0) / 1e9, 1) +
+                (" returned" if c.returned else "") for c in changes)
+        if superseded > 0:
+            diag["reorientSuperseded"] = str(superseded)
 
         offset = config.headingOffsetRad
         estimated = []
@@ -1294,7 +1397,13 @@ class PdrSolver:
             to_ns = boundaries[b + 1] if b + 1 < len(boundaries) else LONG_MAX
             first = steps.lower_bound(from_ns)
             last = steps.lower_bound(to_ns)
-            if first < last:
+            # The Python config carries no headingAxis (the app's calibrated axis); AUTO is its default.
+            heading_axis = getattr(config, "headingAxis", "AUTO")
+            if b == 0 and heading_axis == "FORWARD":
+                axis = FORWARD
+            elif b == 0 and heading_axis == "CAMERA":
+                axis = CAMERA
+            elif first < last:
                 axis = DeviceHeading.choose_axis(track, steps.t_ns, first, last)
             else:
                 axis = DeviceHeading.choose_axis(track, np.array([from_ns], dtype=np.int64), 0, 1)
@@ -1315,10 +1424,24 @@ class PdrSolver:
             if first < last:
                 headings[first:last] = Angles.wrap(
                     DeviceHeading.heading_rad(track.at(steps.t_ns[first:last]), axis) + offset)
+            # Steps taken while the phone was moving get the heading from just before the move; done
+            # before the next segment reads these headings as its front/back reference.
+            for c in changes:
+                if c.end_ns <= from_ns or c.end_ns > to_ns:
+                    continue
+                self.hold_headings(steps, headings, c.start_ns, c.end_ns)
         diag["headingAxis"] = ";".join(s.axis for s in segments)
         diag["headingOffsetDeg"] = Diag.num(math.degrees(config.headingOffsetRad), 1)
         if estimated:
             diag["reorientOffsetsDeg"] = ";".join(estimated)
+
+    @staticmethod
+    def hold_headings(steps, headings, from_ns, to_ns):
+        first = steps.lower_bound(from_ns)
+        last = steps.lower_bound(to_ns)
+        if first == 0 or first >= last:
+            return
+        headings[first:last] = headings[first - 1]
 
 
 # ----------------------------------------------------------------------------------------------
@@ -1327,7 +1450,8 @@ class PdrSolver:
 
 class PathBuilder:
     # 2: results carry rawPoints, the path before loop closure and smoothing.
-    PIPELINE_VERSION = 2
+    # 3: carry changes are detected from the tilt and re-estimate the heading offset (autoReorient).
+    PIPELINE_VERSION = 3
 
     @staticmethod
     def nearest_index(points, t_ns):

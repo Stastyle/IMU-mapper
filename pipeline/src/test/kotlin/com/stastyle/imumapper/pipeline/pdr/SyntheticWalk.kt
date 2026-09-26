@@ -71,10 +71,12 @@ class SyntheticWalk(
     private class Walk(val to: Vec3) : Leg
     private class Annotate(val kind: AnnotationKind, val note: String) : Leg
     private class Offset(val rad: Double) : Leg
+    private class Tilt(val rad: Double) : Leg
     private class Event(val kind: EventKind) : Leg
 
     private val legs = ArrayList<Leg>()
     private var initialOffsetRad = 0.0
+    private var initialTiltRad = tiltRad
 
     fun still(seconds: Double): SyntheticWalk = apply { legs.add(Still(seconds)) }
     fun walkTo(x: Double, y: Double, z: Double = 0.0): SyntheticWalk = apply { legs.add(Walk(Vec3(x, y, z))) }
@@ -85,6 +87,15 @@ class SyntheticWalk(
     /** Changes how the phone is carried from now on: walking heading minus device heading. */
     fun deviceOffset(rad: Double): SyntheticWalk = apply {
         if (legs.isEmpty()) initialOffsetRad = rad else legs.add(Offset(rad))
+    }
+
+    /**
+     * Changes the tilt of the phone from now on (rotation about the device x axis; 0 is flat, about
+     * 1.3 is the near-vertical of a trouser pocket), blended over a second like [deviceOffset]. With
+     * an offset change at the same moment this is a move from one carry position to another.
+     */
+    fun deviceTilt(rad: Double): SyntheticWalk = apply {
+        if (legs.isEmpty()) initialTiltRad = rad else legs.add(Tilt(rad))
     }
 
     private class Phase(
@@ -100,6 +111,7 @@ class SyntheticWalk(
         val phases: List<Phase>,
         val annotations: List<Pair<Double, AnnotationRecord>>,
         val offsetChanges: List<Pair<Double, Double>>,
+        val tiltChanges: List<Pair<Double, Double>>,
         val events: List<Pair<Double, EventKind>>,
         val totalS: Double,
     )
@@ -108,6 +120,7 @@ class SyntheticWalk(
         val phases = ArrayList<Phase>()
         val annotations = ArrayList<Pair<Double, AnnotationRecord>>()
         val offsets = ArrayList<Pair<Double, Double>>()
+        val tilts = ArrayList<Pair<Double, Double>>()
         val events = ArrayList<Pair<Double, EventKind>>()
         var t = 0.0
         var pos = Vec3.ZERO
@@ -129,10 +142,11 @@ class SyntheticWalk(
                 }
                 is Annotate -> annotations.add(t to AnnotationRecord(0L, leg.kind, leg.note))
                 is Offset -> offsets.add(t to leg.rad)
+                is Tilt -> tilts.add(t to leg.rad)
                 is Event -> events.add(t to leg.kind)
             }
         }
-        return Timeline(phases, annotations, offsets, events, t)
+        return Timeline(phases, annotations, offsets, tilts, events, t)
     }
 
     private fun phaseAt(phases: List<Phase>, s: Double): Phase {
@@ -173,10 +187,22 @@ class SyntheticWalk(
         return off
     }
 
-    /** Orientation of the device (sensor -> ENU) given the device heading and gait phase. */
-    private fun deviceQuat(deviceHeadingRad: Double, gaitPhase: Double): Quat {
+    private fun tiltAt(changes: List<Pair<Double, Double>>, s: Double, blendS: Double = 1.0): Double {
+        var tilt = initialTiltRad
+        var prev = initialTiltRad
+        for ((at, rad) in changes) {
+            if (s < at) break
+            prev = tilt
+            tilt = rad
+            if (s - at < blendS) return prev + (rad - prev) * (s - at) / blendS
+        }
+        return tilt
+    }
+
+    /** Orientation of the device (sensor -> ENU) given the device heading, tilt and gait phase. */
+    private fun deviceQuat(deviceHeadingRad: Double, tilt: Double, gaitPhase: Double): Quat {
         val sway = Quat.fromAxisAngle(Vec3.UNIT_Y, 0.04 * sin(gaitPhase / 2.0))
-        return (Quat.yaw(-deviceHeadingRad) * Quat.fromAxisAngle(Vec3.UNIT_X, tiltRad) * sway).normalized()
+        return (Quat.yaw(-deviceHeadingRad) * Quat.fromAxisAngle(Vec3.UNIT_X, tilt) * sway).normalized()
     }
 
     fun buildRecords(): List<LogRecord> {
@@ -202,7 +228,7 @@ class SyntheticWalk(
             val deviceHeading = Angles.wrap(walkHeading - offset)
             val walking = ph.walking
             if (walking) gait += 2.0 * PI * cadenceHz * dt
-            val q = deviceQuat(deviceHeading, gait)
+            val q = deviceQuat(deviceHeading, tiltAt(tl.tiltChanges, s), gait)
             val t = ns(s)
 
             // World-frame acceleration: gravity plus gait oscillation while walking.
