@@ -102,20 +102,43 @@ object PathRenderer {
             for (i in 0 until projected.labelCount) {
                 if (!projected.labelVisible[i]) continue
                 val label = scene.labels[i]
-                val x = projected.labelScreen[i * 2]
-                val y = projected.labelScreen[i * 2 + 1]
-                if (x < -200f || y < -50f || x > size.width || y > size.height) continue
+                val origin = labelOrigin(
+                    projected.labelScreen[i * 2], projected.labelScreen[i * 2 + 1], size.width, size.height,
+                ) ?: continue
                 drawText(
                     textMeasurer = textMeasurer,
                     text = label.text,
-                    topLeft = Offset(x + 4f, y - 8f),
+                    topLeft = origin,
                     style = labelStyle.copy(color = Color(label.color)),
                 )
             }
         }
     }
 
+    /**
+     * Where the text of a label anchored at ([x], [y]) is drawn, or null when it is not drawn: well
+     * off the canvas, or past its right or bottom edge. The last case is not only a waste: drawText
+     * lays the text out in the space between its origin and the canvas edge, and an origin past the
+     * edge makes that space negative, which Compose rejects with an exception and the app dies. A
+     * label ends up there whenever an orbit or pan carries an axis letter or the grid text within a
+     * few pixels of the right edge, which a drag does within seconds. The test is written as one
+     * positive condition so a NaN coordinate fails it as well.
+     */
+    fun labelOrigin(x: Float, y: Float, canvasWidthPx: Float, canvasHeightPx: Float): Offset? {
+        val tx = x + LABEL_DX_PX
+        val ty = y + LABEL_DY_PX
+        val drawn = tx > -LABEL_CULL_LEFT_PX && ty > -LABEL_CULL_TOP_PX && tx < canvasWidthPx && ty < canvasHeightPx
+        return if (drawn) Offset(tx, ty) else null
+    }
+
     /** Marker index under the touch within [HIT_RADIUS_DP] (scaled by [density]), or -1. */
     fun hitTest(projected: ProjectedScene, xPx: Float, yPx: Float, density: Float): Int =
         projected.hitTestMarker(xPx, yPx, HIT_RADIUS_DP * density)
+
+    /** Text origin relative to the label's world anchor: a little right of it and above it. */
+    private const val LABEL_DX_PX = 4f
+    private const val LABEL_DY_PX = -8f
+    /** How far past the left and top edges a label may start and still show its tail. */
+    private const val LABEL_CULL_LEFT_PX = 200f
+    private const val LABEL_CULL_TOP_PX = 50f
 }

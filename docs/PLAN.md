@@ -124,8 +124,8 @@ Key decisions
 - **Sensor rates.** IMU at `SENSOR_DELAY_FASTEST` (200–500 Hz on this device), no batching,
   timestamps from the sensor event (monotonic ns). ARCore poses at frame rate.
 - **Memory of a long trip.** Processing reads the whole raw log: at these rates a half-hour walk
-  is several million samples, which as boxed objects exceeded the default per-app heap and took
-  the app down when the viewer re-ran the processing. `RawLog` stores the streams as primitive
+  is several million samples, which as boxed objects exceeded the default per-app heap once the
+  viewer re-ran the processing on a long trip. `RawLog` stores the streams as primitive
   columns, processing skips the uncalibrated streams it never reads, the app declares
   `largeHeap`, and a trip whose processing failed is not re-run automatically on open.
 - **CI compiles, but publishes nothing.** GitHub Actions runs the pipeline tests and compiles the
