@@ -16,6 +16,8 @@ object Routes {
 
     const val CALIBRATION = "calibration"
 
+    const val TUNING = "tuning"
+
     const val DEBUG = "debug?$ARG_TRIP_ID={$ARG_TRIP_ID}"
     fun debug(tripId: Long? = null) = if (tripId == null) "debug" else "debug?$ARG_TRIP_ID=$tripId"
 

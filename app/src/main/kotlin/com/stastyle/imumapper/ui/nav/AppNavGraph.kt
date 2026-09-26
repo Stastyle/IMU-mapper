@@ -13,6 +13,7 @@ import com.stastyle.imumapper.ui.record.RecordScreen
 import com.stastyle.imumapper.ui.settings.SettingsScreen
 import com.stastyle.imumapper.ui.settings.UpdateBanner
 import com.stastyle.imumapper.ui.triplist.TripListScreen
+import com.stastyle.imumapper.ui.tuning.TuningScreen
 import com.stastyle.imumapper.ui.viewer.ViewerScreen
 
 @Composable
@@ -57,7 +58,10 @@ fun AppNavGraph() {
             )
         }
         composable(Routes.CALIBRATION) {
-            CalibrationScreen(onBack = { nav.popBackStack() })
+            CalibrationScreen(onBack = { nav.popBackStack() }, onOpenTuning = { nav.navigate(Routes.TUNING) })
+        }
+        composable(Routes.TUNING) {
+            TuningScreen(onBack = { nav.popBackStack() })
         }
         composable(
             Routes.DEBUG,
