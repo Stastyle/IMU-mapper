@@ -23,6 +23,9 @@ class ConfigFieldsTest {
             useMagnetometer = false,
             magGateTolerance = 0.2,
             gyroBias = Vec3(0.001, -0.002, 0.0035),
+            autoReorient = false,
+            carryChangeTiltRad = Math.toRadians(40.0),
+            carryChangeSettleS = 2.5,
             stepMinIntervalS = 0.25,
             stepMinSwing = 1.5,
             stepBandLowHz = 0.4,
@@ -40,6 +43,7 @@ class ConfigFieldsTest {
         val back = assertNotNull(parsed.config)
         assertFalse(ConfigFields.differs(original, back))
         assertTrue(ConfigFields.differs(original, original.copy(smoothingWindow = 3)))
+        assertTrue(ConfigFields.differs(original, original.copy(autoReorient = true)))
     }
 
     @Test

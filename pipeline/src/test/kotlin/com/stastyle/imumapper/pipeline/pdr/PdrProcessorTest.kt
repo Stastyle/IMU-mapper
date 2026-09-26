@@ -62,6 +62,7 @@ class PdrProcessorTest {
         assertWithin(20.0, r.stats.distanceM, 0.15, "distance")
         assertEquals(1, r.annotations.size)
         assertTrue(r.annotations[0].p.length < 0.3)
+        assertEquals("0", r.diagnostics["carryChanges"], "four corners are turns, not carry changes")
 
         val open = PdrProcessor().process(w.build(cfg), cfg.copy(loopClosure = false))
         assertNull(open.stats.closureErrorM)
@@ -76,7 +77,7 @@ class PdrProcessorTest {
         val cfg = PipelineConfig(strideLengthM = w.strideM * 1.04, useMagnetometer = false)
         val log = w.build(cfg)
         val r = PdrProcessor().process(log, cfg)
-        assertEquals(2, r.pipelineVersion)
+        assertEquals(3, r.pipelineVersion)
         assertEquals(r.points.size, r.rawPoints.size, "post-processing moves points, never adds or drops them")
         for (i in r.points.indices) {
             assertEquals(r.points[i].tNs, r.rawPoints[i].tNs)
@@ -134,6 +135,46 @@ class PdrProcessorTest {
         val c = walk().still(2.0).walkTo(0.0, 10.0).deviceOffset(PI / 2).walkTo(0.0, 20.0).still(1.0)
         val control = run(c)
         assertTrue(abs(control.points.last().p.x) > 6.0, "control should veer off: ${control.points.last().p}")
+    }
+
+    @Test
+    fun carryChangeIsDetectedAndReoriented() {
+        // Hand to pocket at 8 m: the phone goes near vertical and turns 90 degrees relative to the walk,
+        // and nobody taps anything.
+        val w = walk().still(2.0).walkTo(0.0, 8.0).deviceTilt(1.3).deviceOffset(PI / 2).walkTo(0.0, 20.0).still(1.0)
+        val r = run(w)
+        val end = r.points.last().p
+        assertTrue(end.y > 16.0 && abs(end.x) < 3.0, "path should stay north after the move, ended at $end")
+        assertEquals("1", r.diagnostics["carryChanges"])
+        assertEquals("1", r.diagnostics["reorientCount"])
+        assertNotNull(r.diagnostics["carryChangeTimesS"])
+        assertNotNull(r.diagnostics["reorientOffsetsDeg"])
+        assertWithin(20.0, r.stats.distanceM, 0.10, "distance")
+
+        // Control: with detection off the offset from the hand stays on and the path veers.
+        val off = run(w, config(w) { it.copy(autoReorient = false) })
+        assertTrue(abs(off.points.last().p.x) > 6.0, "without detection the path veers: ${off.points.last().p}")
+        assertEquals("0", off.diagnostics["carryChanges"])
+
+        // A REORIENT tapped as the move begins is served by the detected change, not by its own segment.
+        val tapped = walk().still(2.0).walkTo(0.0, 8.0).annotate(AnnotationKind.REORIENT)
+            .deviceTilt(1.3).deviceOffset(PI / 2).walkTo(0.0, 20.0).still(1.0)
+        val t = run(tapped)
+        assertEquals("1", t.diagnostics["reorientSuperseded"])
+        assertEquals("1", t.diagnostics["reorientCount"])
+        val tEnd = t.points.last().p
+        assertTrue(tEnd.y > 16.0 && abs(tEnd.x) < 3.0, "tapped move ended at $tEnd")
+    }
+
+    @Test
+    fun carryChangeAcrossACornerKeepsBothLegs() {
+        // Pocket the phone on the first leg, then turn east: the re-estimated offset must survive the turn.
+        val w = walk().still(2.0).walkTo(0.0, 6.0).deviceTilt(1.3).deviceOffset(PI / 2)
+            .walkTo(0.0, 14.0).walkTo(10.0, 14.0).still(1.0)
+        val r = run(w)
+        val end = r.points.last().p
+        assertTrue(end.distanceTo(Vec3(10.0, 14.0, 0.0)) < 3.0, "ended at $end")
+        assertEquals("1", r.diagnostics["carryChanges"])
     }
 
     @Test

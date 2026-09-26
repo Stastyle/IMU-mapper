@@ -75,6 +75,7 @@ The classes and functions keep the Kotlin names so the two can be read side by s
 | `pdr/StepDetector`, `DetectedSteps` | `StepDetector.detect/from_hardware/band_pass/filter`, `DetectedSteps` |
 | `pdr/StrideModel` | `StrideModel.stride_m` |
 | `pdr/HeadingEstimator` (`DeviceHeading`, `HeadingOffsetEstimator`) | `DeviceHeading.choose_axis/heading_rad`, `HeadingOffsetEstimator.estimate` |
+| `pdr/CarryChangeDetector`, `CarryChange` | `CarryChangeDetector.detect`, `CarryChange` (same 10 Hz sampling, low-pass and settle rule) |
 | `pdr/AltitudeTrack` | `AltitudeTrack.from_baro/at` |
 | `pdr/PdrSolver`, `PdrContext`, `HeadingSegment` | `PdrSolver.prepare/solve_segment/solve/build_headings`, `PdrContext`, `HeadingSegment` |
 | `pdr/PdrProcessor` | `PdrProcessor.process` (keeps `context`, `raw_points`, `closed_points` for plots) |
