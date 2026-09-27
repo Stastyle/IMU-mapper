@@ -6,13 +6,40 @@ import com.stastyle.imumapper.pipeline.core.PathPoint
 import com.stastyle.imumapper.pipeline.core.PauseIntervals
 import com.stastyle.imumapper.pipeline.core.PipelineConfig
 import com.stastyle.imumapper.pipeline.core.PositionSource
+import com.stastyle.imumapper.pipeline.core.Quat
 import com.stastyle.imumapper.pipeline.core.Vec3
 import com.stastyle.imumapper.pipeline.log.RawLog
 import kotlin.math.cos
 import kotlin.math.sin
 
-/** One stretch of the trip with a fixed heading axis and offset: from the start or a REORIENT. */
-class HeadingSegment(val fromNs: Long, val axis: HeadingAxis, val offsetRad: Double, val estimated: Boolean)
+/**
+ * One stretch of the trip with a fixed heading axis and offset: from the start, or from the end of a
+ * move of the phone (a detected carry change or a REORIENT). While the phone was being moved, from
+ * [moveFromNs] to [fromNs], the walking heading is held at [moveHeadingRad], the one from just before
+ * the move, and [offsetRad] continues it after the move. The first segment has no move:
+ * [moveFromNs] equals [fromNs].
+ */
+class HeadingSegment(
+    val fromNs: Long,
+    val axis: HeadingAxis,
+    val offsetRad: Double,
+    val moveFromNs: Long = fromNs,
+    val moveHeadingRad: Double = 0.0,
+) {
+    companion object {
+        /**
+         * Walking heading at [tNs] with the phone at orientation [q]: the held heading while the
+         * phone was being moved, otherwise the device heading plus the offset of the segment.
+         */
+        fun walkingHeading(segments: List<HeadingSegment>, tNs: Long, q: Quat): Double {
+            var k = 0
+            while (k + 1 < segments.size && segments[k + 1].fromNs <= tNs) k++
+            if (k + 1 < segments.size && tNs >= segments[k + 1].moveFromNs) return segments[k + 1].moveHeadingRad
+            val seg = segments[k]
+            return Angles.wrap(DeviceHeading.headingRad(q, seg.axis) + seg.offsetRad)
+        }
+    }
+}
 
 /**
  * Everything [PdrSolver] derives from a log once: orientation, gravity-free acceleration, the steps
@@ -32,7 +59,7 @@ class PdrContext(
     /** The recorder's [PAUSE, RESUME) intervals: no step and no barometric change is taken from them. */
     val pauses: PauseIntervals,
     val headingSegments: List<HeadingSegment>,
-    /** Walking heading of each used step (device heading + offset), radians clockwise from north. */
+    /** Walking heading of each used step ([HeadingSegment.walkingHeading]), radians clockwise from north. */
     val stepHeadingRad: DoubleArray,
     val stepStrideM: DoubleArray,
     val altitude: AltitudeTrack?,
@@ -44,11 +71,8 @@ class PdrContext(
         return seg
     }
 
-    /** Walking heading the solver would assign at [tNs]: device heading at that time plus the segment offset. */
-    fun walkingHeadingAt(tNs: Long): Double {
-        val seg = segmentAt(tNs)
-        return Angles.wrap(DeviceHeading.headingRad(orientation.at(tNs), seg.axis) + seg.offsetRad)
-    }
+    /** Walking heading the solver would assign at [tNs]; see [HeadingSegment.walkingHeading]. */
+    fun walkingHeadingAt(tNs: Long): Double = HeadingSegment.walkingHeading(headingSegments, tNs, orientation.at(tNs))
 }
 
 /** Output of [PdrSolver.solve]: the start point followed by one point per step. */
@@ -61,10 +85,10 @@ class PdrSolution(val points: List<PathPoint>, val context: PdrContext)
  */
 class PdrSolver(
     private val orientationEstimator: OrientationEstimator = OrientationEstimator(),
-    /** Steps used to re-estimate the heading offset after a REORIENT annotation. */
-    private val reorientSteps: Int = 10,
-    /** Steps before a REORIENT whose mean heading resolves the front/back ambiguity of the estimate. */
-    private val reorientReferenceSteps: Int = 5,
+    /** Seconds just before and just after a move over which the walking heading is averaged. */
+    private val moveHeadingWindowS: Double = 1.5,
+    /** A REORIENT tap stands for a move of the phone up to this many seconds before or after it. */
+    private val reorientMoveS: Double = 2.0,
 ) {
 
     fun prepare(log: RawLog, config: PipelineConfig): PdrContext {
@@ -107,7 +131,7 @@ class PdrSolver(
 
         val segments = ArrayList<HeadingSegment>()
         val headings = DoubleArray(steps.size)
-        buildHeadings(log, config, orientation.track, world, steps, segments, headings, diag)
+        buildHeadings(log, config, orientation.track, steps, segments, headings, diag)
 
         val altitude = AltitudeTrack.fromBaro(log.baro, config.baroSmoothingS)
         diag["baro"] = if (altitude == null) "absent" else "present"
@@ -194,117 +218,117 @@ class PdrSolver(
         return PdrSolution(points, ctx)
     }
 
+    /** A stretch [startNs, endNs) during which the phone was being moved and its heading means nothing. */
+    private class Move(val startNs: Long, val endNs: Long)
+
+    /**
+     * Splits the trip into heading segments at every move of the phone and gives each step its
+     * walking heading. A move is a carry change found by [CarryChangeDetector] or the stretch around
+     * a REORIENT tap. The walking heading is carried through a move instead of being measured again
+     * after it: the walker is taken to keep going straight while moving the phone, so the heading
+     * averaged over [moveHeadingWindowS] just before the move is held for the steps during it, and
+     * the new offset is the one that gives the same heading over the same time just after it. Moving
+     * the phone therefore never turns the path. A turn made during the move is lost, but turns before
+     * or after it are kept, standing or walking, because the orientation follows them on both sides.
+     */
     private fun buildHeadings(
         log: RawLog,
         config: PipelineConfig,
         track: OrientationTrack,
-        world: WorldAccel,
         steps: DetectedSteps,
         segments: MutableList<HeadingSegment>,
         headings: DoubleArray,
         diag: MutableMap<String, String>,
     ) {
+        val startNs = log.firstTimestampNs
         val changes = if (config.autoReorient) {
             CarryChangeDetector.detect(
-                track, log.firstTimestampNs, log.lastTimestampNs, config.carryChangeTiltRad, config.carryChangeSettleS,
+                track, startNs, log.lastTimestampNs, config.carryChangeTiltRad, config.carryChangeSettleS,
             )
         } else {
             emptyList()
         }
-        val boundaries = ArrayList<Long>()
-        boundaries.add(log.firstTimestampNs)
+        val found = ArrayList<Move>()
+        for (c in changes) found.add(Move(c.startNs, c.endNs))
         var superseded = 0
-        val marginNs = (config.carryChangeSettleS * 1e9).toLong()
+        val tapNs = (reorientMoveS * 1e9).toLong()
         for (a in log.annotations) {
             if (a.kind != AnnotationKind.REORIENT) continue
-            // A tap during the move itself (the natural moment to tap, and the tap tends to come a
-            // little before the tilt has visibly left) is served by the detected change: its own
-            // boundary would start a segment on steps taken while the phone moved.
-            if (changes.any { a.tNs >= it.startNs - marginNs && a.tNs < it.endNs }) {
+            val from = maxOf(startNs, a.tNs - tapNs)
+            val to = a.tNs + tapNs
+            if (to <= from) continue
+            // A tap next to a detected move (the natural moment to tap, just before or after moving
+            // the phone) is served by that move.
+            if (changes.any { from < it.endNs && to > it.startNs }) {
                 superseded++
                 continue
             }
-            boundaries.add(a.tNs)
+            found.add(Move(from, to))
         }
-        // A change that settled back where it started keeps the offset: it is bridged, not a new segment.
-        for (c in changes) if (!c.returned) boundaries.add(c.endNs)
-        boundaries.sort()
-        var w = 1
-        for (i in 1 until boundaries.size) {
-            if (boundaries[i] > boundaries[w - 1]) boundaries[w++] = boundaries[i]
+        found.sortBy { it.startNs }
+        // Overlapping moves (taps close together) are one move.
+        val moves = ArrayList<Move>(found.size)
+        for (m in found) {
+            val last = moves.lastOrNull()
+            if (last != null && m.startNs < last.endNs) {
+                moves[moves.size - 1] = Move(last.startNs, maxOf(last.endNs, m.endNs))
+            } else {
+                moves.add(m)
+            }
         }
-        while (boundaries.size > w) boundaries.removeAt(boundaries.size - 1)
-        diag["reorientCount"] = (boundaries.size - 1).toString()
+        diag["reorientCount"] = moves.size.toString()
         diag["carryChanges"] = changes.size.toString()
         if (changes.isNotEmpty()) {
-            val t0 = log.firstTimestampNs
             diag["carryChangeTimesS"] = changes.joinToString(";") {
-                Diag.num((it.startNs - t0) / 1e9, 1) + "-" + Diag.num((it.endNs - t0) / 1e9, 1) +
+                Diag.num((it.startNs - startNs) / 1e9, 1) + "-" + Diag.num((it.endNs - startNs) / 1e9, 1) +
                     (if (it.returned) " returned" else "")
             }
         }
         if (superseded > 0) diag["reorientSuperseded"] = superseded.toString()
 
+        // The calibrated offset belongs to one axis, so the first segment takes the configured one;
+        // after a move the offset is derived again and the axis may be chosen freely.
+        var axis = when (config.headingAxis) {
+            HeadingAxisMode.FORWARD -> HeadingAxis.FORWARD
+            HeadingAxisMode.CAMERA -> HeadingAxis.CAMERA
+            HeadingAxisMode.AUTO -> axisFor(track, steps, startNs, moves.firstOrNull()?.startNs ?: Long.MAX_VALUE)
+        }
         var offset = config.headingOffsetRad
+        segments.add(HeadingSegment(startNs, axis, offset))
+        val windowNs = (moveHeadingWindowS * 1e9).toLong()
+        val offsets = StringBuilder()
+        for (k in moves.indices) {
+            val m = moves[k]
+            val beforeFromNs = maxOf(segments[segments.size - 1].fromNs, m.startNs - windowNs)
+            val held = Angles.wrap(DeviceHeading.meanHeadingRad(track, axis, beforeFromNs, m.startNs) + offset)
+            val nextNs = if (k + 1 < moves.size) moves[k + 1].startNs else Long.MAX_VALUE
+            axis = axisFor(track, steps, m.endNs, nextNs)
+            val after = DeviceHeading.meanHeadingRad(track, axis, m.endNs, minOf(m.endNs + windowNs, nextNs))
+            offset = Angles.diff(held, after)
+            segments.add(HeadingSegment(m.endNs, axis, offset, m.startNs, held))
+            if (offsets.isNotEmpty()) offsets.append(';')
+            offsets.append(Diag.num(Math.toDegrees(offset), 1))
+        }
         val cursor = track.cursor()
-        val estimated = StringBuilder()
-        for (b in boundaries.indices) {
-            val fromNs = boundaries[b]
-            val toNs = if (b + 1 < boundaries.size) boundaries[b + 1] else Long.MAX_VALUE
-            val first = steps.lowerBound(fromNs)
-            val last = steps.lowerBound(toNs)
-            // The calibrated offset belongs to one axis, so the first segment takes the configured
-            // one; after a REORIENT the offset is re-estimated and the axis may be chosen freely.
-            val axis = when {
-                b == 0 && config.headingAxis == HeadingAxisMode.FORWARD -> HeadingAxis.FORWARD
-                b == 0 && config.headingAxis == HeadingAxisMode.CAMERA -> HeadingAxis.CAMERA
-                first < last -> DeviceHeading.chooseAxis(track, steps.tNs, first, last)
-                else -> DeviceHeading.chooseAxis(track, longArrayOf(fromNs), 0, 1)
-            }
-            var wasEstimated = false
-            if (b > 0 && first < last) {
-                val windowEnd = minOf(last - 1, first + reorientSteps - 1)
-                val deviceHeadings = DoubleArray(windowEnd - first + 1) {
-                    DeviceHeading.headingRad(cursor.at(steps.tNs[first + it]), axis)
-                }
-                val meanDevice = Angles.circularMean(deviceHeadings, 0, deviceHeadings.size)
-                val previous = Angles.circularMean(headings, maxOf(0, first - reorientReferenceSteps), first)
-                if (meanDevice != null) {
-                    val est = HeadingOffsetEstimator.estimate(
-                        world, steps.tNs[first], steps.tNs[windowEnd] + 1, meanDevice, previous, offset,
-                    )
-                    if (est != null) {
-                        offset = est
-                        wasEstimated = true
-                    }
-                }
-                if (estimated.isNotEmpty()) estimated.append(';')
-                estimated.append(if (wasEstimated) Diag.num(Math.toDegrees(offset), 1) else "kept")
-            }
-            segments.add(HeadingSegment(fromNs, axis, offset, wasEstimated))
-            for (i in first until last) {
-                headings[i] = Angles.wrap(DeviceHeading.headingRad(cursor.at(steps.tNs[i]), axis) + offset)
-            }
-            // Steps taken while the phone was being moved get the heading from just before the move:
-            // the device heading means nothing mid-move, and the walker was told to keep going straight.
-            // Done before the next segment reads these headings as its reference for the front/back choice.
-            for (c in changes) {
-                if (c.endNs <= fromNs || c.endNs > toNs) continue
-                holdHeadings(steps, headings, c.startNs, c.endNs)
-            }
+        for (i in 0 until steps.size) {
+            val t = steps.tNs[i]
+            headings[i] = HeadingSegment.walkingHeading(segments, t, cursor.at(t))
         }
         diag["headingAxisMode"] = config.headingAxis.name
         diag["headingAxis"] = segments.joinToString(";") { it.axis.name }
         diag["headingOffsetDeg"] = Diag.num(Math.toDegrees(config.headingOffsetRad), 1)
-        if (estimated.isNotEmpty()) diag["reorientOffsetsDeg"] = estimated.toString()
+        if (offsets.isNotEmpty()) diag["reorientOffsetsDeg"] = offsets.toString()
     }
 
-    /** Gives the steps inside [fromNs, toNs) the heading of the last step before it; a move before any step is left alone. */
-    private fun holdHeadings(steps: DetectedSteps, headings: DoubleArray, fromNs: Long, toNs: Long) {
+    /** Axis for the steps in [fromNs, toNs), or for the orientation at [fromNs] when there are none. */
+    private fun axisFor(track: OrientationTrack, steps: DetectedSteps, fromNs: Long, toNs: Long): HeadingAxis {
         val first = steps.lowerBound(fromNs)
         val last = steps.lowerBound(toNs)
-        if (first == 0 || first >= last) return
-        for (i in first until last) headings[i] = headings[first - 1]
+        return if (first < last) {
+            DeviceHeading.chooseAxis(track, steps.tNs, first, last)
+        } else {
+            DeviceHeading.chooseAxis(track, longArrayOf(fromNs), 0, 1)
+        }
     }
 
     private fun excludePaused(steps: DetectedSteps, pauses: PauseIntervals): DetectedSteps {

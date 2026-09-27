@@ -61,15 +61,16 @@ class OrientationTrack private constructor(
 
     /**
      * Sequential lookup that remembers the last index so a time-ordered sweep over another sensor's
-     * samples costs O(1) per query instead of a binary search each time. Going backwards in time is
-     * allowed and falls back to the binary search.
+     * samples costs O(1) per query instead of a binary search each time. The first query and any
+     * query going backwards in time use the binary search, so a cursor started late in a long trip
+     * does not walk there from the first sample.
      */
     inner class Cursor {
         private var index = -1
 
         fun at(tNs: Long): Quat {
             if (times.isEmpty()) return Quat.IDENTITY
-            if (index >= 0 && tNs < times[index]) {
+            if (index < 0 || tNs < times[index]) {
                 index = floorIndex(tNs)
             } else {
                 while (index + 1 < times.size && times[index + 1] <= tNs) index++

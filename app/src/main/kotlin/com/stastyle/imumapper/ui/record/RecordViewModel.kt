@@ -134,7 +134,7 @@ class RecordViewModel(
             AnnotationKind.CHAMBER -> "Chamber marked"
             AnnotationKind.NOTE -> "Note saved"
             AnnotationKind.LOOP_CLOSED -> "Loop closed at start"
-            AnnotationKind.REORIENT -> "Re-orienting: walk straight for ten steps"
+            AnnotationKind.REORIENT -> "Re-orient marked: change the grip now and keep walking straight"
         }
         _ui.update { it.copy(message = if (ok) text else "Not recording") }
     }

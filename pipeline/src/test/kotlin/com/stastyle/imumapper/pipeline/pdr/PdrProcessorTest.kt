@@ -77,7 +77,7 @@ class PdrProcessorTest {
         val cfg = PipelineConfig(strideLengthM = w.strideM * 1.04, useMagnetometer = false)
         val log = w.build(cfg)
         val r = PdrProcessor().process(log, cfg)
-        assertEquals(3, r.pipelineVersion)
+        assertEquals(4, r.pipelineVersion)
         assertEquals(r.points.size, r.rawPoints.size, "post-processing moves points, never adds or drops them")
         for (i in r.points.indices) {
             assertEquals(r.points[i].tNs, r.rawPoints[i].tNs)
@@ -122,12 +122,13 @@ class PdrProcessorTest {
     }
 
     @Test
-    fun reorientReestimatesHeadingOffset() {
+    fun reorientCarriesTheHeadingAcrossTheGripChange() {
+        // The phone is spun flat as the REORIENT is tapped, a move the tilt cannot see.
         val w = walk().still(2.0).walkTo(0.0, 10.0)
             .annotate(AnnotationKind.REORIENT).deviceOffset(PI / 2).walkTo(0.0, 20.0).still(1.0)
         val r = run(w)
         val end = r.points.last().p
-        assertTrue(end.y > 16.0 && abs(end.x) < 3.0, "offset should be re-estimated, path ended at $end")
+        assertTrue(end.y > 19.0 && abs(end.x) < 0.5, "the heading should carry across the tap, path ended at $end")
         assertEquals("1", r.diagnostics["reorientCount"])
         assertNotNull(r.diagnostics["reorientOffsetsDeg"])
 
@@ -175,6 +176,99 @@ class PdrProcessorTest {
         val end = r.points.last().p
         assertTrue(end.distanceTo(Vec3(10.0, 14.0, 0.0)) < 3.0, "ended at $end")
         assertEquals("1", r.diagnostics["carryChanges"])
+    }
+
+    /** Walking heading the solver gives each step, degrees. */
+    private fun stepHeadingsDeg(w: SyntheticWalk, cfg: PipelineConfig = config(w)): List<Double> =
+        PdrSolver().prepare(w.build(cfg), cfg).stepHeadingRad.map { Math.toDegrees(it) }
+
+    private val pocketSkew = Math.toRadians(20.0)
+
+    @Test
+    fun pocketingThePhoneLeavesNoTurn() {
+        // In a trouser pocket the leg swing turns the main axis of the horizontal acceleration away
+        // from the walk, 20 degrees here. The walk is straight, so the path must not turn where the
+        // phone went into the pocket, whatever the acceleration says.
+        val w = walk().still(2.0).walkTo(0.0, 8.0).deviceTilt(1.3).deviceOffset(PI / 2).gaitSkew(pocketSkew)
+            .walkTo(0.0, 20.0).still(1.0)
+        val headings = stepHeadingsDeg(w)
+        assertTrue(headings.all { abs(it) < 4.0 }, "every step should head north: $headings")
+        val end = run(w).points.last().p
+        assertTrue(abs(end.x) < 0.5 && end.y > 19.0, "ended at $end")
+    }
+
+    @Test
+    fun pocketingAsTheWalkStartsLeavesNoTurn() {
+        // Start recording in the hand and slip the phone into the pocket with the first steps. Those
+        // steps have no earlier step to take a heading from; they take the one the phone showed in
+        // the hand before the move.
+        val w = walk().still(1.0).deviceTilt(1.3).deviceOffset(PI / 2).gaitSkew(pocketSkew)
+            .walkTo(0.0, 20.0).still(1.0)
+        val headings = stepHeadingsDeg(w)
+        assertEquals("1", run(w).diagnostics["carryChanges"])
+        assertTrue(headings.all { abs(it) < 4.0 }, "the path should start straight: $headings")
+    }
+
+    @Test
+    fun phoneTakenOutAndPutBackWhileWalkingKeepsTheWalkStraight() {
+        // Out of the pocket for five metres in the hand, then back, walking all the time.
+        val w = SyntheticWalk(tiltRad = 1.3).deviceOffset(PI / 2).gaitSkew(pocketSkew)
+            .still(2.0).walkTo(0.0, 8.0)
+            .deviceTilt(0.4).deviceOffset(0.0).gaitSkew(0.0).walkTo(0.0, 13.0)
+            .deviceTilt(1.3).deviceOffset(PI / 2).gaitSkew(pocketSkew).walkTo(0.0, 24.0).still(1.0)
+        val cfg = config(w) { it.copy(headingOffsetRad = PI / 2) }
+        val r = run(w, cfg)
+        assertEquals("2", r.diagnostics["carryChanges"])
+        val headings = stepHeadingsDeg(w, cfg)
+        assertTrue(headings.all { abs(it) < 4.0 }, "every step should head north: $headings")
+        val end = r.points.last().p
+        assertTrue(abs(end.x) < 0.5 && end.y > 23.0, "ended at $end")
+    }
+
+    @Test
+    fun phonePutBackTheOtherWayRoundKeepsTheWalkStraight() {
+        // A quick glance while walking, and the phone goes back screen out instead of screen in: the
+        // same tilt, so the move counts as returned, but the phone has turned half a circle.
+        val w = SyntheticWalk(tiltRad = 1.3).deviceOffset(PI / 2)
+            .still(2.0).walkTo(0.0, 8.0)
+            .deviceTilt(0.4).deviceOffset(0.0).walkTo(0.0, 10.0)
+            .deviceTilt(1.3).deviceOffset(-PI / 2).walkTo(0.0, 20.0).still(1.0)
+        val r = run(w, config(w) { it.copy(headingOffsetRad = PI / 2) })
+        assertEquals("1", r.diagnostics["carryChanges"])
+        assertTrue(r.diagnostics["carryChangeTimesS"]!!.endsWith(" returned"), r.diagnostics["carryChangeTimesS"])
+        val end = r.points.last().p
+        assertTrue(abs(end.x) < 0.5 && end.y > 19.0, "the walk should not turn back, ended at $end")
+    }
+
+    @Test
+    fun turnMadeWithThePhoneInTheHandIsKept() {
+        // Stop at a junction, take the phone out, turn right while holding it, put it back and walk
+        // on. Both moves carry the heading across, and the turn between them happens in the hand,
+        // where the orientation follows it.
+        val w = SyntheticWalk(tiltRad = 1.3).deviceOffset(PI / 2).gaitSkew(pocketSkew)
+            .still(2.0).walkTo(0.0, 10.0).still(1.0)
+            .deviceTilt(0.4).deviceOffset(0.0).gaitSkew(0.0).still(3.0).turnTo(PI / 2).still(2.0)
+            .deviceTilt(1.3).deviceOffset(PI / 2).gaitSkew(pocketSkew).still(3.0)
+            .walkTo(10.0, 10.0).still(1.0)
+        val r = run(w, config(w) { it.copy(headingOffsetRad = PI / 2) })
+        assertEquals("2", r.diagnostics["carryChanges"])
+        val end = r.points.last().p
+        assertTrue(end.distanceTo(Vec3(10.0, 10.0, 0.0)) < 1.0, "ended at $end")
+    }
+
+    @Test
+    fun walkingHeadingDuringAMoveIsTheHeldOne() {
+        val w = walk().still(2.0).walkTo(0.0, 8.0).deviceTilt(1.3).deviceOffset(PI / 2).walkTo(0.0, 20.0).still(1.0)
+        val cfg = config(w)
+        val ctx = PdrSolver().prepare(w.build(cfg), cfg)
+        assertEquals(2, ctx.headingSegments.size)
+        val seg = ctx.headingSegments[1]
+        assertTrue(seg.moveFromNs < seg.fromNs)
+        // What the VIO hand-over reads mid-move is what the steps there were given.
+        assertEquals(seg.moveHeadingRad, ctx.walkingHeadingAt((seg.moveFromNs + seg.fromNs) / 2))
+        assertTrue(abs(seg.moveHeadingRad) < Math.toRadians(3.0), "held ${Math.toDegrees(seg.moveHeadingRad)}")
+        val after = ctx.walkingHeadingAt(seg.fromNs + 1_000_000_000L)
+        assertTrue(abs(Angles.diff(after, seg.moveHeadingRad)) < Math.toRadians(4.0), "after ${Math.toDegrees(after)}")
     }
 
     @Test

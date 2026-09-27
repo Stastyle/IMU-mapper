@@ -151,13 +151,16 @@ Key decisions
    metal gear).
    **Carry changes** (hand to pocket, pocket to vest) are detected from the direction of gravity
    in the device frame: it is steady inside one carry position and moves by tens of degrees
-   between them, while a turn of the walker changes only yaw. Each detected move is bridged
-   (its steps keep the heading from just before it) and starts a new heading segment whose
-   offset is re-estimated from the next ~10 steps, exactly as after a manual REORIENT; a move
-   that ends where it started (a glance at the screen) is only bridged. Tunables:
-   `autoReorient`, `carryChangeTiltRad`, `carryChangeSettleS`. A phone spun flat about the
-   vertical keeps its gravity direction and is the one move this cannot see; that still needs
-   the REORIENT tap.
+   between them, while a turn of the walker changes only yaw. Each detected move, and the few
+   seconds around a manual REORIENT, starts a new heading segment, and the walking heading is
+   carried through it: the steps during the move keep the heading averaged over the 1.5 s before
+   it, and the new offset gives the same heading over the 1.5 s after it. (Re-estimating the
+   offset from the gait, as the first version did, turned the path by the estimate's error at
+   every move: in a pocket the leg swing tilts the axis of the horizontal acceleration by tens of
+   degrees.) A turn made while the phone is moving is lost; turns before or after it are kept.
+   Tunables: `autoReorient`, `carryChangeTiltRad`, `carryChangeSettleS`. A phone spun flat about
+   the vertical keeps its gravity direction and is the one move this cannot see; that still
+   needs the REORIENT tap.
 6. **Altitude.** Barometer relative to the trip start, low-passed, held constant during
    still segments. Stairs/climbs are visible as vertical steps in the path.
 7. **Loop closure.** If the user marks "back at start", the end-to-start error vector is
@@ -308,9 +311,8 @@ settings would let the app compile locally too.
 - **Magnetometer in caves.** Handled by gating; worst case heading is gyro-only, which drifts
   slowly over minutes. Acceptable for ≤5 min trips.
 - **Carry position changes mid-trip** (pocket → hand) break the heading offset. Mitigation:
-  detected automatically from the tilt (section 5), which restarts the offset calibration for
-  the next 10 steps; the "re-orient" annotation remains for a phone spun flat, which the tilt
-  cannot see.
+  detected automatically from the tilt (section 5), and the walking heading is carried through
+  the move; the "re-orient" annotation remains for a phone spun flat, which the tilt cannot see.
 - **ARCore in caves.** Torch helps, but wet, uniform rock can still lose tracking. PDR
   fallback keeps the path continuous; the viewer shows which segments were VIO vs PDR.
 - **Battery / heat** with ARCore and torch on. Fine for minutes, not hours.

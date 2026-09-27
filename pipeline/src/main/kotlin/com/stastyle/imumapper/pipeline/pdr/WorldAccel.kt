@@ -5,15 +5,12 @@ import com.stastyle.imumapper.pipeline.core.Vec3
 
 /**
  * Accelerometer samples rotated into ENU with gravity removed, as parallel arrays: [vertical] is
- * the up component minus g (drives step detection), [east] and [north] are the horizontal
- * components (drive the stride model and the heading-offset estimate). Samples whose timestamp
- * goes backwards are dropped and counted in [dropped].
+ * the up component minus g, which drives step detection and the stride model. Samples whose
+ * timestamp goes backwards are dropped and counted in [dropped].
  */
 class WorldAccel private constructor(
     val tNs: LongArray,
     val vertical: DoubleArray,
-    val east: DoubleArray,
-    val north: DoubleArray,
     val dropped: Int,
 ) {
     val size: Int get() = tNs.size
@@ -50,8 +47,6 @@ class WorldAccel private constructor(
             val n = accel.size
             val t = LongArray(n)
             val v = DoubleArray(n)
-            val e = DoubleArray(n)
-            val no = DoubleArray(n)
             val cursor = orientation.cursor()
             var k = 0
             var dropped = 0
@@ -65,11 +60,9 @@ class WorldAccel private constructor(
                 val w = cursor.at(s.tNs).rotate(Vec3.of(s.x, s.y, s.z))
                 t[k] = s.tNs
                 v[k] = w.z - gravity
-                e[k] = w.x
-                no[k] = w.y
                 k++
             }
-            return WorldAccel(t.copyOf(k), v.copyOf(k), e.copyOf(k), no.copyOf(k), dropped)
+            return WorldAccel(t.copyOf(k), v.copyOf(k), dropped)
         }
     }
 }

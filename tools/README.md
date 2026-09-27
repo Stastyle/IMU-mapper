@@ -56,7 +56,7 @@ replay reproduces the app's result; `--set` is then the knob for algorithm exper
 | `path.csv` | One row per path point: `tNs, x, y, z, source, headingRad, stepIndex`. |
 | `path_top.png` | Top-down path (east/north) with start, end, annotations, keyframes, the PDR path before loop closure (dashed) and the `--compare` overlay. |
 | `path_side.png` | Side view: z against distance along the path. |
-| `signals.png` | Four panels over time: vertical acceleration (raw and band-passed) with the detected steps and the hardware step events; device heading and the walking heading of each step (REORIENT boundaries dashed); pressure-derived height, the low-passed altitude track and the path z; the interval between consecutive steps against `stepMinIntervalS`. Annotations are vertical lines. |
+| `signals.png` | Four panels over time: vertical acceleration (raw and band-passed) with the detected steps and the hardware step events; device heading and the walking heading of each step (each move of the phone shaded, the heading segment after it starting at the dashed line); pressure-derived height, the low-passed altitude track and the path z; the interval between consecutive steps against `stepMinIntervalS`. Annotations are vertical lines. |
 
 Plots use the headless Agg backend, so the script runs on servers and in CI.
 
@@ -74,10 +74,10 @@ The classes and functions keep the Kotlin names so the two can be read side by s
 | `pdr/WorldAccel` | `WorldAccel.compute` |
 | `pdr/StepDetector`, `DetectedSteps` | `StepDetector.detect/from_hardware/band_pass/filter`, `DetectedSteps` |
 | `pdr/StrideModel` | `StrideModel.stride_m` |
-| `pdr/HeadingEstimator` (`DeviceHeading`, `HeadingOffsetEstimator`) | `DeviceHeading.choose_axis/heading_rad`, `HeadingOffsetEstimator.estimate` |
+| `pdr/HeadingEstimator` (`DeviceHeading`) | `DeviceHeading.choose_axis/heading_rad/mean_heading_rad` |
 | `pdr/CarryChangeDetector`, `CarryChange` | `CarryChangeDetector.detect`, `CarryChange` (same 10 Hz sampling, low-pass and settle rule) |
 | `pdr/AltitudeTrack` | `AltitudeTrack.from_baro/at` |
-| `pdr/PdrSolver`, `PdrContext`, `HeadingSegment` | `PdrSolver.prepare/solve_segment/solve/build_headings`, `PdrContext`, `HeadingSegment` |
+| `pdr/PdrSolver`, `PdrContext`, `HeadingSegment` | `PdrSolver.prepare/solve_segment/solve/build_headings/axis_for`, `PdrContext`, `HeadingSegment.walking_heading` |
 | `pdr/PdrProcessor` | `PdrProcessor.process` (keeps `context`, `raw_points`, `closed_points` for plots) |
 | `post/LoopClosure`, `Smoothing`, `PathBuilder` | `LoopClosure.apply`, `Smoothing.moving_average`, `PathBuilder.build/stats/nearest_index/...` |
 
