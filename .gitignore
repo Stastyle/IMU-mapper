@@ -13,15 +13,41 @@ captures/
 .externalNativeBuild/
 .cxx/
 
-# Signing — never commit keystores
+# Build outputs copied out of build/ (the release workflow stages APKs in dist/)
+dist/
+*.apk
+*.aab
+
+# JVM crash dumps
+hs_err_pid*.log
+replay_pid*.log
+
+# Signing — never commit keystores or their encoded copies. scripts/gen-keystore.* write
+# <name>.jks and <name>.jks.base64 next to each other; the .base64 is the same key.
 *.jks
 *.keystore
+*.p12
+*.pfx
+*.base64
+
+# Claude Code: personal settings, notes and worktrees (the shared .claude/settings.json and
+# CLAUDE.md are committed)
+.claude/settings.local.json
+.claude/worktrees/
+CLAUDE.local.md
 
 # OS / editors
 .DS_Store
+Thumbs.db
+desktop.ini
 *.swp
+*~
+.vscode/
 
 # Python (tools/)
 __pycache__/
 *.pyc
 .venv/
+venv/
+# replay.py writes <log name>_replay/ next to the log when --out is not given
+*_replay/
