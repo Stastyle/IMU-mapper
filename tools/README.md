@@ -1,18 +1,25 @@
 # tools
 
-Offline helpers for algorithm work. `replay.py` reads a raw `.imul` log exported from the app
-(Debug screen → export, or a file from `tools/samples/`), runs the same processing steps as the
-Kotlin PDR pipeline (`pipeline/.../pdr` and `pipeline/.../post`), and writes the path, plots and
-statistics. It exists so an algorithm change can be tried on a recorded log in seconds, plotted,
-and compared with what the app produced, without building the app.
+Offline helpers for algorithm work. `replay.py` reads a raw `.imul` log, runs the processing
+steps of the Kotlin PDR pipeline (`pipeline/.../pdr` and `pipeline/.../post`), and writes the
+path, plots and statistics. The log can come from the app or from `tools/samples/`. To get one
+from the app, long-press the trip in the trip list and pick **Export as ZIP**. Save or send the ZIP
+from the share sheet, then unzip it: `raw.imul` and `results/run-<n>.json` are inside. The tool exists so an algorithm change can
+be tried on a recorded log in seconds, plotted, and compared with what the app produced, without
+building the app. It lags the Kotlin code in a few places, listed under "Not covered".
 
 ## Setup
 
-Python 3.8 or newer with numpy and matplotlib:
+Python 3.8 or newer with numpy, plus matplotlib for the plots:
 
 ```
 python3 -m pip install --user -r tools/requirements.txt
 ```
+
+On Windows use `python` (or `py`) instead of `python3`, which is the Microsoft Store stub there.
+Add `-X utf8` when the log or the `--compare` result contains non-ASCII annotation notes. Without
+it, `--compare` reads the JSON in the Windows ANSI code page, and redirected output can fail to
+encode the notes.
 
 ## Usage
 
@@ -32,8 +39,12 @@ Options:
 | `--no-plots` | Skip the PNG files (faster; no matplotlib needed). |
 | `--quiet` | Print only the stats lines. |
 
-By default the config comes from the log meta, exactly like the app's processing step, so the
-replay reproduces the app's result; `--set` is then the knob for algorithm experiments.
+By default the config comes from the log's `LogMeta`, which holds the calibration that was in
+effect when the trip was recorded. The app processes with the calibration saved at processing
+time, so after a recalibration the two differ. To get as close to an app run as the replay can,
+pass that run's `config` values from `results/run-<n>.json` with `--set`. Leave out `headingAxis`
+and `baroStillGapS`, which `--set` rejects. The differences listed under "Not covered" remain.
+`--set` is also the knob for algorithm experiments.
 
 ### What it prints
 
@@ -82,14 +93,27 @@ The classes and functions keep the Kotlin names so the two can be read side by s
 | `post/LoopClosure`, `Smoothing`, `PathBuilder` | `LoopClosure.apply`, `Smoothing.moving_average`, `PathBuilder.build/stats/nearest_index/...` |
 
 Sequential filters (Madgwick, the step band-pass, the barometric low-pass, the yaw-correction
-average) are plain Python loops that follow the Kotlin code line by line; everything else is
-vectorised with numpy. On `tools/samples/synthetic_square.imul` the replay reproduces the Kotlin
-`PdrProcessor` output to floating-point rounding: 30 steps, distance 20.006 m after closure,
-closure error 0.7525 m, every point within 1e-9 m. The same holds for the Madgwick fallback (log
-without rotation vectors), the fused-only source, hardware steps with the Weinberg stride, and a
-REORIENT annotation. When you change the Kotlin pipeline, export a result from the app (or dump
-one from a pipeline test) and check the replay with `--compare`; when they disagree, the Kotlin
-code is the reference and `replay.py` is the one to fix.
+average and the carry-change low-pass) are plain Python loops that follow the Kotlin code line by line; everything else is
+vectorised with numpy. When it was written, the replay reproduced the Kotlin `PdrProcessor` to
+floating-point rounding on the samples, the Madgwick fallback (a log without rotation vectors),
+the fused-only source, hardware steps with the Weinberg stride, and a REORIENT annotation.
+
+The Kotlin pipeline has since gained the features listed under "Not covered", so parity is now
+close but not exact. Measured on 2026-09-27 against `DefaultProcessor` (pipeline version 3):
+
+- `synthetic_square.imul`: 30 steps and distance 20.0064 m in both. The closure error is
+  0.7525 m in the replay and 0.7526 m in Kotlin.
+- `synthetic_carry_change.imul`: 30 steps and distance 19.9945 m in both.
+- In both samples x and y match. z differs by up to 2.3 mm, because of the barometer still-gap
+  below.
+- `--compare` reports `headingAxisMode` as a diagnostics key that only Kotlin emits.
+
+When you change the Kotlin pipeline, get a Kotlin result and check the replay against it with
+`--compare`. Either export one from the app, or add a temporary pipeline test that writes
+`DefaultProcessor().process(log, log.meta!!.config).toJson()` for a sample log to a file (no
+existing test does this). When they disagree, the Kotlin code is the reference
+and `replay.py` is the one to fix. Nothing runs this check automatically: CI does not run
+`replay.py`.
 
 ### Conventions
 
@@ -100,9 +124,19 @@ World frame ENU (x east, y north, z up, metres), headings in radians clockwise f
 
 - ARCore poses (`POSE`, `POINT_CLOUD`) are parsed and counted but the VIO fusion
   (`pipeline/.../vio`) is not mirrored; a VIO log is replayed as pure PDR from its IMU stream,
-  which is exactly the fallback baseline the app compares against.
-- Loading a log through Python uses the whole file in memory; a 10-minute log at 500 Hz is a
-  few hundred thousand records and takes a few seconds.
+  which is exactly the fallback baseline the app compares against. For a VIO trip, compare with
+  the app's "PDR only" run from the Debug screen, not with its default VIO run.
+- Trip pauses: Kotlin drops the steps and the barometric change between `PAUSE` and `RESUME`,
+  but the replay keeps them.
+- Barometer still-gap: Kotlin freezes the altitude only in the middle of step gaps longer than
+  `baroStillGapS` (default 4 s). The replay uses a fixed 2 s gap and freezes the whole gap.
+- Hardware-step fallback: when the software detector finds no steps (no or stalled
+  accelerometer), Kotlin falls back to the hardware step detector. The replay returns 0 steps
+  unless you pass `--set preferHardwareSteps=true`.
+- `CONFIG_DEFAULTS` has no `headingAxis` or `baroStillGapS`. Their values in `LogMeta` are
+  dropped, `--set` rejects them, and a calibrated `headingAxis` is treated as `AUTO`.
+- Memory: Python loads the whole file, including the uncalibrated streams that the app skips, so
+  a long log at 500 Hz means millions of records and a lot of memory.
 
 ## samples/
 
