@@ -1,8 +1,14 @@
 package com.stastyle.imumapper.capture
 
+import com.stastyle.imumapper.pipeline.core.AccelSample
+import com.stastyle.imumapper.pipeline.core.MagSample
 import com.stastyle.imumapper.pipeline.core.Quat
+import com.stastyle.imumapper.pipeline.core.RotationSample
+import com.stastyle.imumapper.pipeline.core.RotationSource
 import com.stastyle.imumapper.pipeline.core.Vec3
+import java.util.Random
 import kotlin.math.abs
+import kotlin.math.exp
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -77,7 +83,7 @@ class CompassLockTest {
     @Test
     fun smallWobbleKeepsTheWindowButALargerJumpRestartsIt() {
         val lock = CompassLock()
-        // +-1 degree of wobble stays inside the 3 degree limit.
+        // +-1 degree of wobble stays inside the 2 degree deviation limit.
         lock.feed(0, 1500, gameYawDeg = { t -> if ((t / 20) % 2 == 0L) 39.0 else 41.0 })
         assertEquals(0.75f, lock.reading(ns(1500)).progress, 0.02f)
         // A 6 degree jump starts the window over at the jump.
@@ -139,20 +145,175 @@ class CompassLockTest {
     }
 
     @Test
-    fun lockLatchesUntilCalibrationReleasesIt() {
+    fun aLargeJumpAfterTheLockReleasesIt() {
         val lock = CompassLock()
         lock.feed(0, 2000)
         assertEquals(CompassStatus.LOCKED, lock.reading(ns(2000)).status)
-        // A jump after the lock restarts the window but does not unlock.
+        // North moved by 20 degrees: the lock no longer describes it, and settling starts at the jump.
         lock.feed(2020, 2100, gameYawDeg = { 60.0 })
-        val latched = lock.reading(ns(2100))
-        assertEquals(CompassStatus.LOCKED, latched.status)
-        assertEquals(-60.0, assertNotNull(latched.offsetDeg), 1e-6)
+        val released = lock.reading(ns(2100))
+        assertEquals(CompassStatus.SETTLING, released.status)
+        assertEquals(0.04f, released.progress, 0.001f)
+        assertEquals(-60.0, assertNotNull(released.offsetDeg), 1e-6)
+        lock.feed(2120, 4000, gameYawDeg = { 60.0 })
+        assertEquals(CompassStatus.SETTLING, lock.reading(ns(4000)).status)
+        lock.feed(4020, 4020, gameYawDeg = { 60.0 })
+        assertEquals(CompassStatus.LOCKED, lock.reading(ns(4020)).status)
+    }
+
+    @Test
+    fun aJumpJustOverSixDegreesReleasesTheLockAndOneJustUnderDoesNot() {
+        val under = CompassLock()
+        under.feed(0, 2000)
+        under.feed(2020, 2500, gameYawDeg = { 45.5 })
+        assertEquals(CompassStatus.LOCKED, under.reading(ns(2500)).status)
+
+        val over = CompassLock()
+        over.feed(0, 2000)
+        over.feed(2020, 2020, gameYawDeg = { 46.5 })
+        assertEquals(CompassStatus.SETTLING, over.reading(ns(2020)).status)
+    }
+
+    @Test
+    fun wobbleWithinSixDegreesKeepsTheLock() {
+        val lock = CompassLock()
+        lock.feed(0, 2000)
+        assertEquals(CompassStatus.LOCKED, lock.reading(ns(2000)).status)
+        // A hand swinging the phone: the difference wobbles 3 to 5 degrees either side of the locked 40.
+        val wobble = listOf(35.0, 44.0, 37.0, 45.0, 36.0, 43.0)
+        lock.feed(2020, 6000, gameYawDeg = { t -> wobble[((t / 20) % wobble.size).toInt()] })
+        assertEquals(CompassStatus.LOCKED, lock.reading(ns(6000)).status)
+        assertEquals(1f, lock.reading(ns(6000)).progress)
+    }
+
+    @Test
+    fun calibrationReleasesTheLock() {
+        val lock = CompassLock()
+        lock.feed(0, 2000)
+        assertEquals(CompassStatus.LOCKED, lock.reading(ns(2000)).status)
         // A figure-8 request releases it, and afterwards it has to settle again.
         lock.onMagAccuracy(1)
-        assertEquals(CompassStatus.CALIBRATE, lock.reading(ns(2100)).status)
+        assertEquals(CompassStatus.CALIBRATE, lock.reading(ns(2000)).status)
         lock.onMagAccuracy(3)
-        assertEquals(CompassStatus.SETTLING, lock.reading(ns(2100)).status)
+        val after = lock.reading(ns(2000))
+        assertEquals(CompassStatus.SETTLING, after.status)
+        assertEquals(0f, after.progress)
+    }
+
+    @Test
+    fun aDriftOfTwoDegreesPerSecondNeverLocks() {
+        val lock = CompassLock()
+        // The spread of two seconds of this ramp is 4 degrees, just inside the deviation limit; the
+        // trend between the window's halves (2 degrees) is what refuses it.
+        lock.feed(0, 10_000, gameYawDeg = { t -> 20.0 + 2.0 * t / 1000.0 })
+        val r = lock.reading(ns(10_000))
+        assertEquals(CompassStatus.SETTLING, r.status)
+        // Dropping the drifting start keeps about one second: progress shrinks instead of filling.
+        assertTrue(r.progress < 0.6f, "progress ${r.progress}")
+    }
+
+    @Test
+    fun aDriftOfOneDegreePerSecondLocksOnceItSettles() {
+        val lock = CompassLock()
+        lock.feed(0, 3000, gameYawDeg = { t -> 20.0 + t / 1000.0 })
+        // Held at 23 degrees from 3 s on: within two seconds the window is steady again.
+        lock.feed(3020, 5000, gameYawDeg = { 23.0 })
+        val r = lock.reading(ns(5000))
+        assertEquals(CompassStatus.LOCKED, r.status)
+        assertEquals(-23.0, assertNotNull(r.offsetDeg), 0.5)
+    }
+
+    @Test
+    fun aFusedVectorStillConvergingLocksOnlyNearItsFinalNorth() {
+        // The yaw difference approaches its final value with a 3 s time constant from 20 degrees off, as
+        // the fused vector does after registration. Locking after two seconds regardless would anchor
+        // north about 10 degrees off.
+        val lock = CompassLock()
+        var lockedAtMs: Long? = null
+        var t = 0L
+        while (t <= 20_000 && lockedAtMs == null) {
+            lock.feed(t, t, gameYawDeg = { ms -> 40.0 + 20.0 * exp(-ms / 3000.0) })
+            if (lock.reading(ns(t)).status == CompassStatus.LOCKED) lockedAtMs = t
+            t += 20
+        }
+        val at = assertNotNull(lockedAtMs)
+        val remainingDeg = 20.0 * exp(-at / 3000.0)
+        assertTrue(remainingDeg < 2.5, "locked at $at ms with $remainingDeg degrees to go")
+    }
+
+    @Test
+    fun handHeldJitterOfHalfADegreeStillLocks() {
+        val random = Random(42)
+        val jitter = HashMap<Long, Double>()
+        val lock = CompassLock()
+        lock.feed(0, 3000, gameYawDeg = { t -> 40.0 + jitter.getOrPut(t) { random.nextGaussian() * 0.5 } })
+        val r = lock.reading(ns(3000))
+        assertEquals(CompassStatus.LOCKED, r.status)
+        assertEquals(-40.0, assertNotNull(r.offsetDeg), 0.3)
+    }
+
+    @Test
+    fun aSparseStreamDoesNotLock() {
+        val lock = CompassLock()
+        // One pair every 100 ms: the window spans two seconds but holds only 21 samples.
+        lock.feed(0, 4000, stepMs = 100)
+        assertEquals(CompassStatus.SETTLING, lock.reading(ns(4000)).status)
+    }
+
+    @Test
+    fun aLoneSampleAfterALongGapDoesNotLock() {
+        val lock = CompassLock()
+        lock.feed(0, 1980)
+        assertEquals(CompassStatus.SETTLING, lock.reading(ns(1980)).status)
+        // 30 s later (the app was in the background) one sample arrives: it starts a new window.
+        lock.feed(31_980, 31_980)
+        val r = lock.reading(ns(31_980))
+        assertEquals(CompassStatus.SETTLING, r.status)
+        assertEquals(0f, r.progress)
+    }
+
+    @Test
+    fun aGapAfterTheLockReleasesIt() {
+        val lock = CompassLock()
+        lock.feed(0, 2000)
+        assertEquals(CompassStatus.LOCKED, lock.reading(ns(2000)).status)
+        // Two seconds without samples: the fusion may have restarted, so north has to settle again.
+        lock.feed(4000, 4100)
+        val r = lock.reading(ns(4100))
+        assertEquals(CompassStatus.SETTLING, r.status)
+        assertEquals(0.05f, r.progress, 0.001f)
+        lock.feed(4120, 6000)
+        assertEquals(CompassStatus.LOCKED, lock.reading(ns(6000)).status)
+    }
+
+    @Test
+    fun aShortGapKeepsTheWindow() {
+        val lock = CompassLock()
+        lock.feed(0, 1000)
+        // 200 ms missing is under the gap limit: the window carries on and locks on time.
+        lock.feed(1200, 2000)
+        assertEquals(CompassStatus.LOCKED, lock.reading(ns(2000)).status)
+    }
+
+    @Test
+    fun liveRecordsAreRoutedByType() {
+        val lock = CompassLock()
+        val g = Quat.yaw(Math.toRadians(40.0))
+        var t = 0L
+        while (t <= 2000) {
+            val gx = g.x.toFloat()
+            val gy = g.y.toFloat()
+            val gz = g.z.toFloat()
+            lock.feed(RotationSample(ns(t), gx, gy, gz, g.w.toFloat(), -1f, RotationSource.GAME))
+            lock.feed(RotationSample(ns(t), 0f, 0f, 0f, 1f, 0.05f, RotationSource.FUSED))
+            lock.feed(MagSample(ns(t), earth.x.toFloat(), earth.y.toFloat(), earth.z.toFloat()))
+            lock.feed(AccelSample(ns(t), 0f, 0f, 9.81f))
+            t += 20
+        }
+        val r = lock.reading(ns(2000))
+        assertEquals(CompassStatus.LOCKED, r.status)
+        assertEquals(-40.0, assertNotNull(r.offsetDeg), 1e-3)
+        assertEquals(Math.toDegrees(0.05), assertNotNull(r.accuracyDeg), 1e-3)
     }
 
     @Test

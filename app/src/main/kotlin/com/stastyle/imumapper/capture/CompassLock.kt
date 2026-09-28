@@ -1,6 +1,10 @@
 package com.stastyle.imumapper.capture
 
+import com.stastyle.imumapper.pipeline.core.LogRecord
+import com.stastyle.imumapper.pipeline.core.MagSample
 import com.stastyle.imumapper.pipeline.core.Quat
+import com.stastyle.imumapper.pipeline.core.RotationSample
+import com.stastyle.imumapper.pipeline.core.RotationSource
 import com.stastyle.imumapper.pipeline.core.Vec3
 import kotlin.math.PI
 import kotlin.math.abs
@@ -25,7 +29,10 @@ enum class CompassStatus {
     /** North is being measured; [CompassReading.progress] fills while it holds steady. */
     SETTLING,
 
-    /** North has held steady long enough; stays until CALIBRATE or INTERFERENCE releases it. */
+    /**
+     * North has held steady long enough. Stays until CALIBRATE or INTERFERENCE, a gap in the samples or
+     * a jump of the yaw difference releases it.
+     */
     LOCKED,
 }
 
@@ -46,7 +53,7 @@ data class CompassReading(
     /**
      * Mean yaw of fused relative to game rotation over the current window, degrees counter-clockwise
      * about up: the turn that puts this session's game-vector frame onto magnetic north, the value the
-     * pipeline reports as `northOffsetDeg`. Null before the first paired sample.
+     * pipeline reports as `northOffsetDeg`. Null while the window is empty.
      */
     val offsetDeg: Double? = null,
 )
@@ -57,14 +64,30 @@ data class CompassReading(
  * the trip, so that difference is what has to hold still here: the fused vector's yaw converges over
  * a few seconds after its listener is registered, and swings near metal.
  *
+ * Each paired sample adds one yaw difference to a sliding window of the last [LOCK_WINDOW_NS]. While
+ * the window is not steady its oldest samples are dropped, so the progress shrinks only as far as
+ * needed instead of starting over. Steady means both a small spread (every difference within
+ * [MAX_DEVIATION_RAD] of the window's circular mean) and no trend (the means of the older and the
+ * newer half within [MAX_TREND_RAD]): a spread limit alone lets through a fused vector that is still
+ * converging. A steady window that spans [LOCK_WINDOW_NS] with at least [MIN_WINDOW_SAMPLES] samples
+ * locks. The lock latches until the magnetometer asks for a figure 8, interference shows, the samples
+ * stop for longer than [MAX_GAP_NS], or a difference lands more than [RELEASE_DEVIATION_RAD] from the
+ * locked mean.
+ *
  * Feed it the live sensor streams in arrival order and call [reading] for the current state. Not
- * thread-safe; the caller confines it to one thread or locks around it.
+ * thread-safe; the caller confines it to one thread or locks around it. [CompassFeed] does both.
  */
 class CompassLock {
 
     private class Stamped(val tNs: Long, val q: Quat)
 
     private class FieldSample(val tNs: Long, val magnitudeUt: Double)
+
+    /** One yaw difference with the cosine and sine the circular means sum. */
+    private class Delta(val tNs: Long, val rad: Double) {
+        val c: Double = cos(rad)
+        val s: Double = sin(rad)
+    }
 
     private val games = ArrayDeque<Stamped>()
     private val pendingFused = ArrayDeque<Stamped>()
@@ -79,13 +102,25 @@ class CompassLock {
     private var calibrating = false
     private var interference = false
 
-    // The current window of steady deltas: circular sums, first and last sample time, sample count.
-    private var sumC = 0.0
-    private var sumS = 0.0
-    private var windowCount = 0
-    private var windowStartNs = 0L
-    private var windowEndNs = 0L
+    /** The steady yaw differences, oldest first. */
+    private val window = ArrayDeque<Delta>()
+    private var lastDeltaNs = Long.MIN_VALUE
     private var locked = false
+
+    /** Circular mean of the window when it last qualified for the lock. */
+    private var lockedMeanRad = 0.0
+
+    /** Routes one record of the live stream to [onGame], [onFused] or [onMag]; other records are ignored. */
+    fun feed(record: LogRecord) {
+        when (record) {
+            is RotationSample -> when (record.source) {
+                RotationSource.GAME -> onGame(record.tNs, record.toQuat())
+                RotationSource.FUSED -> onFused(record.tNs, record.toQuat(), record.headingAccuracyRad.toDouble())
+            }
+            is MagSample -> onMag(record.tNs, record.x.toDouble(), record.y.toDouble(), record.z.toDouble())
+            else -> Unit
+        }
+    }
 
     fun onGame(tNs: Long, q: Quat) {
         games.addLast(Stamped(tNs, q))
@@ -98,6 +133,13 @@ class CompassLock {
 
     /** [headingAccuracyRad] is the rotation vector's accuracy value, negative when the sensor gives none. */
     fun onFused(tNs: Long, q: Quat, headingAccuracyRad: Double) {
+        if (lastFusedNs != Long.MIN_VALUE && tNs - lastFusedNs > MAX_GAP_NS) {
+            // The fused vector went quiet: the app may have been in the background and the fusion may
+            // have restarted, so what settled before the gap says nothing about north now. Samples
+            // still waiting for a pair are from before the gap.
+            pendingFused.clear()
+            release()
+        }
         lastFusedNs = tNs
         lastFused = q
         this.headingAccuracyRad = headingAccuracyRad
@@ -141,12 +183,14 @@ class CompassLock {
             headingDeg = fused?.let { normalizeDegrees(Math.toDegrees(phoneHeadingRad(it))) },
             accuracyDeg = if (fused != null && headingAccuracyRad >= 0.0) Math.toDegrees(headingAccuracyRad) else null,
             fieldUt = field.lastOrNull()?.magnitudeUt,
-            offsetDeg = if (windowCount > 0) Math.toDegrees(atan2(sumS, sumC)) else null,
+            offsetDeg = if (window.isNotEmpty()) Math.toDegrees(meanRad(0, window.size)) else null,
         )
     }
 
     private fun windowProgress(): Float =
-        if (windowCount == 0) 0f else ((windowEndNs - windowStartNs).toFloat() / LOCK_WINDOW_NS).coerceIn(0f, 1f)
+        if (window.isEmpty()) 0f else (windowSpanNs().toFloat() / LOCK_WINDOW_NS).coerceIn(0f, 1f)
+
+    private fun windowSpanNs(): Long = window.last().tNs - window.first().tNs
 
     private fun noteTime(tNs: Long) {
         if (tNs > latestNs) latestNs = tNs
@@ -184,24 +228,50 @@ class CompassLock {
     }
 
     private fun onDelta(tNs: Long, delta: Double) {
+        // A hole in the pairs (the game stream stalled) counts like one in the fused stream.
+        val gap = lastDeltaNs != Long.MIN_VALUE && tNs - lastDeltaNs > MAX_GAP_NS
+        lastDeltaNs = tNs
+        if (gap) release()
         if (calibrating || interference) {
             // Settling starts over once the field is clean again.
-            clearWindow()
+            window.clear()
             return
         }
-        if (windowCount == 0 || abs(wrapRad(delta - atan2(sumS, sumC))) > MAX_DEVIATION_RAD) {
-            sumC = cos(delta)
-            sumS = sin(delta)
-            windowCount = 1
-            windowStartNs = tNs
-            windowEndNs = tNs
-        } else {
-            sumC += cos(delta)
-            sumS += sin(delta)
-            windowCount++
-            if (tNs > windowEndNs) windowEndNs = tNs
+        // Far from the north that was locked: the fused vector has re-anchored, so the lock no longer
+        // describes it, and the window starts over from this sample.
+        if (locked && abs(wrapRad(delta - lockedMeanRad)) > RELEASE_DEVIATION_RAD) release()
+        window.addLast(Delta(tNs, delta))
+        // The newest sample at or before the window's start stays too, so a steady stream spans the
+        // whole LOCK_WINDOW_NS whatever the sample times are.
+        while (window.size >= 2 && window[1].tNs <= tNs - LOCK_WINDOW_NS) window.removeFirst()
+        while (window.size > 1 && !isSteady()) window.removeFirst()
+        if (window.size >= MIN_WINDOW_SAMPLES && windowSpanNs() >= LOCK_WINDOW_NS) {
+            locked = true
+            lockedMeanRad = meanRad(0, window.size)
         }
-        if (windowEndNs - windowStartNs >= LOCK_WINDOW_NS) locked = true
+    }
+
+    /** Small spread around the circular mean, and no trend from the older to the newer half. */
+    private fun isSteady(): Boolean {
+        val n = window.size
+        val mean = meanRad(0, n)
+        for (d in window) {
+            if (abs(wrapRad(d.rad - mean)) > MAX_DEVIATION_RAD) return false
+        }
+        if (n < MIN_TREND_SAMPLES) return true
+        val half = n / 2
+        return abs(wrapRad(meanRad(n - half, n) - meanRad(0, half))) <= MAX_TREND_RAD
+    }
+
+    /** Circular mean of the window entries [from, to), radians. */
+    private fun meanRad(from: Int, to: Int): Double {
+        var c = 0.0
+        var s = 0.0
+        for (i in from until to) {
+            c += window[i].c
+            s += window[i].s
+        }
+        return atan2(s, c)
     }
 
     private fun updateDisturbance() {
@@ -218,16 +288,13 @@ class CompassLock {
             val latest = field.last().magnitudeUt
             interference = latest < FIELD_MIN_UT || latest > FIELD_MAX_UT || max - min > FIELD_VARIATION_UT
         }
-        if (calibrating || interference) {
-            locked = false
-            clearWindow()
-        }
+        if (calibrating || interference) release()
     }
 
-    private fun clearWindow() {
-        sumC = 0.0
-        sumS = 0.0
-        windowCount = 0
+    /** Drops the lock and the window; settling starts over from the next sample. */
+    private fun release() {
+        locked = false
+        window.clear()
     }
 
     companion object {
@@ -248,17 +315,55 @@ class CompassLock {
         const val STALE_NS: Long = 1_000_000_000L
 
         /**
-         * How long the yaw difference has to hold within [MAX_DEVIATION_RAD] for a lock. The fused
-         * vector settles over a few seconds after registration; two quiet seconds show it has.
+         * How long the yaw difference has to hold steady for a lock. The fused vector settles over a
+         * few seconds after registration; two steady seconds show it has.
          */
         const val LOCK_WINDOW_NS: Long = 2_000_000_000L
 
         /**
-         * Largest deviation from the window's running mean before the window starts over. Three
-         * degrees is a few metres of sideways error per hundred metres walked, and above the jitter of
-         * a settled fused vector.
+         * Fewest yaw differences a full window must hold for a lock. The live stream is thinned to about
+         * 50 Hz, so a full window holds about 100; under 40 means most pairs were lost, and the spread
+         * and trend of a few samples say little.
          */
-        val MAX_DEVIATION_RAD: Double = Math.toRadians(3.0)
+        const val MIN_WINDOW_SAMPLES: Int = 40
+
+        /**
+         * Largest deviation of any yaw difference in the window from the window's circular mean: a
+         * spread of about 4 degrees. A settled fused vector in a steady hand jitters by about half a
+         * degree (standard deviation), and this is four of those, so such a hand locks in two seconds;
+         * at 1.5 degrees the same jitter keeps trimming the window and the lock often takes three
+         * times as long. Slow drift inside this spread is for [MAX_TREND_RAD] to catch.
+         */
+        val MAX_DEVIATION_RAD: Double = Math.toRadians(2.0)
+
+        /**
+         * Largest difference between the circular means of the older and the newer half of the window.
+         * The halves' centres lie about a second apart, so this bounds the drift to about a degree per
+         * second: a fused vector still converging (a time constant of a few seconds and several degrees
+         * to go) drifts faster, while a half's mean averages away the jitter [MAX_DEVIATION_RAD] allows.
+         */
+        val MAX_TREND_RAD: Double = Math.toRadians(1.0)
+
+        /**
+         * Fewest samples a window needs before its trend is judged. The mean of a half holding only a few
+         * samples is as noisy as a single sample, so on a short window the test would keep trimming a
+         * jittery but steady stream and the window could not grow; ten samples a half average that out.
+         */
+        const val MIN_TREND_SAMPLES: Int = 20
+
+        /**
+         * Longest silence of the fused samples (or of the pairs) before the window is cleared and the
+         * lock released. Samples arrive every 20 ms; a quarter of a second missing means the app was
+         * paused or the sensors were registered again, and a restarted fusion has to settle anew.
+         */
+        const val MAX_GAP_NS: Long = 250_000_000L
+
+        /**
+         * Once locked, a yaw difference this far from the locked mean releases the lock. Well above the
+         * 3 to 5 degrees a hand-held phone wobbles by at worst, so the lock does not flicker; a jump this
+         * large means the fused vector re-anchored, and north has moved.
+         */
+        val RELEASE_DEVIATION_RAD: Double = Math.toRadians(6.0)
 
         /**
          * The Earth's field is 25 to 65 microtesla everywhere; outside a margin around that range the
