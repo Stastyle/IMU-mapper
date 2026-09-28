@@ -132,8 +132,7 @@ class CompassLock {
         }
         val progress = when (status) {
             CompassStatus.LOCKED -> 1f
-            CompassStatus.SETTLING ->
-                if (windowCount == 0) 0f else ((windowEndNs - windowStartNs).toFloat() / LOCK_WINDOW_NS).coerceIn(0f, 1f)
+            CompassStatus.SETTLING -> windowProgress()
             else -> 0f
         }
         return CompassReading(
@@ -145,6 +144,9 @@ class CompassLock {
             offsetDeg = if (windowCount > 0) Math.toDegrees(atan2(sumS, sumC)) else null,
         )
     }
+
+    private fun windowProgress(): Float =
+        if (windowCount == 0) 0f else ((windowEndNs - windowStartNs).toFloat() / LOCK_WINDOW_NS).coerceIn(0f, 1f)
 
     private fun noteTime(tNs: Long) {
         if (tNs > latestNs) latestNs = tNs
@@ -251,7 +253,10 @@ class CompassLock {
          */
         val MAX_DEVIATION_RAD: Double = Math.toRadians(3.0)
 
-        /** The Earth's field is 25 to 65 microtesla everywhere; outside a margin around that, something else is measured. */
+        /**
+         * The Earth's field is 25 to 65 microtesla everywhere; outside a margin around that range the
+         * magnetometer is measuring something else.
+         */
         const val FIELD_MIN_UT: Double = 20.0
         const val FIELD_MAX_UT: Double = 70.0
 

@@ -24,6 +24,7 @@ import com.stastyle.imumapper.pipeline.core.LogRecord
 import com.stastyle.imumapper.pipeline.core.TripMode
 import com.stastyle.imumapper.pipeline.log.LogWriter
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -72,9 +73,14 @@ sealed interface RecordingState {
  * all talk to the same instance from [get]. Lives as long as the process so a recording survives the
  * recording screen being left and re-entered.
  *
- * Threading: [start] and [stop] are serialised by a mutex and run in the controller's own scope, so a
- * caller that is cancelled mid-way (a ViewModel being cleared) never leaves the recorder half stopped.
- * [write], [annotate], [pause] and [resume] may be called from any thread.
+ * Threading: [start], [stop], [startCompassPreview] and [stopCompassPreview] are serialised by a mutex
+ * and run in the controller's own scope, so a caller that is cancelled mid-way (a ViewModel being
+ * cleared) never leaves the recorder half stopped. [write], [annotate], [pause] and [resume] may be
+ * called from any thread.
+ *
+ * Compass preview: before a recording the sensors can run without a writer so the fused rotation
+ * vector settles on north while the user waits. [start] then attaches the log writer to the running
+ * logger instead of registering the sensors again, which would restart the fusion.
  *
  * Pausing: the sensors and the ARCore producers keep logging through a pause so the raw log stays
  * complete; the pipeline is authoritative and drops every sample between the PAUSE and RESUME events.
@@ -144,13 +150,41 @@ class RecordingController private constructor(context: Context) {
      * Returns the new trip id. Throws if a recording is already running or the trip cannot be created.
      */
     suspend fun start(mode: TripMode, carryPosition: CarryPosition): Long =
-        scope.async { mutex.withLock { startLocked(mode, carryPosition) } }.await()
+        scope.async {
+            mutex.withLock {
+                try {
+                    startLocked(mode, carryPosition)
+                } catch (e: Exception) {
+                    // A compass preview may be running for this start, and the screen that asked for it
+                    // may be gone by now; without a recording nobody else would stop the sensors.
+                    stopPreviewLocked()
+                    throw e
+                }
+            }
+        }.await()
 
     /**
      * Writes STOP, closes the log, marks the trip RECORDED and stops the service.
      * Returns the trip id, or null when nothing was recording.
      */
     suspend fun stop(): Long? = scope.async { mutex.withLock { stopLocked() } }.await()
+
+    /**
+     * Runs the sensors without a writer so the compass can settle before [start]. Does nothing while a
+     * recording exists. Started undispatched so that calls made one after another from the main thread
+     * queue on the mutex in that order: a Cancel followed at once by a new Start must not stop the
+     * sensors after the new preview started them.
+     */
+    fun startCompassPreview(): Job = scope.launch(start = CoroutineStart.UNDISPATCHED) {
+        mutex.withLock {
+            if (synchronized(lock) { session == null }) sensorLogger.start(null)
+        }
+    }
+
+    /** Stops the sensors of a compass preview. Does nothing while a recording exists, so it never cuts one short. */
+    fun stopCompassPreview(): Job = scope.launch(start = CoroutineStart.UNDISPATCHED) {
+        mutex.withLock { stopPreviewLocked() }
+    }
 
     /** Appends a record from another producer (ARCore poses, keyframes). Dropped when not recording. */
     fun write(record: LogRecord): Boolean = synchronized(lock) {
@@ -295,6 +329,8 @@ class RecordingController private constructor(context: Context) {
             session = s
             stopping = false
         }
+        // Attaches the writer to the logger; when a compass preview is running the listeners stay
+        // registered, so the north the user waited for carries into the recording.
         sensorLogger.start(w)
         // Publish before the service starts so its first notification (and any screen) sees the live trip.
         publish()
@@ -306,6 +342,13 @@ class RecordingController private constructor(context: Context) {
             }
         }
         return tripId
+    }
+
+    /** Stops the sensors when no recording owns them. Call under [mutex]. */
+    private suspend fun stopPreviewLocked() {
+        if (synchronized(lock) { session != null }) return
+        // stop() blocks for up to two seconds while the logger thread lets go.
+        withContext(Dispatchers.IO) { sensorLogger.stop() }
     }
 
     /**

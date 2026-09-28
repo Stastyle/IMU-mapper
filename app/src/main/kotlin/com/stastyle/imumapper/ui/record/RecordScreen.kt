@@ -104,15 +104,20 @@ fun RecordScreen(
         if (toRequest.isEmpty()) vm.start() else permissionLauncher.launch(toRequest.toTypedArray())
     }
 
-    val busy = ui.phase == RecordPhase.STARTING || ui.phase == RecordPhase.RECORDING || ui.phase == RecordPhase.STOPPING
+    val busy = ui.phase != RecordPhase.SETUP && ui.phase != RecordPhase.DONE
     val view = LocalView.current
     DisposableEffect(view, busy) {
-        // Screen stays on while recording so the annotation buttons remain reachable.
+        // Screen stays on while recording so the annotation buttons remain reachable, and while the
+        // compass settles so the wait is not lost to the screen timeout.
         view.keepScreenOn = busy
         onDispose { view.keepScreenOn = false }
     }
     BackHandler(enabled = busy) {
-        if (ui.phase == RecordPhase.RECORDING) showStopDialog = true
+        when (ui.phase) {
+            RecordPhase.RECORDING -> showStopDialog = true
+            RecordPhase.COMPASS -> vm.cancelCompass()
+            else -> Unit
+        }
     }
     LaunchedEffect(ui.finishedTripId) {
         val id = ui.finishedTripId
@@ -149,7 +154,7 @@ fun RecordScreen(
     ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
             when (ui.phase) {
-                RecordPhase.SETUP, RecordPhase.STARTING -> SetupContent(
+                RecordPhase.SETUP, RecordPhase.COMPASS, RecordPhase.STARTING -> SetupContent(
                     ui = ui,
                     onCarry = vm::setCarry,
                     onStart = onStartClick,
@@ -167,6 +172,15 @@ fun RecordScreen(
         }
     }
 
+    if (ui.phase == RecordPhase.COMPASS) {
+        CompassDialog(
+            reading = ui.compass,
+            canSkip = ui.canSkipCompass,
+            onStart = vm::confirmCompass,
+            onSkip = vm::skipCompass,
+            onCancel = vm::cancelCompass,
+        )
+    }
     if (showStopDialog) {
         ConfirmDialog(
             title = "Stop recording?",
@@ -189,6 +203,7 @@ private fun SetupContent(
     onStart: () -> Unit,
 ) {
     val starting = ui.phase == RecordPhase.STARTING
+    val inputsDisabled = starting || ui.phase == RecordPhase.COMPASS
     // No vertical scroll here: the weighted spacer needs a bounded height to push Start to the bottom.
     Column(
         modifier = Modifier
@@ -204,12 +219,13 @@ private fun SetupContent(
                     selected = ui.carry == position,
                     onClick = { onCarry(position) },
                     label = { Text(carryLabel(position)) },
-                    enabled = !starting,
+                    enabled = !inputsDisabled,
                 )
             }
         }
         Text(
-            "The heading offset from calibration is tied to the carry position. Pick the one you calibrated.",
+            "North is taken from the compass before the recording starts. Start with the phone in your hand; " +
+                "the path keeps its direction when you put it in a pocket.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -219,7 +235,7 @@ private fun SetupContent(
         }
         Button(
             onClick = onStart,
-            enabled = !starting,
+            enabled = !inputsDisabled,
             modifier = Modifier.fillMaxWidth().height(80.dp),
         ) {
             if (starting) {
