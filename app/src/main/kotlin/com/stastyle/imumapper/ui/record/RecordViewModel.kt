@@ -183,9 +183,14 @@ class RecordViewModel(
         }
     }
 
-    /** "Start recording" in the compass dialog, once north is locked. */
+    /**
+     * "Start recording" in the compass dialog, once north is locked. The button stays tappable while it
+     * animates out after the lock was lost, so the status is checked here too; "Start anyway" is
+     * [skipCompass].
+     */
     fun confirmCompass() {
-        if (_ui.value.phase != RecordPhase.COMPASS) return
+        val ui = _ui.value
+        if (ui.phase != RecordPhase.COMPASS || ui.compass?.status != CompassStatus.LOCKED) return
         leaveCompass()
         startRecording()
     }
