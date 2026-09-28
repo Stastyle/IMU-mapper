@@ -165,6 +165,15 @@ object CalibrationMath {
         return if (abs(deg) > MAX_HEADING_WALK_CORRECTION_DEG) deg else null
     }
 
+    /**
+     * True when the result's north was not taken at its start: the magnetic gate rejected the first
+     * readings as disturbed, and [OrientationEstimator.NORTH_REFERENCE_AT] names the later second north
+     * came from. The fused vector settles over seconds, so a disturbance at the start can still pull it
+     * when north is read later, and an offset measured against that north would turn every trip.
+     */
+    fun northCameLate(diagnostics: Map<String, String>): Boolean =
+        diagnostics.containsKey(OrientationEstimator.NORTH_REFERENCE_AT)
+
     // --- square test ---
 
     /** Straight-line gap between the last and the first point; null for an empty path. */

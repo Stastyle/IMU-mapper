@@ -161,11 +161,13 @@ data class CalibrationUiState(
  * temporary file, reads it back and runs the PDR pipeline on it, exactly as a real trip would be
  * processed. Only the derived value is kept; the file is deleted afterwards.
  *
- * The heading walk first waits for the compass, as a recording does ([FlowPhase.Compass]): its north is
- * taken from the first second of the log, and a fused vector registered cold would still be settling
- * then, so the saved offset would absorb that error and turn every trip by it. The logger runs without
- * a writer until north locks and the user starts walking; the log's writer is then attached to the
- * running logger, which keeps the registrations and so the settled fusion.
+ * The heading walk first waits for the compass, as a recording does ([FlowPhase.Compass]): the pipeline
+ * takes north from the first second of the log that passes its magnetic gate, and a fused vector
+ * registered cold would still be settling then, so the saved offset would absorb that error and turn
+ * every trip by it. A walk whose first second failed the gate, so that north came from later, is
+ * refused ([CalibrationMath.northCameLate]). The logger runs without a writer until north locks and the
+ * user starts walking; the log's writer is then attached to the running logger, which keeps the
+ * registrations and so the settled fusion.
  */
 class CalibrationViewModel(
     private val appContext: Context,
@@ -641,6 +643,9 @@ class CalibrationViewModel(
                 "The compass gave no north during the walk (" + problem + "). Calibrate outdoors, away " +
                     "from metal, cars and electronics.",
             )
+        }
+        if (CalibrationMath.northCameLate(result.diagnostics)) {
+            throw IllegalStateException("The compass was disturbed as the walk started: calibrate away from metal.")
         }
         val moved = CalibrationMath.compassMovedDeg(result.diagnostics)
         if (moved != null) {

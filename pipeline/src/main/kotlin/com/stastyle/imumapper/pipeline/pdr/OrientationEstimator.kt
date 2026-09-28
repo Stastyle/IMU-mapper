@@ -24,7 +24,7 @@ import kotlin.math.sin
  * passes (normally the first one, so the first second of the trip), is the reference: with
  * [PipelineConfig.northFromCompass] on, the whole trip is turned by it, so +Y is magnetic north
  * (diagnostics `northReference` = "magnetic", `northOffsetDeg` = the reference). When that window
- * starts more than [referenceWindowS] after the first fused sample, `northReferenceAtS` says how
+ * starts more than [referenceWindowS] after the first fused sample, [NORTH_REFERENCE_AT] says how
  * many seconds later. With [PipelineConfig.useMagnetometer] on, the difference is also low-passed
  * over [yawCorrectionTimeConstantS] and its change since the reference is applied as a drift
  * correction; with it off, the reference alone is applied and the magnetometer is ignored after
@@ -113,7 +113,7 @@ class OrientationEstimator(
      * class comment. Only moments where the magnetic field passed the gate are trusted. The gate is
      * referenced to the start itself, so a start that is steadily disturbed passes it and is not
      * detected: the whole trip is turned by the disturbed heading. A start whose readings fail the
-     * gate moves the reference to the first fused sample that passes (`northReferenceAtS`), and only
+     * gate moves the reference to the first fused sample that passes ([NORTH_REFERENCE_AT]), and only
      * a trip where nothing passes keeps the game vector's yaw and says why in `northReference`.
      */
     private fun correctYaw(
@@ -175,7 +175,7 @@ class OrientationEstimator(
         val ref = atan2(rs, rc)
         diag["northOffsetDeg"] = Diag.num(Math.toDegrees(ref), 1)
         val lateNs = times[refStart] - times[0]
-        if (lateNs > window) diag["northReferenceAtS"] = Diag.num(lateNs / 1e9, 1)
+        if (lateNs > window) diag[NORTH_REFERENCE_AT] = Diag.num(lateNs / 1e9, 1)
 
         if (!config.useMagnetometer) {
             // North from the start only: one constant turn, and the magnetometer is ignored afterwards.
@@ -258,5 +258,12 @@ class OrientationEstimator(
          * calibration reads it to reject a walk on which the compass moved.
          */
         const val YAW_CORRECTION_FINAL: String = "yawCorrectionFinalDeg"
+
+        /**
+         * Diagnostics key, present only when the magnetic gate rejected the start: how many seconds into
+         * the trip the window that gave north began. The heading calibration reads it to reject a walk
+         * whose north was not taken at its start.
+         */
+        const val NORTH_REFERENCE_AT: String = "northReferenceAtS"
     }
 }

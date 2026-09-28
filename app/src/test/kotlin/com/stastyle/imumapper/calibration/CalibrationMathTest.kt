@@ -8,6 +8,7 @@ import kotlin.math.PI
 import kotlin.math.pow
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -111,6 +112,13 @@ class HeadingMathTest {
         // Not reported (the magnetometer correction was off) or unreadable: nothing to hold against the walk.
         assertNull(moved(null))
         assertNull(moved("n/a"))
+    }
+
+    @Test
+    fun aNorthReferenceTakenAfterTheStartIsLate() {
+        assertTrue(CalibrationMath.northCameLate(mapOf("northReference" to "magnetic", "northReferenceAtS" to "2.0")))
+        assertFalse(CalibrationMath.northCameLate(mapOf("northReference" to "magnetic", "northOffsetDeg" to "-40.0")))
+        assertFalse(CalibrationMath.northCameLate(emptyMap()))
     }
 
     @Test

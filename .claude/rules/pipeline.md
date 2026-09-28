@@ -96,7 +96,10 @@ paths:
     `OrientationEstimator.YAW_CORRECTION_FINAL` to reject a walk on which the compass moved.
   - `northOffsetDeg` and `northReferenceAtS` are written in `OrientationEstimator.correctYaw` and
     in `correct_yaw` in `replay.py`, in the same order, and `master_prompt.md` explains them.
-    `ConfigSchema` descriptions also name `northReference` and `northOffsetDeg`.
+    `ConfigSchema` descriptions also name `northReference` and `northOffsetDeg`. The heading
+    calibration reads `northReferenceAtS` through `OrientationEstimator.NORTH_REFERENCE_AT`
+    (`CalibrationMath.northCameLate`) and refuses a walk that has it, because its start was
+    disturbed.
 - **New value in a core enum:**
   - The compiler lists the app's exhaustive `when`s, for example `PathScene`,
     `CalibrationFormat`, `CaptureSupport`, `RecordScreen`, `SettingsScreen` and
