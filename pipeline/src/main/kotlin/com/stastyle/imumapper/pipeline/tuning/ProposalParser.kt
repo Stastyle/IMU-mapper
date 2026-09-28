@@ -75,6 +75,7 @@ object ProposalParser {
                     if (axis == null) errors.add("headingAxis must be one of " + HeadingAxisMode.entries.joinToString()) else c = c.copy(headingAxis = axis)
                 }
                 "useMagnetometer" -> bool(key, value, errors)?.let { c = c.copy(useMagnetometer = it) }
+                "northFromCompass" -> bool(key, value, errors)?.let { c = c.copy(northFromCompass = it) }
                 "magGateTolerance" -> number(key, value, errors)?.let { c = c.copy(magGateTolerance = it) }
                 "gyroBias" -> vector(value, errors)?.let { c = c.copy(gyroBias = it) }
                 "stepMinIntervalS" -> number(key, value, errors)?.let { c = c.copy(stepMinIntervalS = it) }

@@ -24,7 +24,9 @@ class ConfigFieldSpec(
     val values: List<String> = emptyList(),
     /**
      * False for values the guided calibration flows measure directly (stride, heading offset, gyro
-     * bias): the prompt asks the model to leave them alone unless the walk shows they are wrong.
+     * bias): the prompt asks the model to leave them alone unless the walk shows they are wrong. Also
+     * false for user settings no walk can show to be wrong (northFromCompass), whose description
+     * tells the model never to change them.
      */
     val tunable: Boolean = true,
 )
@@ -62,8 +64,16 @@ object ConfigSchema {
         ),
         ConfigFieldSpec(
             "useMagnetometer", FieldKind.BOOLEAN, "", 0.0, 1.0,
-            "Correct slow gyro yaw drift with the magnetometer. Turn off when the magnetic gate passes only a " +
-                "small fraction of the samples or the path bends where the walk was straight.",
+            "Correct slow gyro yaw drift with the magnetometer during the walk. It only bounds drift; where north " +
+                "is comes from northFromCompass and stays when this is off. Turn off when the magnetic gate passes " +
+                "only a small fraction of the samples or the path bends where the walk was straight.",
+        ),
+        ConfigFieldSpec(
+            "northFromCompass", FieldKind.BOOLEAN, "", 0.0, 1.0,
+            "Turn the path so +Y is magnetic north, read from the compass at the start of the walk " +
+                "(northReference and northOffsetDeg in the diagnostics). The user's choice of map frame, not a " +
+                "tuning knob: never propose changing it, because no walk can show it is wrong.",
+            tunable = false,
         ),
         ConfigFieldSpec(
             "magGateTolerance", FieldKind.NUMBER, "fraction", 0.0, 1.0,
@@ -143,6 +153,7 @@ object ConfigSchema {
         "headingOffsetRad" -> num(c.headingOffsetRad, 4)
         "headingAxis" -> c.headingAxis.name
         "useMagnetometer" -> c.useMagnetometer.toString()
+        "northFromCompass" -> c.northFromCompass.toString()
         "magGateTolerance" -> num(c.magGateTolerance)
         "gyroBias" -> vec(c.gyroBias)
         "stepMinIntervalS" -> num(c.stepMinIntervalS)
