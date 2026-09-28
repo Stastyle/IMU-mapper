@@ -32,6 +32,13 @@ data class PipelineConfig(
     /** Use the magnetometer-corrected rotation vector to bound gyro yaw drift. */
     val useMagnetometer: Boolean = true,
     /**
+     * Turn the path so +Y is magnetic north, taken from the fused rotation vector at the start of the
+     * trip. Independent of [useMagnetometer]: with that off, the start still sets north and the
+     * magnetometer is ignored afterwards. Off, the trip keeps the game rotation vector's yaw, which is
+     * arbitrary and differs from one recording to the next.
+     */
+    val northFromCompass: Boolean = true,
+    /**
      * Relative tolerance on magnetic field magnitude (and dip) versus the value seen at the start
      * before magnetometer readings are ignored as disturbed.
      */
