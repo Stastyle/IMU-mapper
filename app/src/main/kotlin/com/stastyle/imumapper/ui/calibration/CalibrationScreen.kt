@@ -222,11 +222,13 @@ private fun StrideWalkCard(ui: CalibrationUiState, vm: CalibrationViewModel) {
 private fun HeadingOffsetCard(ui: CalibrationUiState, vm: CalibrationViewModel) {
     FlowCard(
         kind = FlowKind.HEADING,
-        instructions = "Optional: only needed if you start recordings with the phone already in a pocket or " +
-            "mount where it does not point forward. North comes from the compass; the offset belongs to the pose " +
-            "the phone is in when a recording starts. Calibrate in that pose: outdoors and away from metal, face " +
-            "magnetic north (check with a compass), tap Start and wait for the compass, then tap Start walking, " +
-            "walk straight toward magnetic north for about ten steps and tap Stop.",
+        instructions = "Optional: only needed if recordings start with the phone in a mount or holder that does " +
+            "not point forward and whose screen you can still tap; a phone put in a pocket after the start keeps " +
+            "its direction without one. North comes from the compass, and the offset is applied to every " +
+            "recording, so recordings must start in the pose you calibrate it in. Calibrate in that pose: " +
+            "outdoors and away from metal, face magnetic north (check with a compass), tap Start and wait for " +
+            "the compass, then tap Start walking, walk straight toward magnetic north for about ten steps and " +
+            "tap Stop.",
         phase = ui.phase(FlowKind.HEADING),
         enabled = ui.activeFlow == null,
         onStart = { vm.start(FlowKind.HEADING) },
