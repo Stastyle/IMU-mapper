@@ -49,6 +49,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.stastyle.imumapper.data.db.TripEntity
 import com.stastyle.imumapper.ui.common.appContainer
+import com.stastyle.imumapper.ui.record.CompassDialog
 
 /** Calibration flows: still bias, stride walk, heading offset, square test, ARCore vs PDR, assisted tuning. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -81,8 +82,8 @@ fun CalibrationScreen(onBack: () -> Unit, onOpenTuning: () -> Unit) {
         }
     }
     val view = LocalView.current
-    DisposableEffect(view, ui.isRecording) {
-        view.keepScreenOn = ui.isRecording
+    DisposableEffect(view, ui.sensorsRunning) {
+        view.keepScreenOn = ui.sensorsRunning
         onDispose { view.keepScreenOn = false }
     }
     LaunchedEffect(ui.message) {
@@ -122,6 +123,18 @@ fun CalibrationScreen(onBack: () -> Unit, onOpenTuning: () -> Unit) {
             VioCard(ui, vm)
             TuningCard(onOpenTuning)
         }
+    }
+
+    val heading = ui.phase(FlowKind.HEADING)
+    if (heading is FlowPhase.Compass) {
+        // No "Start anyway" here: an offset measured against a compass that has not settled turns every trip.
+        CompassDialog(
+            reading = heading.reading,
+            hint = "Hold the phone in the pose you are calibrating, facing magnetic north, away from metal.",
+            startLabel = "Start walking",
+            onStart = vm::confirmCompass,
+            onCancel = vm::cancelActive,
+        )
     }
 }
 
@@ -203,10 +216,11 @@ private fun StrideWalkCard(ui: CalibrationUiState, vm: CalibrationViewModel) {
 private fun HeadingOffsetCard(ui: CalibrationUiState, vm: CalibrationViewModel) {
     FlowCard(
         kind = FlowKind.HEADING,
-        instructions = "Optional: north comes from the compass. This step measures how the phone sits relative " +
-            "to your walking direction, for carrying it in a way that does not point forward. Outdoors and away " +
-            "from metal, face magnetic north (check with a compass), carry the phone the way you will during " +
-            "trips (" + Fmt.carry(ui.carry) + "), tap Start, walk straight for about ten steps and tap Stop.",
+        instructions = "Optional: only needed if you start recordings with the phone already in a pocket or " +
+            "mount where it does not point forward. North comes from the compass; the offset belongs to the pose " +
+            "the phone is in when a recording starts. Calibrate in that pose: outdoors and away from metal, face " +
+            "magnetic north (check with a compass), tap Start and wait for the compass, then tap Start walking, " +
+            "walk straight toward magnetic north for about ten steps and tap Stop.",
         phase = ui.phase(FlowKind.HEADING),
         enabled = ui.activeFlow == null,
         onStart = { vm.start(FlowKind.HEADING) },

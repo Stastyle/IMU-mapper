@@ -101,6 +101,19 @@ class HeadingMathTest {
     }
 
     @Test
+    fun aLargeDriftCorrectionMeansTheCompassMovedDuringTheWalk() {
+        fun moved(value: String?): Double? =
+            CalibrationMath.compassMovedDeg(if (value == null) emptyMap() else mapOf("yawCorrectionFinalDeg" to value))
+        assertEquals(-7.25, assertNotNull(moved("-7.25")), 1e-12)
+        assertEquals(5.01, assertNotNull(moved("5.01")), 1e-12)
+        assertNull(moved("5.00"))
+        assertNull(moved("-0.3"))
+        // Not reported (the magnetometer correction was off) or unreadable: nothing to hold against the walk.
+        assertNull(moved(null))
+        assertNull(moved("n/a"))
+    }
+
+    @Test
     fun axisComesFromTheFirstHeadingSegment() {
         fun axis(diag: String?): HeadingAxisMode =
             CalibrationMath.headingAxisFromDiagnostics(if (diag == null) emptyMap() else mapOf("headingAxis" to diag))

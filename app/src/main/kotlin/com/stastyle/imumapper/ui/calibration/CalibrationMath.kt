@@ -3,7 +3,9 @@ package com.stastyle.imumapper.ui.calibration
 import com.stastyle.imumapper.pipeline.core.HeadingAxisMode
 import com.stastyle.imumapper.pipeline.core.Quat
 import com.stastyle.imumapper.pipeline.core.Vec3
+import com.stastyle.imumapper.pipeline.pdr.OrientationEstimator
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.max
 import kotlin.math.min
@@ -30,12 +32,19 @@ object CalibrationMath {
     const val HEADING_AXIS_DIAG: String = "headingAxis"
 
     /**
-     * Key of the diagnostic that says what +Y of a result is: [NORTH_MAGNETIC], or "relative: " and
-     * the reason north could not be taken from the compass.
+     * Key of the orientation diagnostic with the drift correction the magnetometer applied by the end of
+     * a trip, in degrees: how far the fused-minus-game yaw moved after the start. Present only when the
+     * correction ran (`useMagnetometer` on).
      */
-    const val NORTH_REFERENCE_DIAG: String = "northReference"
-    const val NORTH_MAGNETIC: String = "magnetic"
-    private const val NORTH_RELATIVE_PREFIX = "relative:"
+    const val YAW_CORRECTION_FINAL_DIAG: String = "yawCorrectionFinalDeg"
+
+    /**
+     * Largest drift correction a heading walk may end with. The walk is short and starts on a settled
+     * compass, so the gyro drifts a fraction of a degree; more than this means the compass itself
+     * moved (metal or a disturbed field along the way), and the end direction measured against it
+     * would put the error into every trip.
+     */
+    const val MAX_HEADING_WALK_CORRECTION_DEG: Double = 5.0
 
     // --- still bias ---
 
@@ -136,13 +145,24 @@ object CalibrationMath {
     }
 
     /**
-     * Why +Y of a result is not magnetic north, from its [NORTH_REFERENCE_DIAG] diagnostic; null when
-     * it is. The pipeline's "relative: " prefix is dropped so the reason reads on its own.
+     * Why +Y of a result is not magnetic north, from its [OrientationEstimator.NORTH_REFERENCE]
+     * diagnostic; null when it is. The pipeline's [OrientationEstimator.RELATIVE] prefix is dropped so
+     * the reason reads on its own.
      */
     fun northProblem(diagnostics: Map<String, String>): String? {
-        val reference = diagnostics[NORTH_REFERENCE_DIAG]?.trim() ?: return "the result does not say where north is"
-        if (reference == NORTH_MAGNETIC) return null
-        return reference.removePrefix(NORTH_RELATIVE_PREFIX).trim().ifEmpty { reference }
+        val reference = diagnostics[OrientationEstimator.NORTH_REFERENCE]?.trim()
+            ?: return "the result does not say where north is"
+        if (reference == OrientationEstimator.MAGNETIC) return null
+        return reference.removePrefix(OrientationEstimator.RELATIVE.trim()).trim().ifEmpty { reference }
+    }
+
+    /**
+     * The drift correction a heading walk ended with, degrees, from [YAW_CORRECTION_FINAL_DIAG], when
+     * its size is over [MAX_HEADING_WALK_CORRECTION_DEG]; null when it is within, or not reported.
+     */
+    fun compassMovedDeg(diagnostics: Map<String, String>): Double? {
+        val deg = diagnostics[YAW_CORRECTION_FINAL_DIAG]?.trim()?.toDoubleOrNull() ?: return null
+        return if (abs(deg) > MAX_HEADING_WALK_CORRECTION_DEG) deg else null
     }
 
     // --- square test ---

@@ -57,6 +57,8 @@ fun FlowCard(
                     setup()
                     Button(onClick = onStart, enabled = enabled) { Text("Start") }
                 }
+                // The compass dialog covers the screen meanwhile; this shows behind it.
+                is FlowPhase.Compass -> Text("Waiting for the compass to find north…")
                 is FlowPhase.Running -> RunningBody(kind, phase, onStop)
                 is FlowPhase.Computing -> {
                     Row(
