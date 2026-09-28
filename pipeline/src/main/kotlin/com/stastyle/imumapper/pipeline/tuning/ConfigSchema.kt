@@ -51,9 +51,13 @@ object ConfigSchema {
         ),
         ConfigFieldSpec(
             "headingOffsetRad", FieldKind.NUMBER, "rad", -6.2832, 6.2832,
-            "Angle added to the phone's heading to get the walking direction. Measured by the heading walk; " +
-                "a constant rotation of the whole path (every leg off by the same angle) is the only evidence " +
-                "for changing it. headingOffsetDeg is accepted as an alternative key in degrees.",
+            "Angle added to the phone's heading to get the walking direction, for how the phone is held when " +
+                "the recording starts. Measured by the heading walk. A constant rotation of the whole path (every " +
+                "leg off by the same angle) may mean a wrong offset, but can also come from the compass at the start " +
+                "(metal nearby) or from magnetic versus true north, so change it only when the same rotation repeats " +
+                "across walks started in clean surroundings with northReference \"magnetic\". When northReference " +
+                "is not \"magnetic\", the direction of the path is the gyro's arbitrary start and says nothing " +
+                "about this offset. headingOffsetDeg is accepted as an alternative key in degrees.",
             tunable = false,
         ),
         ConfigFieldSpec(
