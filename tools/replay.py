@@ -762,23 +762,23 @@ class OrientationEstimator:
             self.skip(config, diag, "magnetic field never passed the gate", "magnetic field never passed the gate")
             return base
 
-        ref_end = int(fused_t[0]) + int(self.reference_window_s * 1e9)
+        # Reference: gated circular mean over one window from the first fused sample that passes.
+        window = int(self.reference_window_s * 1e9)
+        ref_start = int(np.argmax(passes))
+        ref_end = int(fused_t[ref_start]) + window
         rc = rs = 0.0
-        ref_count = 0
-        for i in range(n):
-            if fused_t[i] > ref_end and ref_count > 0:
+        for i in range(ref_start, n):
+            if fused_t[i] > ref_end:
                 break
             if not passes[i]:
                 continue
             rc += math.cos(delta[i])
             rs += math.sin(delta[i])
-            ref_count += 1
-        if ref_count == 0:
-            reason = "magnetic field disturbed during the reference second"
-            self.skip(config, diag, reason, reason)
-            return base
         ref = math.atan2(rs, rc)
         diag["northOffsetDeg"] = Diag.num(math.degrees(ref), 1)
+        late_ns = int(fused_t[ref_start]) - int(fused_t[0])
+        if late_ns > window:
+            diag["northReferenceAtS"] = Diag.num(late_ns / 1e9, 1)
 
         if not config.useMagnetometer:
             # North from the start only: one constant turn, and the magnetometer is ignored afterwards.

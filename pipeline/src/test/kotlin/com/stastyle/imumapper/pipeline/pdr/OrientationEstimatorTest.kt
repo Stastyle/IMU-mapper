@@ -1,5 +1,6 @@
 package com.stastyle.imumapper.pipeline.pdr
 
+import com.stastyle.imumapper.pipeline.core.MagSample
 import com.stastyle.imumapper.pipeline.core.PathResult
 import com.stastyle.imumapper.pipeline.core.PipelineConfig
 import com.stastyle.imumapper.pipeline.core.RotationSample
@@ -159,6 +160,54 @@ class OrientationEstimatorTest {
         assertEquals("relative: magnetic field never passed the gate", gOff.diagnostics["northReference"])
     }
 
+    /**
+     * [w] with the magnetometer scattered for its first [seconds]: readings alternately 1.6 and 0.4
+     * times the real field. Their mean is close to the real field, so the gate built from the first
+     * second passes the steady field that follows and fails every scattered reading.
+     */
+    private fun scatteredStart(w: SyntheticWalk, seconds: Double): RawLog {
+        val end = SyntheticWalk.BASE_NS + Math.round(seconds * 1e9)
+        val b = RawLog.Builder()
+        var k = 0
+        for (rec in w.buildRecords()) {
+            if (rec is MagSample && rec.tNs <= end) {
+                val f = if (k++ % 2 == 0) 1.6f else 0.4f
+                b.add(MagSample(rec.tNs, rec.x * f, rec.y * f, rec.z * f))
+            } else {
+                b.add(rec)
+            }
+        }
+        return b.build()
+    }
+
+    @Test
+    fun aScatteredStartTakesNorthFromTheFirstSecondThatPasses() {
+        val w = offsetWalk(driftRadPerS = 0.02)
+        val cfg = config(w)
+        val r = PdrProcessor().process(scatteredStart(w, 2.0), cfg)
+        assertEquals("magnetic", r.diagnostics["northReference"])
+        assertEquals("applied", r.diagnostics["yawCorrection"])
+        // The first fused sample that passes is at 2.02 s, so the reference second runs to 3.02 s.
+        assertEquals("2.0", r.diagnostics["northReferenceAtS"])
+        // Its mean is the 40 degree offset plus the drift at 2.52 s. The single sample at 2.02 s that
+        // the reference used to be would give 42.3.
+        val windowMean = -(40.0 + Math.toDegrees(0.02 * 2.52))
+        assertTrue(abs(northOffsetDeg(r) - windowMean) < 0.1, "northOffsetDeg ${r.diagnostics["northOffsetDeg"]}")
+        assertEndsNear(trueNorthEnd, r, 2.5, "scattered start")
+
+        val anchorOnly = PdrProcessor().process(scatteredStart(w, 2.0), cfg.copy(useMagnetometer = false))
+        assertEquals("magnetic", anchorOnly.diagnostics["northReference"])
+        assertEquals("2.0", anchorOnly.diagnostics["northReferenceAtS"])
+        assertEquals(r.diagnostics["northOffsetDeg"], anchorOnly.diagnostics["northOffsetDeg"])
+
+        // A start that passes at once uses the first second and does not mention it.
+        val clean = run(w)
+        assertNull(clean.diagnostics["northReferenceAtS"])
+        assertTrue(abs(northOffsetDeg(clean) + 40.0 + Math.toDegrees(0.02 * 0.5)) < 0.1, "clean start")
+        // A scatter shorter than the reference second moves the window without the key.
+        assertNull(PdrProcessor().process(scatteredStart(w, 0.5), cfg).diagnostics["northReferenceAtS"])
+    }
+
     private fun fusedOnly(w: SyntheticWalk): RawLog {
         val b = RawLog.Builder()
         for (rec in w.buildRecords()) if (!(rec is RotationSample && rec.source == RotationSource.GAME)) b.add(rec)
@@ -194,6 +243,8 @@ class OrientationEstimatorTest {
             log to cfg.copy(useMagnetometer = false),
             log to cfg.copy(useMagnetometer = false, northFromCompass = false),
             log to cfg.copy(magGateTolerance = 0.0),
+            scatteredStart(w, 2.0) to cfg,
+            scatteredStart(w, 2.0) to cfg.copy(useMagnetometer = false),
             north(SyntheticWalk(includeMag = false)).build() to cfg,
             north(SyntheticWalk(includeFused = false)).build() to cfg,
             fusedOnly(w) to cfg,

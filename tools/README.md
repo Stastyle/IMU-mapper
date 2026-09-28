@@ -54,8 +54,8 @@ and `baroStillGapS`, which `--set` rejects. The differences listed under "Not co
 2. The **config** in effect.
 3. The pipeline **diagnostics** (same keys as `PathResult.diagnostics` from the Kotlin code:
    orientation source, magnetometer gate pass fraction, where north comes from (`northReference`,
-   `northOffsetDeg`), software vs hardware step counts, stride model, heading axis and offsets,
-   barometer reference, loop closure).
+   `northOffsetDeg`, `northReferenceAtS`), software vs hardware step counts, stride model, heading
+   axis and offsets, barometer reference, loop closure).
 4. **Stats**: distance, steps, duration, vertical range, closure error, and the end point.
 5. With `--compare`: per-stat differences, end-point distance, and the mean and maximum position
    error over the points that share a timestamp.
@@ -113,6 +113,11 @@ close but not exact. Measured on 2026-09-28 against `DefaultProcessor` (pipeline
   = ...)`, not committed) were compared with every combination of `useMagnetometer` and
   `northFromCompass`, with and without magnetometer samples: x and y match to 1e-15 m, and the
   diagnostics have the same keys, values and order apart from `headingAxisMode`.
+- Scratch logs whose magnetometer is scattered for the first 0.5, 2 or 3.5 s (readings alternately
+  1.6 and 0.4 times the field, so the reference second starts at the first reading that passes the
+  gate and `northReferenceAtS` appears from 2 s on) match the same way in four configs: x and y to
+  1e-14 m, and the same diagnostics apart from `headingAxisMode`. Their z differs by up to 2.8 cm
+  because of the barometer still-gap below.
 - `--compare` reports `headingAxisMode` as a diagnostics key that only Kotlin emits.
 
 When you change the Kotlin pipeline, get a Kotlin result and check the replay against it with

@@ -20,14 +20,22 @@ import kotlin.math.sin
  * recording, so on its own the path would come out turned by a random angle. When the game vector
  * is primary, the yaw difference between the fused vector (referenced to magnetic north) and the
  * game vector is measured per fused sample, but only at moments where the magnetic field passed the
- * [MagGate]. Its circular mean over the first [referenceWindowS] is the reference: with
+ * [MagGate]. Its circular mean over [referenceWindowS], starting at the first fused sample that
+ * passes (normally the first one, so the first second of the trip), is the reference: with
  * [PipelineConfig.northFromCompass] on, the whole trip is turned by it, so +Y is magnetic north
- * (diagnostics `northReference` = "magnetic", `northOffsetDeg` = the reference). With
- * [PipelineConfig.useMagnetometer] on, the difference is also low-passed over
- * [yawCorrectionTimeConstantS] and its change since the reference is applied as a drift correction;
- * with it off, the reference alone is applied and the magnetometer is ignored after the start.
- * With the fused vector primary the track is magnetic already. Otherwise the yaw stays arbitrary
- * and `northReference` starts with "relative: " followed by the reason.
+ * (diagnostics `northReference` = "magnetic", `northOffsetDeg` = the reference). When that window
+ * starts more than [referenceWindowS] after the first fused sample, `northReferenceAtS` says how
+ * many seconds later. With [PipelineConfig.useMagnetometer] on, the difference is also low-passed
+ * over [yawCorrectionTimeConstantS] and its change since the reference is applied as a drift
+ * correction; with it off, the reference alone is applied and the magnetometer is ignored after
+ * the start. With the fused vector primary the track is magnetic already. Otherwise the yaw stays
+ * arbitrary and `northReference` starts with "relative: " followed by the reason.
+ *
+ * The gate is referenced to the field at the start of the log ([MagGate.fromStart]), so a start
+ * that is steadily disturbed, for example by metal next to the phone for the whole first second,
+ * passes the gate and is not detected: the trip is turned by the disturbed compass heading and
+ * `northReference` still says "magnetic". Only a start whose readings stray from their own mean
+ * fails the gate, and then the reference waits for the first reading that passes.
  */
 class OrientationEstimator(
     private val madgwickBeta: Double = 0.1,
@@ -102,8 +110,11 @@ class OrientationEstimator(
 
     /**
      * Turns the game track onto magnetic north and removes its yaw drift, as the config asks; see the
-     * class comment. Only moments where the magnetic field passed the gate are trusted, so a trip that
-     * starts in a disturbed field keeps the game vector's yaw and says why in `northReference`.
+     * class comment. Only moments where the magnetic field passed the gate are trusted. The gate is
+     * referenced to the start itself, so a start that is steadily disturbed passes it and is not
+     * detected: the whole trip is turned by the disturbed heading. A start whose readings fail the
+     * gate moves the reference to the first fused sample that passes (`northReferenceAtS`), and only
+     * a trip where nothing passes keeps the game vector's yaw and says why in `northReference`.
      */
     private fun correctYaw(
         base: OrientationTrack,
@@ -146,26 +157,25 @@ class OrientationEstimator(
             return base
         }
 
-        // Reference difference over the first second (gated): the yaw that turns the game frame onto
-        // magnetic north, and the zero of the drift correction below.
-        val refEnd = times[0] + (referenceWindowS * 1e9).toLong()
+        // Reference difference: the gated circular mean over one window that starts at the first fused
+        // sample passing the gate (the first sample on a normal trip, so the first second). It is the
+        // yaw that turns the game frame onto magnetic north, and the zero of the drift correction below.
+        val window = (referenceWindowS * 1e9).toLong()
+        var refStart = 0
+        while (!pass[refStart]) refStart++
+        val refEnd = times[refStart] + window
         var rc = 0.0
         var rs = 0.0
-        var refCount = 0
-        for (i in 0 until n) {
-            if (times[i] > refEnd && refCount > 0) break
+        for (i in refStart until n) {
+            if (times[i] > refEnd) break
             if (!pass[i]) continue
             rc += cos(delta[i])
             rs += sin(delta[i])
-            refCount++
-        }
-        if (refCount == 0) {
-            val reason = "magnetic field disturbed during the reference second"
-            skip(config, diag, reason, reason)
-            return base
         }
         val ref = atan2(rs, rc)
         diag["northOffsetDeg"] = Diag.num(Math.toDegrees(ref), 1)
+        val lateNs = times[refStart] - times[0]
+        if (lateNs > window) diag["northReferenceAtS"] = Diag.num(lateNs / 1e9, 1)
 
         if (!config.useMagnetometer) {
             // North from the start only: one constant turn, and the magnetometer is ignored afterwards.
