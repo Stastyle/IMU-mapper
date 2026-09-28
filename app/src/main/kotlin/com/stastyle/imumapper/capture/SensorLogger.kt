@@ -42,10 +42,10 @@ import kotlin.math.sqrt
  *
  * Ownership: the caller owns the [LogWriter]. [start] attaches it, [stop] flushes it and drops the
  * reference, and the caller closes it afterwards. A null writer is allowed: the logger then only
- * feeds [stats] and [live], which the debug and calibration screens use.
+ * feeds [stats] and [live], which the debug and calibration screens and the compass preview use.
  *
- * All sensor callbacks, the periodic flush, stall detection and stats publishing run on the logger
- * thread, so the per-sensor bookkeeping needs no locks.
+ * All sensor callbacks (including accuracy changes), the periodic flush, stall detection and stats
+ * publishing run on the logger thread, so the per-sensor bookkeeping needs no locks.
  */
 class SensorLogger(context: Context) : SensorEventListener {
 
@@ -74,6 +74,12 @@ class SensorLogger(context: Context) : SensorEventListener {
     private val rates = Array(SensorKind.entries.size) { RateEstimator() }
     private val decimators = Array(SensorKind.entries.size) { Decimator(LIVE_HZ) }
     private val stall = StallDetector()
+
+    /** Last reported accuracy per sensor, [UNKNOWN_ACCURACY] until one arrives (-1 is a real status). */
+    private val accuracies = IntArray(SensorKind.entries.size) { UNKNOWN_ACCURACY }
+
+    /** Sensors whose listener registration succeeded in the current run; [start] while running keeps them. */
+    private val registered = HashSet<SensorKind>()
 
     private val _stats = MutableStateFlow(snapshot(SystemClock.elapsedRealtimeNanos()))
 
@@ -107,7 +113,12 @@ class SensorLogger(context: Context) : SensorEventListener {
         }
     }
 
-    /** Starts listening. Safe to call again while running: the previous writer is flushed and replaced. */
+    /**
+     * Starts listening. Safe to call again while running: the listeners stay registered, the previous
+     * writer is flushed and replaced by [writer], and the counters start from zero. Keeping the
+     * registrations is what lets a recording take over the compass preview: registering again would
+     * restart the sensor fusion and throw away the settled north the user just waited for.
+     */
     fun start(writer: LogWriter?) {
         runOnLoggerThread { startOnThread(writer) }
     }
@@ -129,6 +140,7 @@ class SensorLogger(context: Context) : SensorEventListener {
         val record = toRecord(kind, event) ?: return
         val i = kind.ordinal
         val t = event.timestamp
+        accuracies[i] = event.accuracy
         counts[i]++
         lastTs[i] = t
         val n = minOf(event.values.size, MAX_VALUES)
@@ -151,26 +163,46 @@ class SensorLogger(context: Context) : SensorEventListener {
         if (kind == SensorKind.STEP || decimators[i].accept(t)) _live.tryEmit(record)
     }
 
-    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
+    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
+        // Delivered on the logger thread like onSensorChanged, so the array needs no lock.
+        val kind = sensor?.let { typeToKind[it.type] } ?: return
+        accuracies[kind.ordinal] = accuracy
+    }
 
     private fun startOnThread(newWriter: LogWriter?) {
+        val now = SystemClock.elapsedRealtimeNanos()
         if (running) {
-            sensorManager.unregisterListener(this)
+            // Hand-over (compass preview to recording, or one writer to the next): keep the listeners
+            // so the sensor fusion keeps its state, and only swap the writer and reset the counters.
             try {
                 writer?.flush()
             } catch (e: Exception) {
-                Log.w(TAG, "flush on restart failed", e)
+                Log.w(TAG, "flush on writer swap failed", e)
             }
+            resetCounters()
+            writer = newWriter
+            lastFlushNs = now
+            // resetCounters() cleared the stall detector; seed it again so a sensor that stopped
+            // delivering before the swap is still caught, as after a fresh registration.
+            for (kind in registered) stall.onSample(kind, now)
+            _stats.value = snapshot(now)
+            return
         }
         resetCounters()
+        accuracies.fill(UNKNOWN_ACCURACY)
+        registered.clear()
         writer = newWriter
         running = true
-        val now = SystemClock.elapsedRealtimeNanos()
         lastFlushNs = now
         for ((kind, sensor) in sensors) {
             if (sensor == null) continue
             val ok = sensorManager.registerListener(this, sensor, SensorManager.SENSOR_DELAY_FASTEST, 0, handler)
-            if (ok) stall.onSample(kind, now) else Log.w(TAG, "registerListener failed for ${kind.label}")
+            if (ok) {
+                registered.add(kind)
+                stall.onSample(kind, now)
+            } else {
+                Log.w(TAG, "registerListener failed for ${kind.label}")
+            }
         }
         handler.removeCallbacks(tick)
         handler.postDelayed(tick, TICK_MS)
@@ -178,6 +210,7 @@ class SensorLogger(context: Context) : SensorEventListener {
     }
 
     private fun stopOnThread() {
+        registered.clear()
         if (!running) {
             writer = null
             return
@@ -233,6 +266,7 @@ class SensorLogger(context: Context) : SensorEventListener {
                 lastValues = values,
                 lastTimestampNs = lastTs[i],
                 stalled = stall.isStalled(kind),
+                accuracy = accuracies[i].takeIf { it != UNKNOWN_ACCURACY },
             )
         }
         return SensorStats(
@@ -323,5 +357,8 @@ class SensorLogger(context: Context) : SensorEventListener {
         private const val FLUSH_NS = 1_000_000_000L
         private const val LIVE_HZ = 50.0
         private const val MAX_VALUES = 6
+
+        /** Outside every SENSOR_STATUS_* value, which run from -1 (no contact) to 3 (high). */
+        private const val UNKNOWN_ACCURACY = Int.MIN_VALUE
     }
 }
