@@ -475,16 +475,6 @@ class Angles:
     def diff(a, b):
         return Angles.wrap(np.asarray(a) - np.asarray(b))
 
-    @staticmethod
-    def circular_mean(angles, start, end):
-        if start >= end:
-            return None
-        c = float(np.sum(np.cos(angles[start:end])))
-        s = float(np.sum(np.sin(angles[start:end])))
-        if c * c + s * s < 1e-12:
-            return None
-        return math.atan2(s, c)
-
 
 class Diag:
     @staticmethod
@@ -809,11 +799,9 @@ GRAVITY = 9.81
 
 
 class WorldAccel:
-    def __init__(self, t_ns, vertical, east, north, dropped):
+    def __init__(self, t_ns, vertical, dropped):
         self.t_ns = t_ns
         self.vertical = vertical
-        self.east = east
-        self.north = north
         self.dropped = dropped
 
     @property
@@ -838,7 +826,7 @@ class WorldAccel:
         keep = keep_monotonic(accel_t)
         t = accel_t[keep]
         w = quat_rotate(orientation.at(t), accel[keep])
-        return WorldAccel(t, w[:, 2] - gravity, w[:, 0], w[:, 1], int((~keep).sum()))
+        return WorldAccel(t, w[:, 2] - gravity, int((~keep).sum()))
 
 
 # ----------------------------------------------------------------------------------------------
@@ -1014,10 +1002,18 @@ CAMERA = "CAMERA"
 
 class DeviceHeading:
     UPRIGHT_COS = 0.8
+    MEAN_SAMPLE_PERIOD_NS = 50_000_000
 
     @staticmethod
     def heading_rad(q, axis):
         return forward_heading_rad(q) if axis == FORWARD else camera_heading_rad(q)
+
+    @staticmethod
+    def mean_heading_rad(track, axis, from_ns, to_ns):
+        """Heading of the summed horizontal projections of the axis over [from_ns, to_ns); once at from_ns if empty."""
+        times = np.arange(from_ns, max(to_ns, from_ns + 1), DeviceHeading.MEAN_SAMPLE_PERIOD_NS, dtype=np.int64)
+        d = quat_rotate(track.at(times), UNIT_Y if axis == FORWARD else CAMERA_AXIS)
+        return math.atan2(float(np.sum(d[:, 0])), float(np.sum(d[:, 1])))
 
     @staticmethod
     def choose_axis(track, times, start, end):
@@ -1101,48 +1097,6 @@ class CarryChangeDetector:
             ref = new_ref
             k = end + window
         return out
-
-
-class HeadingOffsetEstimator:
-    MIN_SAMPLES = 50
-    MIN_AXIS_RATIO = 1.3
-
-    @staticmethod
-    def estimate(accel, from_ns, to_ns, device_heading_rad, previous_walking_heading_rad, fallback_offset_rad):
-        start = accel.lower_bound(from_ns)
-        end = accel.lower_bound(to_ns)
-        n = end - start
-        if n < HeadingOffsetEstimator.MIN_SAMPLES:
-            return None
-        e = accel.east[start:end]
-        no = accel.north[start:end]
-        me = float(np.sum(e)) / n
-        mn = float(np.sum(no)) / n
-        de = e - me
-        dn = no - mn
-        see = float(np.sum(de * de))
-        sen = float(np.sum(de * dn))
-        snn = float(np.sum(dn * dn))
-        theta = 0.5 * math.atan2(2.0 * sen, see - snn)
-        c = math.cos(theta)
-        s = math.sin(theta)
-        major = see * c * c + 2.0 * sen * c * s + snn * s * s
-        minor = see * s * s - 2.0 * sen * c * s + snn * c * c
-        if major <= 0.0 or major < HeadingOffsetEstimator.MIN_AXIS_RATIO * minor:
-            return None
-        h1 = Angles.wrap(math.atan2(c, s))
-        h2 = Angles.wrap(h1 + math.pi)
-        if previous_walking_heading_rad is not None:
-            d1 = abs(Angles.diff(h1, previous_walking_heading_rad))
-            d2 = abs(Angles.diff(h2, previous_walking_heading_rad))
-            chosen = h1 if d1 <= d2 else h2
-        else:
-            o1 = Angles.diff(h1, device_heading_rad)
-            o2 = Angles.diff(h2, device_heading_rad)
-            d1 = abs(Angles.diff(o1, fallback_offset_rad))
-            d2 = abs(Angles.diff(o2, fallback_offset_rad))
-            chosen = h1 if d1 <= d2 else h2
-        return Angles.diff(chosen, device_heading_rad)
 
 
 # ----------------------------------------------------------------------------------------------
@@ -1242,11 +1196,23 @@ class PathPoint:
 
 
 class HeadingSegment:
-    def __init__(self, from_ns, axis, offset_rad, estimated):
+    def __init__(self, from_ns, axis, offset_rad, move_from_ns=None, move_heading_rad=0.0):
         self.from_ns = from_ns
         self.axis = axis
         self.offset_rad = offset_rad
-        self.estimated = estimated
+        self.move_from_ns = from_ns if move_from_ns is None else move_from_ns
+        self.move_heading_rad = move_heading_rad
+
+    @staticmethod
+    def walking_heading(segments, t_ns, q):
+        """Held heading while the phone was being moved, otherwise device heading plus the segment offset."""
+        k = 0
+        while k + 1 < len(segments) and segments[k + 1].from_ns <= t_ns:
+            k += 1
+        if k + 1 < len(segments) and t_ns >= segments[k + 1].move_from_ns:
+            return segments[k + 1].move_heading_rad
+        seg = segments[k]
+        return Angles.wrap(float(DeviceHeading.heading_rad(q, seg.axis)) + seg.offset_rad)
 
 
 class PdrContext:
@@ -1276,19 +1242,18 @@ class PdrContext:
         return seg
 
     def walking_heading_at(self, t_ns):
-        seg = self.segment_at(t_ns)
-        return Angles.wrap(float(DeviceHeading.heading_rad(self.orientation.at(t_ns), seg.axis)) + seg.offset_rad)
+        return HeadingSegment.walking_heading(self.heading_segments, t_ns, self.orientation.at(t_ns))
 
 
 LONG_MAX = 2 ** 63 - 1
 
 
 class PdrSolver:
-    def __init__(self, orientation_estimator=None, still_gap_s=2.0, reorient_steps=10, reorient_reference_steps=5):
+    def __init__(self, orientation_estimator=None, still_gap_s=2.0, move_heading_window_s=1.5, reorient_move_s=2.0):
         self.orientation_estimator = orientation_estimator or OrientationEstimator()
         self.still_gap_s = still_gap_s
-        self.reorient_steps = reorient_steps
-        self.reorient_reference_steps = reorient_reference_steps
+        self.move_heading_window_s = move_heading_window_s
+        self.reorient_move_s = reorient_move_s
 
     def prepare(self, log, config):
         diag = {}
@@ -1315,7 +1280,7 @@ class PdrSolver:
 
         segments = []
         headings = np.zeros(steps.size)
-        self.build_headings(log, config, track, world, steps, segments, headings, diag)
+        self.build_headings(log, config, track, steps, segments, headings, diag)
 
         altitude = AltitudeTrack.from_baro(log.baro_t, log.baro_hpa, config.baroSmoothingS)
         diag["baro"] = "absent" if altitude is None else "present"
@@ -1359,89 +1324,83 @@ class PdrSolver:
         start_heading = steps[0].heading_rad if steps else ctx.walking_heading_at(start_ns)
         return [PathPoint(start_ns, np.zeros(3), "PDR", start_heading, -1)] + steps, ctx
 
-    def build_headings(self, log, config, track, world, steps, segments, headings, diag):
+    def build_headings(self, log, config, track, steps, segments, headings, diag):
+        """Carries the walking heading through every move of the phone (PdrSolver.buildHeadings)."""
+        start_ns = log.first_timestamp_ns()
         changes = []
         if config.autoReorient:
-            changes = CarryChangeDetector.detect(track, log.first_timestamp_ns(), log.last_timestamp_ns(),
+            changes = CarryChangeDetector.detect(track, start_ns, log.last_timestamp_ns(),
                                                  config.carryChangeTiltRad, config.carryChangeSettleS)
-        boundaries = [log.first_timestamp_ns()]
+        found = [(c.start_ns, c.end_ns) for c in changes]
         superseded = 0
-        margin_ns = int(config.carryChangeSettleS * 1e9)
+        tap_ns = int(self.reorient_move_s * 1e9)
         for a in log.annotations:
             if a["kind"] != "REORIENT":
                 continue
-            # A tap during the move itself is served by the detected change.
-            if any(c.start_ns - margin_ns <= a["tNs"] < c.end_ns for c in changes):
+            lo = max(start_ns, a["tNs"] - tap_ns)
+            hi = a["tNs"] + tap_ns
+            if hi <= lo:
+                continue
+            # A tap next to a detected move is served by that move.
+            if any(lo < c.end_ns and hi > c.start_ns for c in changes):
                 superseded += 1
                 continue
-            boundaries.append(a["tNs"])
-        # A change that settled back where it started keeps the offset: bridged, not a new segment.
-        for c in changes:
-            if not c.returned:
-                boundaries.append(c.end_ns)
-        boundaries = sorted(set(boundaries))
-        diag["reorientCount"] = str(len(boundaries) - 1)
+            found.append((lo, hi))
+        found.sort(key=lambda m: m[0])
+        # Overlapping moves (taps close together) are one move.
+        moves = []
+        for m in found:
+            if moves and m[0] < moves[-1][1]:
+                moves[-1] = (moves[-1][0], max(moves[-1][1], m[1]))
+            else:
+                moves.append(m)
+        diag["reorientCount"] = str(len(moves))
         diag["carryChanges"] = str(len(changes))
         if changes:
-            t0 = log.first_timestamp_ns()
             diag["carryChangeTimesS"] = ";".join(
-                Diag.num((c.start_ns - t0) / 1e9, 1) + "-" + Diag.num((c.end_ns - t0) / 1e9, 1) +
+                Diag.num((c.start_ns - start_ns) / 1e9, 1) + "-" + Diag.num((c.end_ns - start_ns) / 1e9, 1) +
                 (" returned" if c.returned else "") for c in changes)
         if superseded > 0:
             diag["reorientSuperseded"] = str(superseded)
 
+        # The Python config carries no headingAxis (the app's calibrated axis); AUTO is its default.
+        heading_axis = getattr(config, "headingAxis", "AUTO")
+        if heading_axis == "FORWARD":
+            axis = FORWARD
+        elif heading_axis == "CAMERA":
+            axis = CAMERA
+        else:
+            axis = self.axis_for(track, steps, start_ns, moves[0][0] if moves else LONG_MAX)
         offset = config.headingOffsetRad
-        estimated = []
-        for b in range(len(boundaries)):
-            from_ns = boundaries[b]
-            to_ns = boundaries[b + 1] if b + 1 < len(boundaries) else LONG_MAX
-            first = steps.lower_bound(from_ns)
-            last = steps.lower_bound(to_ns)
-            # The Python config carries no headingAxis (the app's calibrated axis); AUTO is its default.
-            heading_axis = getattr(config, "headingAxis", "AUTO")
-            if b == 0 and heading_axis == "FORWARD":
-                axis = FORWARD
-            elif b == 0 and heading_axis == "CAMERA":
-                axis = CAMERA
-            elif first < last:
-                axis = DeviceHeading.choose_axis(track, steps.t_ns, first, last)
-            else:
-                axis = DeviceHeading.choose_axis(track, np.array([from_ns], dtype=np.int64), 0, 1)
-            was_estimated = False
-            if b > 0 and first < last:
-                window_end = min(last - 1, first + self.reorient_steps - 1)
-                device_headings = DeviceHeading.heading_rad(track.at(steps.t_ns[first:window_end + 1]), axis)
-                mean_device = Angles.circular_mean(device_headings, 0, len(device_headings))
-                previous = Angles.circular_mean(headings, max(0, first - self.reorient_reference_steps), first)
-                if mean_device is not None:
-                    est = HeadingOffsetEstimator.estimate(
-                        world, int(steps.t_ns[first]), int(steps.t_ns[window_end]) + 1, mean_device, previous, offset)
-                    if est is not None:
-                        offset = est
-                        was_estimated = True
-                estimated.append(Diag.num(math.degrees(offset), 1) if was_estimated else "kept")
-            segments.append(HeadingSegment(from_ns, axis, offset, was_estimated))
-            if first < last:
-                headings[first:last] = Angles.wrap(
-                    DeviceHeading.heading_rad(track.at(steps.t_ns[first:last]), axis) + offset)
-            # Steps taken while the phone was moving get the heading from just before the move; done
-            # before the next segment reads these headings as its front/back reference.
-            for c in changes:
-                if c.end_ns <= from_ns or c.end_ns > to_ns:
-                    continue
-                self.hold_headings(steps, headings, c.start_ns, c.end_ns)
+        segments.append(HeadingSegment(start_ns, axis, offset))
+        window_ns = int(self.move_heading_window_s * 1e9)
+        offsets = []
+        for k, (m_start, m_end) in enumerate(moves):
+            segment_from = segments[-1].from_ns
+            before = DeviceHeading.mean_heading_rad(track, axis, max(segment_from, m_start - window_ns), m_start)
+            held = Angles.wrap(before + offset)
+            next_ns = moves[k + 1][0] if k + 1 < len(moves) else LONG_MAX
+            axis = self.axis_for(track, steps, m_end, next_ns)
+            after = DeviceHeading.mean_heading_rad(track, axis, m_end, min(m_end + window_ns, next_ns))
+            offset = Angles.diff(held, after)
+            segments.append(HeadingSegment(m_end, axis, offset, m_start, held))
+            offsets.append(Diag.num(math.degrees(offset), 1))
+        if steps.size:
+            qs = track.at(steps.t_ns)
+            for i in range(steps.size):
+                headings[i] = HeadingSegment.walking_heading(segments, int(steps.t_ns[i]), qs[i])
         diag["headingAxis"] = ";".join(s.axis for s in segments)
         diag["headingOffsetDeg"] = Diag.num(math.degrees(config.headingOffsetRad), 1)
-        if estimated:
-            diag["reorientOffsetsDeg"] = ";".join(estimated)
+        if offsets:
+            diag["reorientOffsetsDeg"] = ";".join(offsets)
 
     @staticmethod
-    def hold_headings(steps, headings, from_ns, to_ns):
+    def axis_for(track, steps, from_ns, to_ns):
         first = steps.lower_bound(from_ns)
         last = steps.lower_bound(to_ns)
-        if first == 0 or first >= last:
-            return
-        headings[first:last] = headings[first - 1]
+        if first < last:
+            return DeviceHeading.choose_axis(track, steps.t_ns, first, last)
+        return DeviceHeading.choose_axis(track, np.array([from_ns], dtype=np.int64), 0, 1)
 
 
 # ----------------------------------------------------------------------------------------------
@@ -1451,7 +1410,9 @@ class PdrSolver:
 class PathBuilder:
     # 2: results carry rawPoints, the path before loop closure and smoothing.
     # 3: carry changes are detected from the tilt and re-estimate the heading offset (autoReorient).
-    PIPELINE_VERSION = 3
+    # 4: the walking heading is carried through every move of the phone (carry change or REORIENT)
+    #    instead of being re-estimated from the gait, so moving the phone no longer turns the path.
+    PIPELINE_VERSION = 4
 
     @staticmethod
     def nearest_index(points, t_ns):
@@ -1859,6 +1820,8 @@ def make_plots(log, config, result, processor, out_dir, compare_xyz=None, title=
         axes[1].plot((ctx.steps.t_ns - t0) / 1e9, np.degrees(ctx.step_heading_rad), ".", color=C_BLUE, markersize=5,
                      label="walking heading per step")
     for seg in ctx.heading_segments[1:]:
+        axes[1].axvspan((seg.move_from_ns - t0) / 1e9, (seg.from_ns - t0) / 1e9, color=C_MAGENTA, alpha=0.12,
+                        linewidth=0)
         axes[1].axvline((seg.from_ns - t0) / 1e9, color=C_MAGENTA, linewidth=1, linestyle="--")
     axes[1].set_ylabel("deg clockwise from north")
     axes[1].set_ylim(-185, 185)

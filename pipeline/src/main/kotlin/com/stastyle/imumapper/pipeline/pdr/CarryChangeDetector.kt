@@ -6,9 +6,10 @@ import kotlin.math.roundToInt
 
 /**
  * A stretch [startNs, endNs) during which the phone was moved to another carry position (hand to
- * pocket, pocket to vest, a re-grip). [returned] is true when the phone came to rest in the same
- * orientation it left, a glance at the screen for instance: the move still has to be bridged, but
- * the heading offset has not changed.
+ * pocket, pocket to vest, a re-grip). [returned] is true when the phone came to rest with the tilt
+ * it left, a glance at the screen for instance. It is reported, not relied on: the same tilt does not
+ * mean the same heading offset, because a phone put back into the pocket the other way round keeps
+ * its tilt and turns half a circle.
  */
 class CarryChange(val startNs: Long, val endNs: Long, val returned: Boolean)
 

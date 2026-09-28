@@ -488,7 +488,8 @@ private fun NoteDialog(onSave: (String) -> Unit, onDismiss: () -> Unit) {
 private fun modeDescription(mode: TripMode): String = when (mode) {
     TripMode.POCKET ->
         "IMU only. Put the phone in a pocket, hand or chest pocket; the screen may turn off. " +
-            "Use the buttons or a volume key to mark points."
+            "Use the buttons or a volume key to mark points. " +
+            "Don't turn while you take the phone out or put it away: the path can't see that turn."
     TripMode.FLASHLIGHT ->
         "Camera tracking with the torch on. Hold the phone in front of you, camera facing forward. " +
             "When tracking is lost the path continues from steps."

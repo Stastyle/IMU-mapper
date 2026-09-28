@@ -67,6 +67,7 @@ the defaults with the true stride. Expected results:
 
 - `carryChanges` 1 and `carryChangeTimesS` about 8.4–10.1 s, `reorientCount` 1 with no annotation
 - `headingAxis` `FORWARD;CAMERA` (the pocketed phone is upright, so the second segment uses the camera axis)
-- `reorientOffsetsDeg` about 92°, the path ends within 3 m of (0, 20) instead of veering east
+- `reorientOffsetsDeg` about 90°: the heading from before the move is carried through it, so the path
+  ends within 0.1 m of (0, 20) instead of veering east
 
 The world frame is ENU, the timestamps start at 1 000 000 000 000 ns, see `docs/CONVENTIONS.md`.

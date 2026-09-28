@@ -69,17 +69,23 @@ class SyntheticWalk(
     private sealed interface Leg
     private class Still(val seconds: Double) : Leg
     private class Walk(val to: Vec3) : Leg
+    private class Turn(val headingRad: Double, val seconds: Double) : Leg
     private class Annotate(val kind: AnnotationKind, val note: String) : Leg
     private class Offset(val rad: Double) : Leg
     private class Tilt(val rad: Double) : Leg
+    private class Skew(val rad: Double) : Leg
     private class Event(val kind: EventKind) : Leg
 
     private val legs = ArrayList<Leg>()
     private var initialOffsetRad = 0.0
     private var initialTiltRad = tiltRad
+    private var initialSkewRad = 0.0
 
     fun still(seconds: Double): SyntheticWalk = apply { legs.add(Still(seconds)) }
     fun walkTo(x: Double, y: Double, z: Double = 0.0): SyntheticWalk = apply { legs.add(Walk(Vec3(x, y, z))) }
+
+    /** Turns on the spot to [headingRad] (clockwise from north), standing still for [seconds]. */
+    fun turnTo(headingRad: Double, seconds: Double = 1.0): SyntheticWalk = apply { legs.add(Turn(headingRad, seconds)) }
     fun annotate(kind: AnnotationKind, note: String = ""): SyntheticWalk = apply { legs.add(Annotate(kind, note)) }
     fun pause(): SyntheticWalk = apply { legs.add(Event(EventKind.PAUSE)) }
     fun resume(): SyntheticWalk = apply { legs.add(Event(EventKind.RESUME)) }
@@ -98,6 +104,15 @@ class SyntheticWalk(
         if (legs.isEmpty()) initialTiltRad = rad else legs.add(Tilt(rad))
     }
 
+    /**
+     * Turns the horizontal gait acceleration [rad] away from the walking direction from now on, as
+     * the leg swing does to a phone in a trouser pocket: the principal axis of the horizontal
+     * acceleration, which the heading-offset estimate relies on, then misses the walk by that much.
+     */
+    fun gaitSkew(rad: Double): SyntheticWalk = apply {
+        if (legs.isEmpty()) initialSkewRad = rad else legs.add(Skew(rad))
+    }
+
     private class Phase(
         val startS: Double,
         val endS: Double,
@@ -112,6 +127,7 @@ class SyntheticWalk(
         val annotations: List<Pair<Double, AnnotationRecord>>,
         val offsetChanges: List<Pair<Double, Double>>,
         val tiltChanges: List<Pair<Double, Double>>,
+        val skewChanges: List<Pair<Double, Double>>,
         val events: List<Pair<Double, EventKind>>,
         val totalS: Double,
     )
@@ -121,6 +137,7 @@ class SyntheticWalk(
         val annotations = ArrayList<Pair<Double, AnnotationRecord>>()
         val offsets = ArrayList<Pair<Double, Double>>()
         val tilts = ArrayList<Pair<Double, Double>>()
+        val skews = ArrayList<Pair<Double, Double>>()
         val events = ArrayList<Pair<Double, EventKind>>()
         var t = 0.0
         var pos = Vec3.ZERO
@@ -140,13 +157,19 @@ class SyntheticWalk(
                     t += seconds
                     pos = leg.to
                 }
+                is Turn -> {
+                    heading = leg.headingRad
+                    phases.add(Phase(t, t + leg.seconds, pos, pos, false, heading))
+                    t += leg.seconds
+                }
                 is Annotate -> annotations.add(t to AnnotationRecord(0L, leg.kind, leg.note))
                 is Offset -> offsets.add(t to leg.rad)
                 is Tilt -> tilts.add(t to leg.rad)
+                is Skew -> skews.add(t to leg.rad)
                 is Event -> events.add(t to leg.kind)
             }
         }
-        return Timeline(phases, annotations, offsets, tilts, events, t)
+        return Timeline(phases, annotations, offsets, tilts, skews, events, t)
     }
 
     private fun phaseAt(phases: List<Phase>, s: Double): Phase {
@@ -185,6 +208,12 @@ class SyntheticWalk(
             }
         }
         return off
+    }
+
+    private fun skewAt(changes: List<Pair<Double, Double>>, s: Double): Double {
+        var skew = initialSkewRad
+        for ((at, rad) in changes) if (s >= at) skew = rad else break
+        return skew
     }
 
     private fun tiltAt(changes: List<Pair<Double, Double>>, s: Double, blendS: Double = 1.0): Double {
@@ -236,8 +265,9 @@ class SyntheticWalk(
             var ay = 0.0
             var az = g
             if (walking) {
-                val fwdX = sin(walkHeading)
-                val fwdY = cos(walkHeading)
+                val gaitHeading = walkHeading + skewAt(tl.skewChanges, s)
+                val fwdX = sin(gaitHeading)
+                val fwdY = cos(gaitHeading)
                 val fwd = forwardBounce * cos(gait)
                 val lat = lateralBounce * sin(gait / 2.0)
                 ax += fwd * fwdX + lat * fwdY
