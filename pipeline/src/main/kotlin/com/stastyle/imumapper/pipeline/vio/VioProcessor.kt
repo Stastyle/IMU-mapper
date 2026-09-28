@@ -96,7 +96,7 @@ class VioProcessor(
         val yaw = if (imuHeading == null) Quat.IDENTITY else ArCoreFrame.yawBetween(rawHeading, imuHeading)
         diag["yawAlignmentDeg"] =
             Diag.num(Math.toDegrees(if (imuHeading == null) 0.0 else Angles.diff(imuHeading, rawHeading)), 1)
-        diag["northReference"] = imu.northReference
+        diag[OrientationEstimator.NORTH_REFERENCE] = imu.northReference
         var transform = FrameTransform(yaw, Vec3.ZERO).anchoredAt(first.position(), Vec3.ZERO)
 
         // Without an orientation the PDR headings are all the bare offset: dead-reckoning with them
