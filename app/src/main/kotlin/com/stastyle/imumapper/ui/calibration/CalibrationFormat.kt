@@ -72,6 +72,7 @@ object Fmt {
         "Heading offset" to degrees(c.headingOffsetRad) + " on " + axis(c.headingAxis) + " axis",
         "Gyro bias (rad/s)" to vec3(c.gyroBias),
         "Magnetometer" to (if (c.useMagnetometer) "used, gate " + num(c.magGateTolerance * 100.0, 0) + " %" else "off"),
+        "North" to (if (c.northFromCompass) "from the compass" else "off (gyro frame)"),
         "Hardware steps" to (if (c.preferHardwareSteps) "preferred" else "software detector"),
     )
 }

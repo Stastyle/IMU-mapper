@@ -21,6 +21,7 @@ class ConfigFieldsTest {
             weinbergK = 0.42,
             headingOffsetRad = Math.toRadians(-37.5),
             useMagnetometer = false,
+            northFromCompass = false,
             magGateTolerance = 0.2,
             gyroBias = Vec3(0.001, -0.002, 0.0035),
             autoReorient = false,
@@ -44,6 +45,7 @@ class ConfigFieldsTest {
         assertFalse(ConfigFields.differs(original, back))
         assertTrue(ConfigFields.differs(original, original.copy(smoothingWindow = 3)))
         assertTrue(ConfigFields.differs(original, original.copy(autoReorient = true)))
+        assertTrue(ConfigFields.differs(original, original.copy(northFromCompass = true)))
     }
 
     @Test
