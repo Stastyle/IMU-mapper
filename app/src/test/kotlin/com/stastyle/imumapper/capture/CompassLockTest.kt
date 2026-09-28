@@ -45,6 +45,24 @@ class CompassLockTest {
         }
     }
 
+    /** Feeds one sample at [t] and returns the status right after it. */
+    private fun CompassLock.statusAfter(t: Long, gameYawDeg: Double): CompassStatus {
+        feed(t, t, gameYawDeg = { gameYawDeg })
+        return reading(ns(t)).status
+    }
+
+    /** When a lock fed 40 degrees plus Gaussian jitter of [sigmaDeg] first locks, ms; null if not in [limitMs]. */
+    private fun lockTimeMs(sigmaDeg: Double, seed: Long, limitMs: Long = 60_000): Long? {
+        val random = Random(seed)
+        val lock = CompassLock()
+        var t = 0L
+        while (t <= limitMs) {
+            if (lock.statusAfter(t, 40.0 + random.nextGaussian() * sigmaDeg) == CompassStatus.LOCKED) return t
+            t += 20
+        }
+        return null
+    }
+
     @Test
     fun waitsForTheFirstFusedSample() {
         val lock = CompassLock()
@@ -86,13 +104,16 @@ class CompassLockTest {
         // +-1 degree of wobble stays inside the 2 degree deviation limit.
         lock.feed(0, 1500, gameYawDeg = { t -> if ((t / 20) % 2 == 0L) 39.0 else 41.0 })
         assertEquals(0.75f, lock.reading(ns(1500)).progress, 0.02f)
-        // A 6 degree jump starts the window over at the jump.
+        // One sample 6 degrees off is skipped as a glitch: the window keeps its progress.
         lock.feed(1520, 1520, gameYawDeg = { 46.0 })
-        assertEquals(0f, lock.reading(ns(1520)).progress, 0.001f)
-        lock.feed(1540, 3500, gameYawDeg = { 46.0 })
-        assertEquals(CompassStatus.SETTLING, lock.reading(ns(3500)).status)
-        lock.feed(3520, 3520, gameYawDeg = { 46.0 })
-        val r = lock.reading(ns(3520))
+        assertEquals(0.75f, lock.reading(ns(1520)).progress, 0.02f)
+        // A second one in a row is a real jump, and the window starts over at it.
+        lock.feed(1540, 1540, gameYawDeg = { 46.0 })
+        assertEquals(0f, lock.reading(ns(1540)).progress, 0.001f)
+        lock.feed(1560, 3520, gameYawDeg = { 46.0 })
+        assertEquals(CompassStatus.SETTLING, lock.reading(ns(3520)).status)
+        lock.feed(3540, 3540, gameYawDeg = { 46.0 })
+        val r = lock.reading(ns(3540))
         assertEquals(CompassStatus.LOCKED, r.status)
         assertEquals(-46.0, assertNotNull(r.offsetDeg), 1e-6)
     }
@@ -149,16 +170,17 @@ class CompassLockTest {
         val lock = CompassLock()
         lock.feed(0, 2000)
         assertEquals(CompassStatus.LOCKED, lock.reading(ns(2000)).status)
-        // North moved by 20 degrees: the lock no longer describes it, and settling starts at the jump.
+        // North moved by 20 degrees: the lock no longer describes it. The first sample there is skipped
+        // as a glitch, the second releases the lock, and settling starts at it.
         lock.feed(2020, 2100, gameYawDeg = { 60.0 })
         val released = lock.reading(ns(2100))
         assertEquals(CompassStatus.SETTLING, released.status)
-        assertEquals(0.04f, released.progress, 0.001f)
+        assertEquals(0.03f, released.progress, 0.001f)
         assertEquals(-60.0, assertNotNull(released.offsetDeg), 1e-6)
-        lock.feed(2120, 4000, gameYawDeg = { 60.0 })
-        assertEquals(CompassStatus.SETTLING, lock.reading(ns(4000)).status)
-        lock.feed(4020, 4020, gameYawDeg = { 60.0 })
-        assertEquals(CompassStatus.LOCKED, lock.reading(ns(4020)).status)
+        lock.feed(2120, 4020, gameYawDeg = { 60.0 })
+        assertEquals(CompassStatus.SETTLING, lock.reading(ns(4020)).status)
+        lock.feed(4040, 4040, gameYawDeg = { 60.0 })
+        assertEquals(CompassStatus.LOCKED, lock.reading(ns(4040)).status)
     }
 
     @Test
@@ -170,8 +192,11 @@ class CompassLockTest {
 
         val over = CompassLock()
         over.feed(0, 2000)
+        // One sample over the limit is a glitch and keeps the lock; the second in a row releases it.
         over.feed(2020, 2020, gameYawDeg = { 46.5 })
-        assertEquals(CompassStatus.SETTLING, over.reading(ns(2020)).status)
+        assertEquals(CompassStatus.LOCKED, over.reading(ns(2020)).status)
+        over.feed(2040, 2040, gameYawDeg = { 46.5 })
+        assertEquals(CompassStatus.SETTLING, over.reading(ns(2040)).status)
     }
 
     @Test
@@ -250,6 +275,40 @@ class CompassLockTest {
         val r = lock.reading(ns(3000))
         assertEquals(CompassStatus.LOCKED, r.status)
         assertEquals(-40.0, assertNotNull(r.offsetDeg), 0.3)
+    }
+
+    @Test
+    fun aLoneGlitchIsSkippedAndTheLockComesOnTime() {
+        val lock = CompassLock()
+        lock.feed(0, 1000)
+        // A 5 degree spike: added, it would fail the spread and trim the window down to itself.
+        lock.feed(1020, 1020, gameYawDeg = { 45.0 })
+        val r = lock.reading(ns(1020))
+        assertEquals(0.5f, r.progress, 0.001f)
+        assertEquals(-40.0, assertNotNull(r.offsetDeg), 1e-6)
+        lock.feed(1040, 2000)
+        assertEquals(CompassStatus.LOCKED, lock.reading(ns(2000)).status)
+        // Once locked, a lone spike past the jump limit is skipped too.
+        lock.feed(2020, 2020, gameYawDeg = { 55.0 })
+        assertEquals(CompassStatus.LOCKED, lock.reading(ns(2020)).status)
+        lock.feed(2040, 2100)
+        assertEquals(CompassStatus.LOCKED, lock.reading(ns(2100)).status)
+    }
+
+    @Test
+    fun jitterOfOneDegreeLocksInEverySeededRun() {
+        // One sample in twenty lands past the 2 degree spread. Before lone outliers were skipped each of
+        // them trimmed the window, and a third of these runs did not lock within a minute.
+        val times = (0L until 30L).map { seed -> assertNotNull(lockTimeMs(1.0, seed), "seed $seed never locked") }
+            .sorted()
+        assertTrue(times[times.size / 2] <= 3500, "median ${times[times.size / 2]} ms")
+        assertTrue(times.last() <= 10_000, "slowest ${times.last()} ms")
+    }
+
+    @Test
+    fun jitterOfOnePointTwoDegreesLocksToo() {
+        // Before lone outliers were skipped, none of these runs locked within a minute.
+        for (seed in 0L until 30L) assertNotNull(lockTimeMs(1.2, seed), "seed $seed never locked within a minute")
     }
 
     @Test

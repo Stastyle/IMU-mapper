@@ -70,9 +70,16 @@ data class CompassReading(
  * [MAX_DEVIATION_RAD] of the window's circular mean) and no trend (the means of the older and the
  * newer half within [MAX_TREND_RAD]): a spread limit alone lets through a fused vector that is still
  * converging. A steady window that spans [LOCK_WINDOW_NS] with at least [MIN_WINDOW_SAMPLES] samples
- * locks. The lock latches until the magnetometer asks for a figure 8, interference shows, the samples
- * stop for longer than [MAX_GAP_NS], or a difference lands more than [RELEASE_DEVIATION_RAD] from the
- * locked mean.
+ * locks.
+ *
+ * One difference far from a window of at least [MIN_TREND_SAMPLES] is skipped as a glitch: added, it
+ * would fail the spread and trim away the steady samples before it, so a single spike would cost the
+ * whole wait. A second one in a row is a real change and goes in, so a step still restarts the window,
+ * one sample late.
+ *
+ * The lock latches until the magnetometer asks for a figure 8, interference shows, the samples stop
+ * for longer than [MAX_GAP_NS], or two differences in a row land more than [RELEASE_DEVIATION_RAD] from
+ * the locked mean.
  *
  * Feed it the live sensor streams in arrival order and call [reading] for the current state. Not
  * thread-safe; the caller confines it to one thread or locks around it. [CompassFeed] does both.
@@ -109,6 +116,9 @@ class CompassLock {
 
     /** Circular mean of the window when it last qualified for the lock. */
     private var lockedMeanRad = 0.0
+
+    /** The previous yaw difference was skipped as a lone outlier, so the next outlier goes in. */
+    private var skippedOutlier = false
 
     /** Routes one record of the live stream to [onGame], [onFused] or [onMag]; other records are ignored. */
     fun feed(record: LogRecord) {
@@ -235,29 +245,47 @@ class CompassLock {
         if (calibrating || interference) {
             // Settling starts over once the field is clean again.
             window.clear()
+            skippedOutlier = false
             return
         }
         // Far from the north that was locked: the fused vector has re-anchored, so the lock no longer
         // describes it, and the window starts over from this sample.
-        if (locked && abs(wrapRad(delta - lockedMeanRad)) > RELEASE_DEVIATION_RAD) release()
+        val jumped = locked && abs(wrapRad(delta - lockedMeanRad)) > RELEASE_DEVIATION_RAD
+        // A lone glitch is skipped; a second outlier in a row goes through, released or trimmed as usual.
+        val outlier = jumped ||
+            (window.size >= MIN_TREND_SAMPLES && abs(wrapRad(delta - meanRad(0, window.size))) > MAX_DEVIATION_RAD)
+        if (outlier && !skippedOutlier) {
+            skippedOutlier = true
+            return
+        }
+        skippedOutlier = outlier
+        if (jumped) release()
         window.addLast(Delta(tNs, delta))
         // The newest sample at or before the window's start stays too, so a steady stream spans the
         // whole LOCK_WINDOW_NS whatever the sample times are.
         while (window.size >= 2 && window[1].tNs <= tNs - LOCK_WINDOW_NS) window.removeFirst()
-        while (window.size > 1 && !isSteady()) window.removeFirst()
+        while (window.size > 1 && !(spreadOk() && trendOk())) window.removeFirst()
         if (window.size >= MIN_WINDOW_SAMPLES && windowSpanNs() >= LOCK_WINDOW_NS) {
             locked = true
             lockedMeanRad = meanRad(0, window.size)
         }
     }
 
-    /** Small spread around the circular mean, and no trend from the older to the newer half. */
-    private fun isSteady(): Boolean {
-        val n = window.size
-        val mean = meanRad(0, n)
+    /** Every difference within [MAX_DEVIATION_RAD] of the window's circular mean. */
+    private fun spreadOk(): Boolean {
+        val mean = meanRad(0, window.size)
         for (d in window) {
             if (abs(wrapRad(d.rad - mean)) > MAX_DEVIATION_RAD) return false
         }
+        return true
+    }
+
+    /**
+     * The means of the older and the newer half within [MAX_TREND_RAD]; true for a window under
+     * [MIN_TREND_SAMPLES], whose halves are too noisy to judge.
+     */
+    private fun trendOk(): Boolean {
+        val n = window.size
         if (n < MIN_TREND_SAMPLES) return true
         val half = n / 2
         return abs(wrapRad(meanRad(n - half, n) - meanRad(0, half))) <= MAX_TREND_RAD
@@ -295,6 +323,7 @@ class CompassLock {
     private fun release() {
         locked = false
         window.clear()
+        skippedOutlier = false
     }
 
     companion object {
@@ -332,7 +361,9 @@ class CompassLock {
          * spread of about 4 degrees. A settled fused vector in a steady hand jitters by about half a
          * degree (standard deviation), and this is four of those, so such a hand locks in two seconds;
          * at 1.5 degrees the same jitter keeps trimming the window and the lock often takes three
-         * times as long. Slow drift inside this spread is for [MAX_TREND_RAD] to catch.
+         * times as long. A jitter of one degree puts one sample in twenty past this, and skipping lone
+         * outliers lets it lock in about three seconds. Slow drift inside this spread is for
+         * [MAX_TREND_RAD] to catch.
          */
         val MAX_DEVIATION_RAD: Double = Math.toRadians(2.0)
 
@@ -345,9 +376,11 @@ class CompassLock {
         val MAX_TREND_RAD: Double = Math.toRadians(1.0)
 
         /**
-         * Fewest samples a window needs before its trend is judged. The mean of a half holding only a few
-         * samples is as noisy as a single sample, so on a short window the test would keep trimming a
-         * jittery but steady stream and the window could not grow; ten samples a half average that out.
+         * Fewest samples a window needs before its trend is judged, and before a lone sample far from its
+         * mean is skipped as a glitch. The mean of a half holding only a few samples is as noisy as a
+         * single sample, so on a short window the test would keep trimming a jittery but steady stream
+         * and the window could not grow; ten samples a half average that out. The mean of a shorter
+         * window is too uncertain to call one sample an outlier.
          */
         const val MIN_TREND_SAMPLES: Int = 20
 
@@ -359,9 +392,10 @@ class CompassLock {
         const val MAX_GAP_NS: Long = 250_000_000L
 
         /**
-         * Once locked, a yaw difference this far from the locked mean releases the lock. Well above the
-         * 3 to 5 degrees a hand-held phone wobbles by at worst, so the lock does not flicker; a jump this
-         * large means the fused vector re-anchored, and north has moved.
+         * Once locked, two yaw differences in a row this far from the locked mean release the lock (one
+         * alone is skipped as a glitch). Well above the 3 to 5 degrees a hand-held phone wobbles by at
+         * worst, so the lock does not flicker; a jump this large means the fused vector re-anchored, and
+         * north has moved.
          */
         val RELEASE_DEVIATION_RAD: Double = Math.toRadians(6.0)
 
