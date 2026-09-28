@@ -18,6 +18,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.Button
@@ -60,16 +62,20 @@ import kotlin.math.roundToInt
 import kotlin.math.sin
 
 /**
- * The "Calibrating compass" popup shown before a recording: a live compass dial, what the user should
- * do right now, and Start recording once north is locked. Back and Cancel return to the setup.
+ * The "Calibrating compass" popup shown before a recording and before the heading calibration walk: a
+ * live compass dial, what the user should do right now, and [startLabel] once north is locked. Back and
+ * Cancel call [onCancel]. [hint] says how to hold the phone. With [onSkip] set, "Start anyway" appears
+ * while [canSkip] is true, for when the compass never locks; without it there is no way past the lock.
  */
 @Composable
 fun CompassDialog(
     reading: CompassReading?,
-    canSkip: Boolean,
+    hint: String,
+    startLabel: String,
     onStart: () -> Unit,
-    onSkip: () -> Unit,
     onCancel: () -> Unit,
+    canSkip: Boolean = false,
+    onSkip: (() -> Unit)? = null,
 ) {
     val status = reading?.status ?: CompassStatus.WAITING
     val locked = status == CompassStatus.LOCKED
@@ -87,8 +93,12 @@ fun CompassDialog(
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
             tonalElevation = 6.dp,
         ) {
+            // Scrolls so Start and Cancel stay reachable when the window is short (split screen).
             Column(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 20.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 24.dp, vertical = 20.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
@@ -117,14 +127,14 @@ fun CompassDialog(
                     )
                 }
                 Text(
-                    text = "Hold the phone in front of you, away from metal.",
+                    text = hint,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
                 )
                 AnimatedVisibility(visible = locked) {
                     Button(onClick = onStart, modifier = Modifier.fillMaxWidth().height(56.dp)) {
-                        Text("Start recording", style = MaterialTheme.typography.titleMedium)
+                        Text(startLabel, style = MaterialTheme.typography.titleMedium)
                     }
                 }
                 Row(
@@ -133,8 +143,19 @@ fun CompassDialog(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     TextButton(onClick = onCancel) { Text("Cancel") }
-                    AnimatedVisibility(visible = canSkip) {
-                        TextButton(onClick = onSkip) { Text("Start without compass") }
+                    if (onSkip != null) {
+                        AnimatedVisibility(visible = canSkip) {
+                            Column(horizontalAlignment = Alignment.End) {
+                                TextButton(onClick = onSkip) { Text("Start anyway") }
+                                Text(
+                                    text = "North may be off by several degrees",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    textAlign = TextAlign.End,
+                                    modifier = Modifier.padding(end = 12.dp),
+                                )
+                            }
+                        }
                     }
                 }
             }

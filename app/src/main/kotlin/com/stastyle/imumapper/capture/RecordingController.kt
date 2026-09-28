@@ -146,14 +146,16 @@ class RecordingController private constructor(context: Context) {
     }
 
     /**
-     * Creates the trip, opens its raw log, starts the foreground service and the sensors.
-     * Returns the new trip id. Throws if a recording is already running or the trip cannot be created.
+     * Creates the trip, opens its raw log, starts the foreground service and the sensors. [notes] go
+     * into the log's [LogMeta.notes], for what the log itself cannot show (a north taken before the
+     * compass settled). Returns the new trip id. Throws if a recording is already running or the trip
+     * cannot be created.
      */
-    suspend fun start(mode: TripMode, carryPosition: CarryPosition): Long =
+    suspend fun start(mode: TripMode, carryPosition: CarryPosition, notes: String = ""): Long =
         scope.async {
             mutex.withLock {
                 try {
-                    startLocked(mode, carryPosition)
+                    startLocked(mode, carryPosition, notes)
                 } catch (e: Exception) {
                     // A compass preview may be running for this start, and the screen that asked for it
                     // may be gone by now; without a recording nobody else would stop the sensors.
@@ -282,7 +284,7 @@ class RecordingController private constructor(context: Context) {
         }
     }
 
-    private suspend fun startLocked(mode: TripMode, carryPosition: CarryPosition): Long {
+    private suspend fun startLocked(mode: TripMode, carryPosition: CarryPosition, notes: String): Long {
         check(synchronized(lock) { session == null }) { "A recording is already running" }
         val startedAtEpochMs = System.currentTimeMillis()
         val config = container.calibrationRepository.getConfig()
@@ -315,6 +317,7 @@ class RecordingController private constructor(context: Context) {
                     startedAtEpochMs = startedAtEpochMs,
                     sensorPeriodsUs = sensorLogger.sensorPeriodsUs(),
                     config = config,
+                    notes = notes,
                 ),
             )
             w.write(EventRecord(startedNs, EventKind.START))

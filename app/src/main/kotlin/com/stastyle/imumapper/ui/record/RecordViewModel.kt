@@ -56,7 +56,15 @@ data class RecordUiState(
     val compass: CompassReading? = null,
     /** Whole seconds spent in [RecordPhase.COMPASS] so far. */
     val compassWaitS: Int = 0,
+    /** [PipelineConfig.northFromCompass] of the saved calibration. */
+    val compassNorthSetting: Boolean = true,
+    /** The phone has the rotation vector, game rotation vector and magnetometer the compass step needs. */
+    val compassSensors: Boolean = true,
 ) {
+    /** North of the next trip comes from the compass: the setting is on and the sensors exist. */
+    val northFromCompass: Boolean
+        get() = compassNorthSetting && compassSensors
+
     /**
      * Offer to record without a settled north once the wait has gone on for a while: indoors or near
      * metal the compass may never lock, and recording must stay possible.
@@ -67,6 +75,9 @@ data class RecordUiState(
 
     companion object {
         const val SKIP_COMPASS_AFTER_S = 8
+
+        /** [com.stastyle.imumapper.pipeline.core.LogMeta.notes] of a trip started with "Start anyway". */
+        const val COMPASS_SKIPPED_NOTE = "compass not locked at start"
     }
 }
 
@@ -81,7 +92,7 @@ class RecordViewModel(
     private val tripProcessor: TripProcessor,
 ) : ViewModel() {
 
-    private val _ui = MutableStateFlow(RecordUiState(mode = mode))
+    private val _ui = MutableStateFlow(RecordUiState(mode = mode, compassSensors = hasCompassSensors()))
     val ui: StateFlow<RecordUiState> = _ui.asStateFlow()
 
     /** Trip id of the recording we were showing, for when it is stopped from the notification. */
@@ -94,6 +105,18 @@ class RecordViewModel(
         viewModelScope.launch {
             val saved = runCatching { calibration.getCarryPosition() }.getOrDefault(CarryPosition.HAND)
             _ui.update { it.copy(carry = saved) }
+        }
+        viewModelScope.launch {
+            try {
+                calibration.observeConfig().collect { c ->
+                    _ui.update { it.copy(compassNorthSetting = c.northFromCompass) }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // Only the setup text depends on it; start() reads the config again.
+                Log.w(TAG, "config not observed", e)
+            }
         }
         viewModelScope.launch { controller.state.collect { onControllerState(it) } }
         viewModelScope.launch { controller.sensorLogger.stats.collect { s -> _ui.update { it.copy(stats = s) } } }
@@ -168,17 +191,22 @@ class RecordViewModel(
     }
 
     /**
-     * "Start without compass": records anyway. The pipeline still takes north from the start of the
-     * trip, and its diagnostics tell when that north came from a compass that had not settled.
+     * "Start anyway": records before the compass locked. The pipeline still takes north from the
+     * compass at the start of the trip, which may then be several degrees off, and nothing in its
+     * diagnostics can tell; the log's meta notes say so instead ([RecordUiState.COMPASS_SKIPPED_NOTE]),
+     * and the Debug screen shows them.
      */
     fun skipCompass() {
         if (_ui.value.phase != RecordPhase.COMPASS) return
         Log.i(TAG, "recording started without a compass lock")
         leaveCompass()
-        startRecording()
+        startRecording(notes = RecordUiState.COMPASS_SKIPPED_NOTE)
     }
 
-    /** Cancel or Back in the compass dialog: stops the preview and returns to the setup. */
+    /**
+     * Cancel or Back in the compass dialog, or the app going to the background: stops the preview and
+     * returns to the setup.
+     */
     fun cancelCompass() {
         if (_ui.value.phase != RecordPhase.COMPASS) return
         leaveCompass()
@@ -220,12 +248,12 @@ class RecordViewModel(
         compassJob = null
     }
 
-    private fun startRecording() {
+    private fun startRecording(notes: String = "") {
         val current = _ui.value
         _ui.update { it.copy(phase = RecordPhase.STARTING, error = null, compass = null) }
         viewModelScope.launch {
             // On failure the controller also stops a compass preview that was running for this start.
-            runCatching { controller.start(current.mode, current.carry) }
+            runCatching { controller.start(current.mode, current.carry, notes) }
                 .onFailure { e ->
                     Log.e(TAG, "start failed", e)
                     _ui.update {
