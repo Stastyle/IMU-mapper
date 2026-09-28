@@ -87,6 +87,20 @@ class HeadingMathTest {
     }
 
     @Test
+    fun northProblemExplainsARelativeNorth() {
+        assertNull(CalibrationMath.northProblem(mapOf("northReference" to "magnetic")))
+        assertEquals(
+            "magnetic field never passed the gate",
+            CalibrationMath.northProblem(mapOf("northReference" to "relative: magnetic field never passed the gate")),
+        )
+        assertEquals(
+            "north from compass is off",
+            CalibrationMath.northProblem(mapOf("northReference" to "relative: north from compass is off")),
+        )
+        assertNotNull(CalibrationMath.northProblem(emptyMap()))
+    }
+
+    @Test
     fun axisComesFromTheFirstHeadingSegment() {
         fun axis(diag: String?): HeadingAxisMode =
             CalibrationMath.headingAxisFromDiagnostics(if (diag == null) emptyMap() else mapOf("headingAxis" to diag))

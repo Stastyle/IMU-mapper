@@ -29,6 +29,14 @@ object CalibrationMath {
     /** Key of the PDR diagnostic that names the device axis each heading segment was measured on. */
     const val HEADING_AXIS_DIAG: String = "headingAxis"
 
+    /**
+     * Key of the diagnostic that says what +Y of a result is: [NORTH_MAGNETIC], or "relative: " and
+     * the reason north could not be taken from the compass.
+     */
+    const val NORTH_REFERENCE_DIAG: String = "northReference"
+    const val NORTH_MAGNETIC: String = "magnetic"
+    private const val NORTH_RELATIVE_PREFIX = "relative:"
+
     // --- still bias ---
 
     /** Component-wise mean; null for an empty list. */
@@ -125,6 +133,16 @@ object CalibrationMath {
         val first = diagnostics[HEADING_AXIS_DIAG]?.split(';')?.firstOrNull()?.trim() ?: return HeadingAxisMode.AUTO
         return HeadingAxisMode.entries.firstOrNull { it != HeadingAxisMode.AUTO && it.name == first }
             ?: HeadingAxisMode.AUTO
+    }
+
+    /**
+     * Why +Y of a result is not magnetic north, from its [NORTH_REFERENCE_DIAG] diagnostic; null when
+     * it is. The pipeline's "relative: " prefix is dropped so the reason reads on its own.
+     */
+    fun northProblem(diagnostics: Map<String, String>): String? {
+        val reference = diagnostics[NORTH_REFERENCE_DIAG]?.trim() ?: return "the result does not say where north is"
+        if (reference == NORTH_MAGNETIC) return null
+        return reference.removePrefix(NORTH_RELATIVE_PREFIX).trim().ifEmpty { reference }
     }
 
     // --- square test ---

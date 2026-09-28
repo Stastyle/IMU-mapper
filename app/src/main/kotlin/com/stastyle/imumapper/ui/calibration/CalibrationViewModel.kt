@@ -523,7 +523,20 @@ class CalibrationViewModel(
     }
 
     private fun computeHeading(log: RawLog, config: PipelineConfig): FlowResult.Heading {
-        val result = PdrProcessor().process(log, config)
+        // The saved axis belongs to the saved offset; the walk picks its own and saves it with the result.
+        val walkConfig = config.copy(headingAxis = HeadingAxisMode.AUTO)
+        val result = PdrProcessor().process(log, walkConfig)
+        if (walkConfig.northFromCompass) {
+            // The offset turns the walk onto north; if the walk's north is not the compass's, the offset
+            // would hold an arbitrary angle again.
+            val problem = CalibrationMath.northProblem(result.diagnostics)
+            if (problem != null) {
+                throw IllegalStateException(
+                    "The compass gave no north during the walk (" + problem + "). Calibrate outdoors, away " +
+                        "from metal, cars and electronics.",
+                )
+            }
+        }
         val end = result.points.lastOrNull()?.p ?: throw IllegalStateException("The pipeline produced no path")
         val offset = CalibrationMath.headingOffsetFromEnd(end, config.headingOffsetRad)
             ?: throw IllegalStateException("Walk further: the path ended under one metre from the start")

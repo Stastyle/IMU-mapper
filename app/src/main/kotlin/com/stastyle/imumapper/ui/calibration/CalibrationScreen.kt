@@ -150,7 +150,7 @@ private fun CurrentConfigCard(ui: CalibrationUiState) {
             ValueRow("Carry position", Fmt.carry(ui.carry))
             Text(
                 "Values apply to every new recording and re-processing. The carry position is chosen on the " +
-                    "recording screen; calibrate the heading offset with the phone carried that way.",
+                    "recording screen; if you calibrate the heading offset, do it with the phone carried that way.",
                 style = MaterialTheme.typography.bodySmall,
             )
         }
@@ -203,9 +203,10 @@ private fun StrideWalkCard(ui: CalibrationUiState, vm: CalibrationViewModel) {
 private fun HeadingOffsetCard(ui: CalibrationUiState, vm: CalibrationViewModel) {
     FlowCard(
         kind = FlowKind.HEADING,
-        instructions = "Carry the phone the way you will during trips (" + Fmt.carry(ui.carry) + "), tap Start, " +
-            "walk straight for about ten steps and tap Stop. The offset between the phone's axis and your " +
-            "walking direction is relative to that direction.",
+        instructions = "Optional: north comes from the compass. This step measures how the phone sits relative " +
+            "to your walking direction, for carrying it in a way that does not point forward. Outdoors and away " +
+            "from metal, face magnetic north (check with a compass), carry the phone the way you will during " +
+            "trips (" + Fmt.carry(ui.carry) + "), tap Start, walk straight for about ten steps and tap Stop.",
         phase = ui.phase(FlowKind.HEADING),
         enabled = ui.activeFlow == null,
         onStart = { vm.start(FlowKind.HEADING) },

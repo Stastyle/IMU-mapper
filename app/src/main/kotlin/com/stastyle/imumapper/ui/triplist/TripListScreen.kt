@@ -313,8 +313,9 @@ private fun EmptyState(modifier: Modifier = Modifier) {
             Text("No trips yet", style = MaterialTheme.typography.titleLarge)
             Spacer(Modifier.height(8.dp))
             Text(
-                "1. Open Calibration and do the still, stride and heading steps once.\n" +
-                    "2. Tap New trip, pick a mode and where the phone is carried.\n" +
+                "1. Open Calibration and do the still and stride steps once; the heading step is optional.\n" +
+                    "2. Tap New trip, pick a mode and where the phone is carried, and wait for the compass " +
+                    "to find north.\n" +
                     "3. Walk, then stop: the route appears as a 3D path you can rotate.\n\n" +
                     "Every raw log is kept, so a trip can be re-processed after calibration improves. " +
                     "Use Import to open a ZIP or .imul exported from another phone.",
