@@ -4,7 +4,7 @@ import android.os.SystemClock
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.stastyle.imumapper.capture.CompassLock
+import com.stastyle.imumapper.capture.CompassFeed
 import com.stastyle.imumapper.capture.CompassReading
 import com.stastyle.imumapper.capture.CompassStatus
 import com.stastyle.imumapper.capture.RecordingController
@@ -14,22 +14,15 @@ import com.stastyle.imumapper.capture.SensorStats
 import com.stastyle.imumapper.data.CalibrationRepository
 import com.stastyle.imumapper.pipeline.core.AnnotationKind
 import com.stastyle.imumapper.pipeline.core.CarryPosition
-import com.stastyle.imumapper.pipeline.core.LogRecord
-import com.stastyle.imumapper.pipeline.core.MagSample
 import com.stastyle.imumapper.pipeline.core.PipelineConfig
-import com.stastyle.imumapper.pipeline.core.RotationSample
-import com.stastyle.imumapper.pipeline.core.RotationSource
 import com.stastyle.imumapper.pipeline.core.TripMode
 import com.stastyle.imumapper.process.TripProcessor
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /** Where the recording screen is in its flow. */
@@ -201,43 +194,23 @@ class RecordViewModel(
 
     private fun enterCompass() {
         controller.startCompassPreview()
-        val lock = CompassLock()
         val enteredNs = SystemClock.elapsedRealtimeNanos()
         _ui.update {
-            it.copy(phase = RecordPhase.COMPASS, compass = lock.reading(enteredNs), compassWaitS = 0, error = null)
+            it.copy(
+                phase = RecordPhase.COMPASS,
+                compass = CompassReading(CompassStatus.WAITING),
+                compassWaitS = 0,
+                error = null,
+            )
         }
         compassJob?.cancel()
         compassJob = viewModelScope.launch {
-            // The live stream carries every sensor at about 50 Hz; sort it off the main thread. The lock
-            // is shared with the publisher below, hence the synchronized blocks.
-            launch(Dispatchers.Default) {
-                controller.sensorLogger.live.collect { r -> synchronized(lock) { feed(lock, r) } }
-            }
-            launch {
-                controller.sensorLogger.stats.collect { s ->
-                    synchronized(lock) { lock.onMagAccuracy(s.of(SensorKind.MAG).accuracy) }
-                }
-            }
-            while (isActive) {
-                val now = SystemClock.elapsedRealtimeNanos()
-                val reading = synchronized(lock) { lock.reading(now) }
-                val waitedS = ((now - enteredNs) / 1_000_000_000L).toInt()
+            CompassFeed.readings(controller.sensorLogger).collect { reading ->
+                val waitedS = ((SystemClock.elapsedRealtimeNanos() - enteredNs) / 1_000_000_000L).toInt()
                 _ui.update {
                     if (it.phase == RecordPhase.COMPASS) it.copy(compass = reading, compassWaitS = waitedS) else it
                 }
-                delay(COMPASS_PUBLISH_MS)
             }
-        }
-    }
-
-    private fun feed(lock: CompassLock, record: LogRecord) {
-        when (record) {
-            is RotationSample -> when (record.source) {
-                RotationSource.GAME -> lock.onGame(record.tNs, record.toQuat())
-                RotationSource.FUSED -> lock.onFused(record.tNs, record.toQuat(), record.headingAccuracyRad.toDouble())
-            }
-            is MagSample -> lock.onMag(record.tNs, record.x.toDouble(), record.y.toDouble(), record.z.toDouble())
-            else -> Unit
         }
     }
 
@@ -317,8 +290,5 @@ class RecordViewModel(
 
     private companion object {
         const val TAG = "RecordViewModel"
-
-        /** About 15 dialog updates a second: smooth enough for the dial, far below the sensor rate. */
-        const val COMPASS_PUBLISH_MS = 66L
     }
 }
