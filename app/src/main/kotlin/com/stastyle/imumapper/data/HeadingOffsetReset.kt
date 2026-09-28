@@ -3,6 +3,7 @@ package com.stastyle.imumapper.data
 import com.stastyle.imumapper.pipeline.core.HeadingAxisMode
 import com.stastyle.imumapper.pipeline.core.PipelineConfig
 import kotlinx.coroutines.CancellationException
+import kotlin.math.abs
 
 /**
  * Clears the saved heading offset once, for the release that takes north from the compass. Before
@@ -45,9 +46,18 @@ object HeadingOffsetReset {
         return stale
     }
 
-    /** True when [saved] has another heading offset or axis than [previous]: a value the user chose. */
+    /**
+     * True when [saved] has another heading offset or axis than [previous]: a value the user chose. Offsets
+     * within [OFFSET_TOLERANCE_RAD] count as the same, because the Debug editor shows the offset in degrees
+     * with six decimals and parses it back, so saving there carries the stored offset along only nearly
+     * unchanged.
+     */
     fun changesOffset(previous: PipelineConfig, saved: PipelineConfig): Boolean =
-        saved.headingOffsetRad != previous.headingOffsetRad || saved.headingAxis != previous.headingAxis
+        abs(saved.headingOffsetRad - previous.headingOffsetRad) > OFFSET_TOLERANCE_RAD ||
+            saved.headingAxis != previous.headingAxis
+
+    /** The same tolerance as the Debug editor's own change test (`ConfigFields.differs`). */
+    const val OFFSET_TOLERANCE_RAD: Double = 1e-6
 
     /**
      * Saves [config] with [notes] as the calibration, and records the reset as done with [markDone] when

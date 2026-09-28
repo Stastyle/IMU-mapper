@@ -3,12 +3,16 @@ package com.stastyle.imumapper.data
 import com.stastyle.imumapper.pipeline.core.HeadingAxisMode
 import com.stastyle.imumapper.pipeline.core.PipelineConfig
 import com.stastyle.imumapper.pipeline.core.Vec3
+import com.stastyle.imumapper.ui.debug.ConfigDraft
+import com.stastyle.imumapper.ui.debug.ConfigFields
 import kotlinx.coroutines.runBlocking
 import java.io.IOException
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -109,6 +113,22 @@ class HeadingOffsetResetTest {
         val retyped = Flag()
         HeadingOffsetReset.saveCalibration(repo, repo.config.copy(headingOffsetRad = 0.2), "", retyped::markDone)
         assertTrue(retyped.done)
+    }
+
+    @Test
+    fun aDebugEditorSaveCarriesAStaleOffsetAlongWithoutMarkingTheResetDone() = runBlocking {
+        // The editor shows the offset in degrees with six decimals and parses it back, so the stale
+        // 1.234 rad returns about a nanoradian off. That is the stored offset carried along, not the user's.
+        val stale = calibrated.copy(headingOffsetRad = 1.234)
+        val repo = FakeCalibrationRepository(stale)
+        val flag = Flag()
+        val roundTripped = assertNotNull(ConfigFields.parse(ConfigDraft.from(stale)).config)
+        assertNotEquals(stale.headingOffsetRad, roundTripped.headingOffsetRad)
+        assertNull(HeadingOffsetReset.saveCalibration(repo, roundTripped, "debug editor", flag::markDone))
+        assertFalse(flag.done)
+        // So the reset still clears it at the next start.
+        assertTrue(HeadingOffsetReset.runOnce(repo, flag::isDone, flag::markDone))
+        assertEquals(0.0, repo.config.headingOffsetRad)
     }
 
     @Test
