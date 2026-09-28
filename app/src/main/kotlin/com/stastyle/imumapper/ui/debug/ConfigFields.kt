@@ -17,6 +17,7 @@ enum class ConfigField(val label: String, val type: FieldType, val hint: String)
     WEINBERG_K("Weinberg k (0 = fixed stride)", FieldType.DOUBLE, "0 to 5"),
     HEADING_OFFSET_DEG("Heading offset (deg)", FieldType.DOUBLE, "-360 to 360"),
     USE_MAGNETOMETER("Use magnetometer", FieldType.BOOL, ""),
+    NORTH_FROM_COMPASS("North from compass", FieldType.BOOL, ""),
     MAG_GATE_TOLERANCE("Magnetic gate tolerance (fraction)", FieldType.DOUBLE, "0 to 1"),
     GYRO_BIAS_X("Gyro bias x (rad/s)", FieldType.DOUBLE, "-1 to 1"),
     GYRO_BIAS_Y("Gyro bias y (rad/s)", FieldType.DOUBLE, "-1 to 1"),
@@ -60,6 +61,7 @@ data class ConfigDraft(
                 ConfigField.WEINBERG_K to num(c.weinbergK),
                 ConfigField.HEADING_OFFSET_DEG to num(Math.toDegrees(c.headingOffsetRad)),
                 ConfigField.USE_MAGNETOMETER to c.useMagnetometer.toString(),
+                ConfigField.NORTH_FROM_COMPASS to c.northFromCompass.toString(),
                 ConfigField.MAG_GATE_TOLERANCE to num(c.magGateTolerance),
                 ConfigField.GYRO_BIAS_X to num(c.gyroBias.x),
                 ConfigField.GYRO_BIAS_Y to num(c.gyroBias.y),
@@ -150,6 +152,7 @@ object ConfigFields {
             headingOffsetRad = CalibrationMath.wrapRad(Math.toRadians(headingDeg!!)),
             headingAxis = draft.headingAxis,
             useMagnetometer = draft.bool(ConfigField.USE_MAGNETOMETER),
+            northFromCompass = draft.bool(ConfigField.NORTH_FROM_COMPASS),
             magGateTolerance = magTol!!,
             gyroBias = Vec3(bx!!, by!!, bz!!),
             autoReorient = draft.bool(ConfigField.AUTO_REORIENT),
@@ -175,7 +178,7 @@ object ConfigFields {
         fun d(x: Double, y: Double) = abs(x - y) > 1e-6
         return d(a.strideLengthM, b.strideLengthM) || d(a.weinbergK, b.weinbergK) ||
             d(a.headingOffsetRad, b.headingOffsetRad) || a.headingAxis != b.headingAxis ||
-            a.useMagnetometer != b.useMagnetometer ||
+            a.useMagnetometer != b.useMagnetometer || a.northFromCompass != b.northFromCompass ||
             d(a.magGateTolerance, b.magGateTolerance) || d(a.gyroBias.x, b.gyroBias.x) ||
             d(a.gyroBias.y, b.gyroBias.y) || d(a.gyroBias.z, b.gyroBias.z) ||
             a.autoReorient != b.autoReorient || d(a.carryChangeTiltRad, b.carryChangeTiltRad) ||

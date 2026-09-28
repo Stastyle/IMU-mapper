@@ -3,6 +3,7 @@ package com.stastyle.imumapper.update
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.longPreferencesKey
@@ -20,8 +21,9 @@ private val Context.updatesDataStore: DataStore<Preferences> by preferencesDataS
 
 /**
  * The "updates" preferences store: when the updater last asked GitHub, which tag the user has
- * already dismissed, and the Settings screen's default trip mode. The settings keys live here
- * because this is the app's only DataStore and a second one for two keys is not worth a file.
+ * already dismissed, the Settings screen's default trip mode, and whether the one-time heading offset
+ * reset has run. The other keys live here because this is the app's only DataStore and a second one
+ * for a few keys is not worth a file.
  */
 class UpdatePreferences(context: Context) {
 
@@ -54,9 +56,22 @@ class UpdatePreferences(context: Context) {
         store.edit { it[KEY_DEFAULT_TRIP_MODE] = mode.name }
     }
 
+    /**
+     * True once [com.stastyle.imumapper.data.HeadingOffsetReset] has run, or the user has saved a heading
+     * offset of their own since the update, which leaves nothing to reset. Reads the store directly,
+     * without the empty fallback: an unreadable file throws, so the reset is skipped for this start
+     * instead of wiping an offset the user calibrated after it.
+     */
+    suspend fun headingOffsetResetDone(): Boolean = store.data.first()[KEY_HEADING_OFFSET_RESET_DONE] ?: false
+
+    suspend fun markHeadingOffsetResetDone() {
+        store.edit { it[KEY_HEADING_OFFSET_RESET_DONE] = true }
+    }
+
     private companion object {
         val KEY_LAST_CHECK_EPOCH_MS = longPreferencesKey("last_check_epoch_ms")
         val KEY_LAST_SEEN_TAG = stringPreferencesKey("last_seen_tag")
         val KEY_DEFAULT_TRIP_MODE = stringPreferencesKey("default_trip_mode")
+        val KEY_HEADING_OFFSET_RESET_DONE = booleanPreferencesKey("heading_offset_reset_done")
     }
 }

@@ -29,11 +29,14 @@ import kotlin.math.abs
  *
  * Frame handling: ARCore's world frame is turned into ENU by [ArCoreFrame.AR_TO_ENU], then yawed
  * so the camera heading at the first TRACKING frame matches the IMU's camera heading at that
- * moment (the same rotation-vector frame PDR uses, so both paths share one "north"), and
- * translated so the first tracking pose is the origin. Every stretch of continuous tracking gets
- * its own [FrameTransform]: after a loss the next stretch is translated so its first pose lands on
- * the PDR estimate, and re-yawed as well when its heading disagrees with the IMU by more than
- * [yawRealignThresholdRad] (ARCore normally keeps its frame across a loss; a fresh session does not).
+ * moment, and translated so the first tracking pose is the origin. The IMU heading comes from
+ * [ImuHeading], the same orientation track PDR uses, so both paths share one north: magnetic north
+ * when the track was turned onto the compass (diagnostic `northReference`, copied from the IMU
+ * side), otherwise the gyro's arbitrary start. This yaw is the only place north enters the ARCore
+ * frame. Every stretch of continuous tracking gets its own [FrameTransform]: after a loss the next
+ * stretch is translated so its first pose lands on the PDR estimate, and re-yawed as well when its
+ * heading disagrees with the IMU by more than [yawRealignThresholdRad] (ARCore normally keeps its
+ * frame across a loss; a fresh session does not).
  *
  * A tracking loss is a STOPPED frame between tracking frames, a hole longer than [maxHoleS]
  * between tracking frames (PAUSED frames count as a hole, see [TrackingRuns]), or the log
@@ -84,7 +87,7 @@ class VioProcessor(
         // PDR is prepared whenever the log carries step data: it fills gaps and gives the step count.
         val ctx: PdrContext? =
             if (log.accel.isNotEmpty() || log.steps.isNotEmpty()) solver.prepare(log, config) else null
-        val imu = ImuHeading.of(log, ctx)
+        val imu = ImuHeading.of(log, ctx, config)
         diag["yawAlignmentSource"] = imu.source.name
 
         val first = runs[0].first
@@ -93,6 +96,7 @@ class VioProcessor(
         val yaw = if (imuHeading == null) Quat.IDENTITY else ArCoreFrame.yawBetween(rawHeading, imuHeading)
         diag["yawAlignmentDeg"] =
             Diag.num(Math.toDegrees(if (imuHeading == null) 0.0 else Angles.diff(imuHeading, rawHeading)), 1)
+        diag[OrientationEstimator.NORTH_REFERENCE] = imu.northReference
         var transform = FrameTransform(yaw, Vec3.ZERO).anchoredAt(first.position(), Vec3.ZERO)
 
         // Without an orientation the PDR headings are all the bare offset: dead-reckoning with them

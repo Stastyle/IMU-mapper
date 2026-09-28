@@ -34,6 +34,12 @@ data class SensorHealth(
     val lastTimestampNs: Long = 0L,
     /** True while the sensor has delivered nothing for over [StallDetector] threshold. */
     val stalled: Boolean = false,
+    /**
+     * Last accuracy the sensor reported, with the values of Android's `SensorManager.SENSOR_STATUS_*`
+     * constants: 0 unreliable, 1 low, 2 medium, 3 high, -1 no contact. Null until the sensor reports
+     * one. The magnetometer's value tells whether it needs the figure-8 calibration.
+     */
+    val accuracy: Int? = null,
 )
 
 /** Snapshot of every sensor plus the counters the recording screen shows. Published a few times a second. */

@@ -3,7 +3,9 @@ package com.stastyle.imumapper.ui.calibration
 import com.stastyle.imumapper.pipeline.core.HeadingAxisMode
 import com.stastyle.imumapper.pipeline.core.Quat
 import com.stastyle.imumapper.pipeline.core.Vec3
+import com.stastyle.imumapper.pipeline.pdr.OrientationEstimator
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.max
 import kotlin.math.min
@@ -28,6 +30,22 @@ object CalibrationMath {
 
     /** Key of the PDR diagnostic that names the device axis each heading segment was measured on. */
     const val HEADING_AXIS_DIAG: String = "headingAxis"
+
+    /**
+     * Key of the orientation diagnostic with the drift correction the magnetometer applied by the end of
+     * a trip, in degrees: how far the fused-minus-game yaw moved after the start. Present whenever the
+     * correction ran: `useMagnetometer` on, which the heading walk forces, and a game rotation vector
+     * turned onto north. A walk without it had its north from the fused vector alone.
+     */
+    const val YAW_CORRECTION_FINAL_DIAG: String = OrientationEstimator.YAW_CORRECTION_FINAL
+
+    /**
+     * Largest drift correction a heading walk may end with. The walk is short and starts on a settled
+     * compass, so the gyro drifts a fraction of a degree; more than this means the compass itself
+     * moved (metal or a disturbed field along the way), and the end direction measured against it
+     * would put the error into every trip.
+     */
+    const val MAX_HEADING_WALK_CORRECTION_DEG: Double = 5.0
 
     // --- still bias ---
 
@@ -126,6 +144,36 @@ object CalibrationMath {
         return HeadingAxisMode.entries.firstOrNull { it != HeadingAxisMode.AUTO && it.name == first }
             ?: HeadingAxisMode.AUTO
     }
+
+    /**
+     * Why +Y of a result is not magnetic north, from its [OrientationEstimator.NORTH_REFERENCE]
+     * diagnostic; null when it is. The pipeline's [OrientationEstimator.RELATIVE] prefix is dropped so
+     * the reason reads on its own.
+     */
+    fun northProblem(diagnostics: Map<String, String>): String? {
+        val reference = diagnostics[OrientationEstimator.NORTH_REFERENCE]?.trim()
+            ?: return "the result does not say where north is"
+        if (reference == OrientationEstimator.MAGNETIC) return null
+        return reference.removePrefix(OrientationEstimator.RELATIVE.trim()).trim().ifEmpty { reference }
+    }
+
+    /**
+     * The drift correction a heading walk ended with, degrees, from [YAW_CORRECTION_FINAL_DIAG], when
+     * its size is over [MAX_HEADING_WALK_CORRECTION_DEG]; null when it is within, or not reported.
+     */
+    fun compassMovedDeg(diagnostics: Map<String, String>): Double? {
+        val deg = diagnostics[YAW_CORRECTION_FINAL_DIAG]?.trim()?.toDoubleOrNull() ?: return null
+        return if (abs(deg) > MAX_HEADING_WALK_CORRECTION_DEG) deg else null
+    }
+
+    /**
+     * True when the result's north was not taken at its start: the magnetic gate rejected the first
+     * readings as disturbed, and [OrientationEstimator.NORTH_REFERENCE_AT] names the later second north
+     * came from. The fused vector settles over seconds, so a disturbance at the start can still pull it
+     * when north is read later, and an offset measured against that north would turn every trip.
+     */
+    fun northCameLate(diagnostics: Map<String, String>): Boolean =
+        diagnostics.containsKey(OrientationEstimator.NORTH_REFERENCE_AT)
 
     // --- square test ---
 

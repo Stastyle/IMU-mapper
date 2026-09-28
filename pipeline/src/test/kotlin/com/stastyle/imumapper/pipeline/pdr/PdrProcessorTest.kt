@@ -77,7 +77,7 @@ class PdrProcessorTest {
         val cfg = PipelineConfig(strideLengthM = w.strideM * 1.04, useMagnetometer = false)
         val log = w.build(cfg)
         val r = PdrProcessor().process(log, cfg)
-        assertEquals(4, r.pipelineVersion)
+        assertEquals(5, r.pipelineVersion)
         assertEquals(r.points.size, r.rawPoints.size, "post-processing moves points, never adds or drops them")
         for (i in r.points.indices) {
             assertEquals(r.points[i].tNs, r.rawPoints[i].tNs)

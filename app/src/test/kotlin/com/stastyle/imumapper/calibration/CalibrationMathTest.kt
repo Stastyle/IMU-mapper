@@ -8,6 +8,7 @@ import kotlin.math.PI
 import kotlin.math.pow
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -84,6 +85,40 @@ class HeadingMathTest {
         // A walk that already points north changes nothing.
         assertEquals(0.1, assertNotNull(CalibrationMath.headingOffsetFromEnd(Vec3(0.0, 5.0, 1.0), 0.1)), 1e-12)
         assertNull(CalibrationMath.headingOffsetFromEnd(Vec3(0.2, 0.2, 0.0), 0.0))
+    }
+
+    @Test
+    fun northProblemExplainsARelativeNorth() {
+        assertNull(CalibrationMath.northProblem(mapOf("northReference" to "magnetic")))
+        assertEquals(
+            "magnetic field never passed the gate",
+            CalibrationMath.northProblem(mapOf("northReference" to "relative: magnetic field never passed the gate")),
+        )
+        assertEquals(
+            "north from compass is off",
+            CalibrationMath.northProblem(mapOf("northReference" to "relative: north from compass is off")),
+        )
+        assertNotNull(CalibrationMath.northProblem(emptyMap()))
+    }
+
+    @Test
+    fun aLargeDriftCorrectionMeansTheCompassMovedDuringTheWalk() {
+        fun moved(value: String?): Double? =
+            CalibrationMath.compassMovedDeg(if (value == null) emptyMap() else mapOf("yawCorrectionFinalDeg" to value))
+        assertEquals(-7.25, assertNotNull(moved("-7.25")), 1e-12)
+        assertEquals(5.01, assertNotNull(moved("5.01")), 1e-12)
+        assertNull(moved("5.00"))
+        assertNull(moved("-0.3"))
+        // Not reported (north came from the fused vector alone, so no drift correction ran) or unreadable.
+        assertNull(moved(null))
+        assertNull(moved("n/a"))
+    }
+
+    @Test
+    fun aNorthReferenceTakenAfterTheStartIsLate() {
+        assertTrue(CalibrationMath.northCameLate(mapOf("northReference" to "magnetic", "northReferenceAtS" to "2.0")))
+        assertFalse(CalibrationMath.northCameLate(mapOf("northReference" to "magnetic", "northOffsetDeg" to "-40.0")))
+        assertFalse(CalibrationMath.northCameLate(emptyMap()))
     }
 
     @Test

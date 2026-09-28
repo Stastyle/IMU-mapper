@@ -37,7 +37,7 @@ import kotlin.random.Random
  * cadence; the phone rides along with a fixed tilt and a walking-direction offset. Generates
  * accelerometer (gravity + vertical bounce + forward/lateral gait oscillation + noise), gyroscope
  * (differentiated from the true orientation, plus bias), game and fused rotation vectors (the game
- * one with optional yaw drift), magnetometer, barometer and hardware step events.
+ * one with an optional yaw offset and drift), magnetometer, barometer and hardware step events.
  *
  * Steps happen at the cadence while walking, so the true stride is speed / cadence. A [pause] /
  * [resume] pair writes the recorder's PAUSE and RESUME events; the sensors keep being generated
@@ -55,6 +55,12 @@ class SyntheticWalk(
     val includeHardwareSteps: Boolean = true,
     /** Slow yaw drift of the game rotation vector, rad/s (positive = counter-clockwise). */
     val gameYawDriftRadPerS: Double = 0.0,
+    /**
+     * Yaw of the game rotation vector's frame against true north at the start, radians
+     * counter-clockwise, as a real game vector starts at an arbitrary yaw. The fused vector and the
+     * magnetometer stay true.
+     */
+    val gameYawOffsetRad: Double = 0.0,
     val gyroBias: Vec3 = Vec3.ZERO,
     val noiseSeed: Int = 7,
     val accelNoise: Double = 0.08,
@@ -307,7 +313,7 @@ class SyntheticWalk(
             )
 
             if (includeRotation && k % rotEvery == 0) {
-                val drifted = (Quat.yaw(gameYawDriftRadPerS * s) * q).normalized()
+                val drifted = (Quat.yaw(gameYawOffsetRad + gameYawDriftRadPerS * s) * q).normalized()
                 out.add(rotation(t, drifted, RotationSource.GAME))
                 if (includeFused) out.add(rotation(t, q, RotationSource.FUSED))
             }

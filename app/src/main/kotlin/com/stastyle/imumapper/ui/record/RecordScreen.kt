@@ -57,6 +57,9 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.stastyle.imumapper.capture.RecordingController
@@ -71,6 +74,7 @@ import com.stastyle.imumapper.pipeline.core.AnnotationKind
 import com.stastyle.imumapper.pipeline.core.CarryPosition
 import com.stastyle.imumapper.pipeline.core.TripMode
 import com.stastyle.imumapper.ui.common.appContainer
+import com.stastyle.imumapper.ui.common.findActivity
 
 /**
  * Recording screen for the given [mode]. Calls [onFinished] with the new trip id once the
@@ -104,15 +108,37 @@ fun RecordScreen(
         if (toRequest.isEmpty()) vm.start() else permissionLauncher.launch(toRequest.toTypedArray())
     }
 
-    val busy = ui.phase == RecordPhase.STARTING || ui.phase == RecordPhase.RECORDING || ui.phase == RecordPhase.STOPPING
+    // The compass preview runs the sensors at the fastest rate; like the calibration flows it must not
+    // outlive the screen or keep running while the app is in the background, where nobody can tap Start.
+    // A recreation (split screen or pop-up view changes the screen layout, which the manifest does not
+    // handle) stops and disposes the screen too, but the view model and its wait survive it: keep them.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val activity = remember(context) { context.findActivity() }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP && activity?.isChangingConfigurations != true) vm.cancelCompass()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            if (activity?.isChangingConfigurations != true) vm.cancelCompass()
+        }
+    }
+
+    val busy = ui.phase != RecordPhase.SETUP && ui.phase != RecordPhase.DONE
     val view = LocalView.current
     DisposableEffect(view, busy) {
-        // Screen stays on while recording so the annotation buttons remain reachable.
+        // Screen stays on while recording so the annotation buttons remain reachable, and while the
+        // compass settles so the wait is not lost to the screen timeout.
         view.keepScreenOn = busy
         onDispose { view.keepScreenOn = false }
     }
     BackHandler(enabled = busy) {
-        if (ui.phase == RecordPhase.RECORDING) showStopDialog = true
+        when (ui.phase) {
+            RecordPhase.RECORDING -> showStopDialog = true
+            RecordPhase.COMPASS -> vm.cancelCompass()
+            else -> Unit
+        }
     }
     LaunchedEffect(ui.finishedTripId) {
         val id = ui.finishedTripId
@@ -149,7 +175,7 @@ fun RecordScreen(
     ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
             when (ui.phase) {
-                RecordPhase.SETUP, RecordPhase.STARTING -> SetupContent(
+                RecordPhase.SETUP, RecordPhase.COMPASS, RecordPhase.STARTING -> SetupContent(
                     ui = ui,
                     onCarry = vm::setCarry,
                     onStart = onStartClick,
@@ -167,6 +193,17 @@ fun RecordScreen(
         }
     }
 
+    if (ui.phase == RecordPhase.COMPASS) {
+        CompassDialog(
+            reading = ui.compass,
+            hint = startPose(ui) + ", away from metal.",
+            startLabel = "Start recording",
+            onStart = vm::confirmCompass,
+            onCancel = vm::cancelCompass,
+            canSkip = ui.canSkipCompass,
+            onSkip = vm::skipCompass,
+        )
+    }
     if (showStopDialog) {
         ConfirmDialog(
             title = "Stop recording?",
@@ -189,6 +226,7 @@ private fun SetupContent(
     onStart: () -> Unit,
 ) {
     val starting = ui.phase == RecordPhase.STARTING
+    val inputsDisabled = starting || ui.phase == RecordPhase.COMPASS
     // No vertical scroll here: the weighted spacer needs a bounded height to push Start to the bottom.
     Column(
         modifier = Modifier
@@ -204,12 +242,12 @@ private fun SetupContent(
                     selected = ui.carry == position,
                     onClick = { onCarry(position) },
                     label = { Text(carryLabel(position)) },
-                    enabled = !starting,
+                    enabled = !inputsDisabled,
                 )
             }
         }
         Text(
-            "The heading offset from calibration is tied to the carry position. Pick the one you calibrated.",
+            northText(ui),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -219,7 +257,7 @@ private fun SetupContent(
         }
         Button(
             onClick = onStart,
-            enabled = !starting,
+            enabled = !inputsDisabled,
             modifier = Modifier.fillMaxWidth().height(80.dp),
         ) {
             if (starting) {
@@ -495,6 +533,32 @@ private fun modeDescription(mode: TripMode): String = when (mode) {
             "When tracking is lost the path continues from steps."
     TripMode.ILLUMINATED ->
         "Camera tracking in a lit space with automatic photos. Hold the phone in front of you."
+}
+
+/**
+ * How to hold the phone when the recording starts. A calibrated heading offset is applied to the start
+ * of every recording, so with one the recording must start in the pose it was calibrated in; a start in
+ * the hand would turn the map by the offset.
+ */
+private fun startPose(ui: RecordUiState): String =
+    if (ui.offsetCalibrated) {
+        "Start in the pose you calibrated the heading offset in"
+    } else {
+        "Start with the phone in your hand"
+    }
+
+/** Where north comes from for the next trip, and how to hold the phone at the start ([startPose]). */
+private fun northText(ui: RecordUiState): String {
+    val start = startPose(ui) + "; the path keeps its direction when you put the phone in a pocket."
+    return when {
+        ui.northFromCompass -> "North is taken from the compass before the recording starts. $start"
+        !ui.compassSensors ->
+            "This phone lacks the sensors to find north with the compass, so north on the map is the " +
+                "gyroscope's own direction for this trip. $start"
+        else ->
+            "North on the map is the gyroscope's own direction for this trip, not the compass's; Settings can " +
+                "turn North from compass on. $start"
+    }
 }
 
 private fun carryLabel(position: CarryPosition): String = when (position) {

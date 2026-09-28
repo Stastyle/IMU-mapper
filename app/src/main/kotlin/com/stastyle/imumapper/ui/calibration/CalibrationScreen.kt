@@ -49,6 +49,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.stastyle.imumapper.data.db.TripEntity
 import com.stastyle.imumapper.ui.common.appContainer
+import com.stastyle.imumapper.ui.common.findActivity
+import com.stastyle.imumapper.ui.record.CompassDialog
 
 /** Calibration flows: still bias, stride walk, heading offset, square test, ARCore vs PDR, assisted tuning. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -62,27 +64,31 @@ fun CalibrationScreen(onBack: () -> Unit, onOpenTuning: () -> Unit) {
             calibration = container.calibrationRepository,
             trips = container.tripRepository,
             files = container.tripFiles,
+            markHeadingOffsetResetDone = container.updateManager.preferences::markHeadingOffsetResetDone,
         )
     }
     val ui by vm.ui.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
 
     // A flow must not keep the fastest sensor rate running once the screen is gone or the app is
-    // in the background, and the screen should not lock while the user is walking a square.
+    // in the background, and the screen should not lock while the user is walking a square. A
+    // recreation (split screen or pop-up view changes the screen layout, which the manifest does not
+    // handle) stops and disposes the screen too, but the view model and its flow survive it: keep them.
     val lifecycleOwner = LocalLifecycleOwner.current
+    val activity = remember(context) { context.findActivity() }
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_STOP) vm.cancelActive()
+            if (event == Lifecycle.Event.ON_STOP && activity?.isChangingConfigurations != true) vm.cancelActive()
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
-            vm.cancelActive()
+            if (activity?.isChangingConfigurations != true) vm.cancelActive()
         }
     }
     val view = LocalView.current
-    DisposableEffect(view, ui.isRecording) {
-        view.keepScreenOn = ui.isRecording
+    DisposableEffect(view, ui.sensorsRunning) {
+        view.keepScreenOn = ui.sensorsRunning
         onDispose { view.keepScreenOn = false }
     }
     LaunchedEffect(ui.message) {
@@ -123,6 +129,18 @@ fun CalibrationScreen(onBack: () -> Unit, onOpenTuning: () -> Unit) {
             TuningCard(onOpenTuning)
         }
     }
+
+    val heading = ui.phase(FlowKind.HEADING)
+    if (heading is FlowPhase.Compass) {
+        // No "Start anyway" here: an offset measured against a compass that has not settled turns every trip.
+        CompassDialog(
+            reading = heading.reading,
+            hint = "Hold the phone in the pose you are calibrating, facing magnetic north, away from metal.",
+            startLabel = "Start walking",
+            onStart = vm::confirmCompass,
+            onCancel = vm::cancelActive,
+        )
+    }
 }
 
 @Composable
@@ -150,7 +168,8 @@ private fun CurrentConfigCard(ui: CalibrationUiState) {
             ValueRow("Carry position", Fmt.carry(ui.carry))
             Text(
                 "Values apply to every new recording and re-processing. The carry position is chosen on the " +
-                    "recording screen; calibrate the heading offset with the phone carried that way.",
+                    "recording screen. The heading offset belongs to the pose the phone is in when a recording " +
+                    "starts, so calibrate it in that pose and start every recording in it.",
                 style = MaterialTheme.typography.bodySmall,
             )
         }
@@ -203,9 +222,13 @@ private fun StrideWalkCard(ui: CalibrationUiState, vm: CalibrationViewModel) {
 private fun HeadingOffsetCard(ui: CalibrationUiState, vm: CalibrationViewModel) {
     FlowCard(
         kind = FlowKind.HEADING,
-        instructions = "Carry the phone the way you will during trips (" + Fmt.carry(ui.carry) + "), tap Start, " +
-            "walk straight for about ten steps and tap Stop. The offset between the phone's axis and your " +
-            "walking direction is relative to that direction.",
+        instructions = "Optional: only needed if recordings start with the phone in a mount or holder that does " +
+            "not point forward and whose screen you can still tap; a phone put in a pocket after the start keeps " +
+            "its direction without one. North comes from the compass, and the offset is applied to every " +
+            "recording, so recordings must start in the pose you calibrate it in. Calibrate in that pose: " +
+            "outdoors and away from metal, face magnetic north (check with a compass), tap Start and wait for " +
+            "the compass, then tap Start walking, walk straight toward magnetic north for about ten steps and " +
+            "tap Stop.",
         phase = ui.phase(FlowKind.HEADING),
         enabled = ui.activeFlow == null,
         onStart = { vm.start(FlowKind.HEADING) },

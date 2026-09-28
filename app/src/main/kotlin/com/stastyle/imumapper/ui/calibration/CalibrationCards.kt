@@ -57,6 +57,8 @@ fun FlowCard(
                     setup()
                     Button(onClick = onStart, enabled = enabled) { Text("Start") }
                 }
+                // The compass dialog covers the screen meanwhile; this shows behind it.
+                is FlowPhase.Compass -> Text("Waiting for the compass to find north…")
                 is FlowPhase.Running -> RunningBody(kind, phase, onStop)
                 is FlowPhase.Computing -> {
                     Row(
@@ -170,9 +172,10 @@ fun HeadingResult(r: FlowResult.Heading) {
     ValueRow("Measured on axis", Fmt.axis(r.axis))
     ValueRow("Walked", Fmt.metres(r.walkedM) + " · ${r.steps} steps")
     Text(
-        "The offset is relative to the walking direction: it turns the direction you just walked into " +
-            "\"north\" (up) on the map for this carry position. Walk towards real north if you want the map " +
-            "oriented; otherwise headings are relative to this walk.",
+        "The offset is the angle between where the phone points and where you walk, for the pose the phone " +
+            "was in when the walk started. It is applied to every recording, so every recording must start in " +
+            "that pose. It is right only if you walked toward magnetic north: it turns the walk you just made " +
+            "into north on the map. With the phone held in front of you it should be near 0°.",
         style = MaterialTheme.typography.bodySmall,
     )
 }

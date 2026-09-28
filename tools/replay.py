@@ -288,6 +288,7 @@ CONFIG_DEFAULTS = [
     ("weinbergK", 0.0),
     ("headingOffsetRad", 0.0),
     ("useMagnetometer", True),
+    ("northFromCompass", True),
     ("magGateTolerance", 0.15),
     ("gyroBias", {"x": 0.0, "y": 0.0, "z": 0.0}),
     ("autoReorient", True),
@@ -656,6 +657,12 @@ class MagGate:
 # OrientationEstimator (pdr/OrientationEstimator.kt)
 # ----------------------------------------------------------------------------------------------
 
+NORTH_REFERENCE = "northReference"
+NORTH_MAGNETIC = "magnetic"
+NORTH_RELATIVE = "relative: "
+NORTH_OFF = NORTH_RELATIVE + "north from compass is off"
+
+
 class OrientationEstimator:
     def __init__(self, madgwick_beta=0.1, yaw_correction_time_constant_s=5.0, reference_window_s=1.0):
         self.madgwick_beta = madgwick_beta
@@ -671,25 +678,40 @@ class OrientationEstimator:
             base = OrientationTrack.from_rotation_samples(game_t, game)
             diag["orientationSource"] = "GAME"
             diag["rotationSamples"] = str(len(game_t))
-            if config.useMagnetometer and len(fused_t) > 0:
+            if (config.useMagnetometer or config.northFromCompass) and len(fused_t) > 0:
                 track = self.correct_yaw(base, fused_t, fused, log, config, diag)
             else:
                 diag["yawCorrection"] = "disabled" if not config.useMagnetometer else "no fused rotation samples"
+                diag[NORTH_REFERENCE] = self.relative_north(config, "no fused rotation samples")
                 track = base
             return track, "GAME", diag
         if len(fused_t) > 0:
             diag["orientationSource"] = "FUSED"
             diag["rotationSamples"] = str(len(fused_t))
             diag["yawCorrection"] = "not needed: fused rotation vector is the primary source"
+            diag[NORTH_REFERENCE] = NORTH_MAGNETIC
             return OrientationTrack.from_rotation_samples(fused_t, fused), "FUSED", diag
         if len(log.gyro_t) > 0 and len(log.accel_t) > 0:
             diag["orientationSource"] = "MADGWICK"
             diag["yawCorrection"] = "not available without rotation vector samples"
             diag["madgwickBeta"] = str(self.madgwick_beta)
+            diag[NORTH_REFERENCE] = NORTH_RELATIVE + "no rotation vector samples"
             return self.madgwick(log, config), "MADGWICK", diag
         diag["orientationSource"] = "NONE"
         diag["orientationWarning"] = "no rotation vector, gyro or accel samples; identity orientation used"
+        diag[NORTH_REFERENCE] = NORTH_RELATIVE + "no orientation samples"
         return EMPTY_TRACK, "NONE", diag
+
+    @staticmethod
+    def relative_north(config, reason):
+        """A relative northReference; switching north off is the reason whatever else went wrong."""
+        return NORTH_RELATIVE + reason if config.northFromCompass else NORTH_OFF
+
+    @staticmethod
+    def skip(config, diag, correction, north):
+        """Game track that cannot be turned onto north; with the magnetometer off yawCorrection stays "disabled"."""
+        diag["yawCorrection"] = "skipped: " + correction if config.useMagnetometer else "disabled"
+        diag[NORTH_REFERENCE] = OrientationEstimator.relative_north(config, north)
 
     def madgwick(self, log, config):
         filt = MadgwickFilter(self.madgwick_beta)
@@ -722,7 +744,7 @@ class OrientationEstimator:
     def correct_yaw(self, base, fused_t, fused, log, config, diag):
         gate = MagGate.from_start(log.mag_t, log.mag, base, config.magGateTolerance, self.reference_window_s)
         if gate is None:
-            diag["yawCorrection"] = "skipped: no magnetometer samples to gate the fused heading"
+            self.skip(config, diag, "no magnetometer samples to gate the fused heading", "no magnetometer samples")
             return base
         diag["magRefMagnitudeUt"] = Diag.num(gate.ref_magnitude_ut, 2)
         diag["magRefDipDeg"] = Diag.num(math.degrees(gate.ref_dip_rad), 1)
@@ -737,24 +759,32 @@ class OrientationEstimator:
         passed = int(passes.sum())
         diag["magGatePassFraction"] = Diag.num(passed / n, 3)
         if passed == 0:
-            diag["yawCorrection"] = "skipped: magnetic field never passed the gate"
+            self.skip(config, diag, "magnetic field never passed the gate", "magnetic field never passed the gate")
             return base
 
-        ref_end = int(fused_t[0]) + int(self.reference_window_s * 1e9)
+        # Reference: gated circular mean over one window from the first fused sample that passes.
+        window = int(self.reference_window_s * 1e9)
+        ref_start = int(np.argmax(passes))
+        ref_end = int(fused_t[ref_start]) + window
         rc = rs = 0.0
-        ref_count = 0
-        for i in range(n):
-            if fused_t[i] > ref_end and ref_count > 0:
+        for i in range(ref_start, n):
+            if fused_t[i] > ref_end:
                 break
             if not passes[i]:
                 continue
             rc += math.cos(delta[i])
             rs += math.sin(delta[i])
-            ref_count += 1
-        if ref_count == 0:
-            diag["yawCorrection"] = "skipped: magnetic field disturbed during the reference second"
-            return base
         ref = math.atan2(rs, rc)
+        diag["northOffsetDeg"] = Diag.num(math.degrees(ref), 1)
+        late_ns = int(fused_t[ref_start]) - int(fused_t[0])
+        if late_ns > window:
+            diag["northReferenceAtS"] = Diag.num(late_ns / 1e9, 1)
+
+        if not config.useMagnetometer:
+            # North from the start only: one constant turn, and the magnetometer is ignored afterwards.
+            diag["yawCorrection"] = "disabled"
+            diag[NORTH_REFERENCE] = NORTH_MAGNETIC
+            return OrientationTrack.build(base.times, quat_normalized(quat_mul(quat_yaw(ref), base.q)))
 
         corr = np.zeros(n)
         ec = math.cos(ref)
@@ -779,7 +809,10 @@ class OrientationEstimator:
             corr[i] = unwrapped
         diag["yawCorrectionFinalDeg"] = Diag.num(math.degrees(corr[n - 1]), 2)
         diag["yawCorrection"] = "applied"
+        diag[NORTH_REFERENCE] = NORTH_MAGNETIC if config.northFromCompass else NORTH_OFF
 
+        # corr is the drift since the reference; adding the reference itself puts north on +Y.
+        anchor = ref if config.northFromCompass else 0.0
         # Resample the correction onto the game track (linear between fused samples, held outside).
         t = base.times
         ci = np.clip(floor_index(fused_t, t), 0, n - 1)
@@ -788,7 +821,7 @@ class OrientationEstimator:
         span = np.where(interp, (fused_t[ci1] - fused_t[ci]).astype(np.float64), 1.0)
         f = np.clip((t - fused_t[ci]).astype(np.float64) / span, 0.0, 1.0)
         c = np.where(interp, corr[ci] + (corr[ci1] - corr[ci]) * f, corr[ci])
-        return OrientationTrack.build(t, quat_normalized(quat_mul(quat_yaw(c), base.q)))
+        return OrientationTrack.build(t, quat_normalized(quat_mul(quat_yaw(c + anchor), base.q)))
 
 
 # ----------------------------------------------------------------------------------------------
@@ -1412,7 +1445,9 @@ class PathBuilder:
     # 3: carry changes are detected from the tilt and re-estimate the heading offset (autoReorient).
     # 4: the walking heading is carried through every move of the phone (carry change or REORIENT)
     #    instead of being re-estimated from the gait, so moving the phone no longer turns the path.
-    PIPELINE_VERSION = 4
+    # 5: +Y is magnetic north, set from the fused rotation vector at the start of the trip
+    #    (northFromCompass); before, every trip kept the game rotation vector's arbitrary yaw.
+    PIPELINE_VERSION = 5
 
     @staticmethod
     def nearest_index(points, t_ns):

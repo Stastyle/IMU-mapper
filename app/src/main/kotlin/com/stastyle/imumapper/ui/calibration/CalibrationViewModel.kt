@@ -7,8 +7,12 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.stastyle.imumapper.BuildConfig
+import com.stastyle.imumapper.capture.CompassFeed
+import com.stastyle.imumapper.capture.CompassReading
+import com.stastyle.imumapper.capture.CompassStatus
 import com.stastyle.imumapper.capture.SensorLogger
 import com.stastyle.imumapper.data.CalibrationRepository
+import com.stastyle.imumapper.data.HeadingOffsetReset
 import com.stastyle.imumapper.data.TripFiles
 import com.stastyle.imumapper.data.TripRepository
 import com.stastyle.imumapper.data.db.TripEntity
@@ -43,6 +47,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
+import kotlin.math.abs
 
 /** The four guided flows that record a short log and derive one calibration value from it. */
 enum class FlowKind(val title: String) {
@@ -94,6 +99,12 @@ sealed interface FlowResult {
 sealed interface FlowPhase {
     data object Idle : FlowPhase
 
+    /**
+     * The heading walk's compass step: the sensors run without a log until north settles and the user
+     * starts walking.
+     */
+    data class Compass(val reading: CompassReading) : FlowPhase
+
     /** Sensors are being recorded. [remainingS] counts down for the timed still flow, null for walks. */
     data class Running(val elapsedS: Int, val remainingS: Int?, val steps: Int) : FlowPhase
 
@@ -135,23 +146,36 @@ data class CalibrationUiState(
 ) {
     fun phase(kind: FlowKind): FlowPhase = phases[kind] ?: FlowPhase.Idle
 
-    /** The flow currently recording or computing, if any; only one runs at a time. */
+    /** The flow currently waiting for the compass, recording or computing, if any; only one runs at a time. */
     val activeFlow: FlowKind?
-        get() = phases.entries.firstOrNull { it.value is FlowPhase.Running || it.value is FlowPhase.Computing }?.key
+        get() = phases.entries.firstOrNull {
+            it.value is FlowPhase.Compass || it.value is FlowPhase.Running || it.value is FlowPhase.Computing
+        }?.key
 
-    val isRecording: Boolean get() = phases.values.any { it is FlowPhase.Running }
+    /** A flow runs the sensors: it records, or waits for the compass before recording. */
+    val sensorsRunning: Boolean get() = phases.values.any { it is FlowPhase.Running || it is FlowPhase.Compass }
 }
 
 /**
  * Runs the calibration flows: each one records a short log through its own [SensorLogger] into a
  * temporary file, reads it back and runs the PDR pipeline on it, exactly as a real trip would be
  * processed. Only the derived value is kept; the file is deleted afterwards.
+ *
+ * The heading walk first waits for the compass, as a recording does ([FlowPhase.Compass]): the pipeline
+ * takes north from the first second of the log that passes its magnetic gate, and a fused vector
+ * registered cold would still be settling then, so the saved offset would absorb that error and turn
+ * every trip by it. A walk whose first second failed the gate, so that north came from later, is
+ * refused ([CalibrationMath.northCameLate]). The logger runs without a writer until north locks and the
+ * user starts walking; the log's writer is then attached to the running logger, which keeps the
+ * registrations and so the settled fusion.
  */
 class CalibrationViewModel(
     private val appContext: Context,
     private val calibration: CalibrationRepository,
     private val trips: TripRepository,
     private val files: TripFiles,
+    /** Records the one-time [HeadingOffsetReset] as done; a saved heading offset makes it moot. */
+    private val markHeadingOffsetResetDone: suspend () -> Unit,
 ) : ViewModel() {
 
     private val _ui = MutableStateFlow(CalibrationUiState())
@@ -168,6 +192,10 @@ class CalibrationViewModel(
 
     /** Flow whose log file is being opened on the IO dispatcher; [session] is still null then. */
     private var opening: FlowKind? = null
+
+    /** Flow in its compass step ([FlowPhase.Compass]); [compassJob] publishes the compass meanwhile. */
+    private var compassFlow: FlowKind? = null
+    private var compassJob: Job? = null
 
     /**
      * Stops the sensors and closes the writer of the previous session. SensorLogger.stop() runs on
@@ -210,13 +238,16 @@ class CalibrationViewModel(
     }
 
     fun discard(kind: FlowKind) {
-        if (_ui.value.phase(kind) is FlowPhase.Running || _ui.value.phase(kind) is FlowPhase.Computing) return
+        if (_ui.value.activeFlow == kind) return
         setPhase(kind, FlowPhase.Idle)
     }
 
-    /** Starts recording for [kind]. The still flow stops itself after [STILL_SECONDS]; walks stop on [stop]. */
+    /**
+     * Starts [kind]. The heading walk waits for the compass first and records from [confirmCompass];
+     * the others record at once. The still flow stops itself after [STILL_SECONDS]; walks stop on [stop].
+     */
     fun start(kind: FlowKind) {
-        if (session != null || opening != null) {
+        if (session != null || opening != null || compassFlow != null) {
             _ui.update { it.copy(message = "Finish the running flow first") }
             return
         }
@@ -226,6 +257,45 @@ class CalibrationViewModel(
             return
         }
         val sensorLogger = logger ?: SensorLogger(appContext).also { logger = it }
+        if (kind == FlowKind.HEADING) enterCompass(kind, sensorLogger) else record(kind, sensorLogger, distance)
+    }
+
+    /** "Start walking" in the compass dialog: once north is locked, the heading walk's log starts. */
+    fun confirmCompass() {
+        val kind = compassFlow ?: return
+        val phase = _ui.value.phase(kind) as? FlowPhase.Compass ?: return
+        if (phase.reading.status != CompassStatus.LOCKED) return
+        val sensorLogger = logger ?: return
+        leaveCompass()
+        record(kind, sensorLogger, null)
+    }
+
+    /**
+     * Runs the logger without a writer and publishes the compass until [confirmCompass] or
+     * [cancelActive]. It waits for the previous flow's stop first, which would otherwise unregister the
+     * listeners registered here.
+     */
+    private fun enterCompass(kind: FlowKind, sensorLogger: SensorLogger) {
+        compassFlow = kind
+        setPhase(kind, FlowPhase.Compass(CompassReading(CompassStatus.WAITING)))
+        compassJob = viewModelScope.launch {
+            closeJob?.join()
+            sensorLogger.start(null)
+            CompassFeed.readings(sensorLogger).collect { r ->
+                if (compassFlow == kind) setPhase(kind, FlowPhase.Compass(r))
+            }
+        }
+    }
+
+    /** Stops publishing the compass; the sensors keep running for the walk or for the caller to stop. */
+    private fun leaveCompass() {
+        compassJob?.cancel()
+        compassJob = null
+        compassFlow = null
+    }
+
+    /** Opens the flow's log and attaches it to the logger, which starts it or, after a compass step, keeps it. */
+    private fun record(kind: FlowKind, sensorLogger: SensorLogger, distance: Double?) {
         opening = kind
         setPhase(kind, FlowPhase.Running(0, if (kind == FlowKind.STILL) STILL_SECONDS else null, 0))
         viewModelScope.launch {
@@ -244,6 +314,8 @@ class CalibrationViewModel(
                 if (opening == kind) {
                     opening = null
                     setPhase(kind, FlowPhase.Failed("Could not open a log file: " + describe(e)))
+                    // A heading walk's sensors run since its compass step, and no session will stop them.
+                    stopSensors()
                 }
                 return@launch
             }
@@ -267,13 +339,26 @@ class CalibrationViewModel(
         finish(s)
     }
 
-    /** Aborts whatever is recording (screen left, app stopped). Safe to call when nothing runs. */
+    /**
+     * Aborts whatever runs (Cancel in the compass dialog, screen left, app stopped). A compass step goes
+     * back to Idle, since nothing was recorded yet; a recording is marked interrupted. Safe to call when
+     * nothing runs.
+     */
     fun cancelActive() {
+        val waiting = compassFlow
+        if (waiting != null) {
+            leaveCompass()
+            setPhase(waiting, FlowPhase.Idle)
+            stopSensors()
+            return
+        }
         val pending = opening
         if (pending != null) {
-            // The log is still being opened: start() sees the cleared intent and discards the file.
+            // The log is still being opened: record() sees the cleared intent and discards the file. The
+            // sensors may be running already, from a compass step.
             opening = null
             setPhase(pending, FlowPhase.Failed("Interrupted before it finished"))
+            stopSensors()
             return
         }
         val s = session ?: return
@@ -281,6 +366,20 @@ class CalibrationViewModel(
         s.ticker?.cancel()
         setPhase(s.kind, FlowPhase.Failed("Interrupted before it finished"))
         closeJob = viewModelScope.launch(Dispatchers.IO) { closeSession(s) }
+    }
+
+    /** Stops a logger that runs without a session; the next start waits for it like for a session's close. */
+    private fun stopSensors() {
+        val sensorLogger = logger ?: return
+        val previous = closeJob
+        closeJob = viewModelScope.launch(Dispatchers.IO) {
+            previous?.join()
+            try {
+                sensorLogger.stop()
+            } catch (e: Exception) {
+                Log.w(TAG, "sensor logger stop failed", e)
+            }
+        }
     }
 
     fun save(kind: FlowKind) {
@@ -311,8 +410,17 @@ class CalibrationViewModel(
         val newConfig = change.first
         val note = change.second
         viewModelScope.launch {
-            val outcome = runCatching { calibration.saveConfig(newConfig, note) }
+            val outcome = runCatching {
+                HeadingOffsetReset.saveCalibration(
+                    calibration = calibration,
+                    config = newConfig,
+                    notes = note,
+                    markDone = markHeadingOffsetResetDone,
+                    offsetMeasured = result is FlowResult.Heading,
+                )
+            }
             outcome.exceptionOrNull()?.let { if (it is CancellationException) throw it }
+            outcome.getOrNull()?.let { Log.w(TAG, "heading offset reset not marked done", it) }
             outcome.fold(
                 onSuccess = {
                     setPhase(kind, FlowPhase.Idle)
@@ -349,6 +457,7 @@ class CalibrationViewModel(
         val s = session
         session = null
         opening = null
+        leaveCompass()
         s?.ticker?.cancel()
         // viewModelScope is already cancelled here, so the cleanup has to be synchronous.
         if (s != null) closeSession(s)
@@ -523,7 +632,33 @@ class CalibrationViewModel(
     }
 
     private fun computeHeading(log: RawLog, config: PipelineConfig): FlowResult.Heading {
-        val result = PdrProcessor().process(log, config)
+        // The saved axis belongs to the saved offset; the walk picks its own and saves it with the result.
+        // North always comes from the compass here, whatever the Settings switch says: the offset turns
+        // the walk onto magnetic north, and against the gyro's own north it would hold an arbitrary angle.
+        // The drift correction always runs too, whatever the saved config says, so the walk always reports
+        // how far the compass moved and a saved setting cannot switch that check off.
+        val walkConfig = config.copy(
+            headingAxis = HeadingAxisMode.AUTO,
+            northFromCompass = true,
+            useMagnetometer = true,
+        )
+        val result = PdrProcessor().process(log, walkConfig)
+        val problem = CalibrationMath.northProblem(result.diagnostics)
+        if (problem != null) {
+            throw IllegalStateException(
+                "The compass gave no north during the walk (" + problem + "). Calibrate outdoors, away " +
+                    "from metal, cars and electronics.",
+            )
+        }
+        if (CalibrationMath.northCameLate(result.diagnostics)) {
+            throw IllegalStateException("The compass was disturbed as the walk started: calibrate away from metal.")
+        }
+        val moved = CalibrationMath.compassMovedDeg(result.diagnostics)
+        if (moved != null) {
+            throw IllegalStateException(
+                "The compass moved by " + Fmt.num(abs(moved), 1) + "° during the walk: calibrate away from metal.",
+            )
+        }
         val end = result.points.lastOrNull()?.p ?: throw IllegalStateException("The pipeline produced no path")
         val offset = CalibrationMath.headingOffsetFromEnd(end, config.headingOffsetRad)
             ?: throw IllegalStateException("Walk further: the path ended under one metre from the start")

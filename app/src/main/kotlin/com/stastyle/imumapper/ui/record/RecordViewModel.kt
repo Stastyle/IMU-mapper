@@ -1,16 +1,25 @@
 package com.stastyle.imumapper.ui.record
 
+import android.os.SystemClock
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.stastyle.imumapper.capture.CompassFeed
+import com.stastyle.imumapper.capture.CompassReading
+import com.stastyle.imumapper.capture.CompassStatus
 import com.stastyle.imumapper.capture.RecordingController
 import com.stastyle.imumapper.capture.RecordingState
+import com.stastyle.imumapper.capture.SensorKind
 import com.stastyle.imumapper.capture.SensorStats
 import com.stastyle.imumapper.data.CalibrationRepository
 import com.stastyle.imumapper.pipeline.core.AnnotationKind
 import com.stastyle.imumapper.pipeline.core.CarryPosition
+import com.stastyle.imumapper.pipeline.core.HeadingAxisMode
+import com.stastyle.imumapper.pipeline.core.PipelineConfig
 import com.stastyle.imumapper.pipeline.core.TripMode
 import com.stastyle.imumapper.process.TripProcessor
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -21,7 +30,9 @@ import kotlinx.coroutines.launch
 enum class RecordPhase {
     /** Choosing the carry position, waiting for Start. */
     SETUP,
-    /** Start pressed; trip and log are being created. */
+    /** Start pressed; the sensors run without a log while the compass settles on north. */
+    COMPASS,
+    /** Recording requested; trip and log are being created. */
     STARTING,
     RECORDING,
     /** Stop pressed; the log is being closed and the trip processed. */
@@ -42,7 +53,39 @@ data class RecordUiState(
     val message: String? = null,
     /** Set once in [RecordPhase.DONE]; the screen calls onFinished with it. */
     val finishedTripId: Long? = null,
-)
+    /** Live compass state while in [RecordPhase.COMPASS], null otherwise. */
+    val compass: CompassReading? = null,
+    /** Whole seconds spent in [RecordPhase.COMPASS] so far. */
+    val compassWaitS: Int = 0,
+    /** [PipelineConfig.northFromCompass] of the saved calibration. */
+    val compassNorthSetting: Boolean = true,
+    /** The phone has the rotation vector, game rotation vector and magnetometer the compass step needs. */
+    val compassSensors: Boolean = true,
+    /**
+     * The saved calibration has a heading offset or axis. The pipeline applies them to the start of every
+     * recording, so a recording must start in the pose they were calibrated in, not in the hand.
+     */
+    val offsetCalibrated: Boolean = false,
+) {
+    /** North of the next trip comes from the compass: the setting is on and the sensors exist. */
+    val northFromCompass: Boolean
+        get() = compassNorthSetting && compassSensors
+
+    /**
+     * Offer to record without a settled north once the wait has gone on for a while: indoors or near
+     * metal the compass may never lock, and recording must stay possible.
+     */
+    val canSkipCompass: Boolean
+        get() = phase == RecordPhase.COMPASS && compassWaitS >= SKIP_COMPASS_AFTER_S &&
+            compass?.status != CompassStatus.LOCKED
+
+    companion object {
+        const val SKIP_COMPASS_AFTER_S = 8
+
+        /** [com.stastyle.imumapper.pipeline.core.LogMeta.notes] of a trip started with "Start anyway". */
+        const val COMPASS_SKIPPED_NOTE = "compass not locked at start"
+    }
+}
 
 /**
  * Drives [RecordScreen]. The recording itself lives in [RecordingController], which outlives this
@@ -55,16 +98,32 @@ class RecordViewModel(
     private val tripProcessor: TripProcessor,
 ) : ViewModel() {
 
-    private val _ui = MutableStateFlow(RecordUiState(mode = mode))
+    private val _ui = MutableStateFlow(RecordUiState(mode = mode, compassSensors = hasCompassSensors()))
     val ui: StateFlow<RecordUiState> = _ui.asStateFlow()
 
     /** Trip id of the recording we were showing, for when it is stopped from the notification. */
     private var shownTripId: Long? = null
 
+    /** Feeds the compass preview into [RecordUiState.compass]; runs only in [RecordPhase.COMPASS]. */
+    private var compassJob: Job? = null
+
     init {
         viewModelScope.launch {
             val saved = runCatching { calibration.getCarryPosition() }.getOrDefault(CarryPosition.HAND)
             _ui.update { it.copy(carry = saved) }
+        }
+        viewModelScope.launch {
+            try {
+                calibration.observeConfig().collect { c ->
+                    val offset = c.headingOffsetRad != 0.0 || c.headingAxis != HeadingAxisMode.AUTO
+                    _ui.update { it.copy(compassNorthSetting = c.northFromCompass, offsetCalibrated = offset) }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // Only the texts depend on it; start() reads the config again.
+                Log.w(TAG, "config not observed", e)
+            }
         }
         viewModelScope.launch { controller.state.collect { onControllerState(it) } }
         viewModelScope.launch { controller.sensorLogger.stats.collect { s -> _ui.update { it.copy(stats = s) } } }
@@ -74,12 +133,14 @@ class RecordViewModel(
         when (state) {
             is RecordingState.Recording -> {
                 shownTripId = state.tripId
+                // A recording owns the sensors now; the preview's feed has nothing left to show.
+                if (_ui.value.phase == RecordPhase.COMPASS) leaveCompass()
                 _ui.update {
                     // Adopt a recording that is already running (screen re-entered) as well as our own.
-                    val adopting = it.phase == RecordPhase.SETUP || it.phase == RecordPhase.STARTING ||
-                        it.phase == RecordPhase.RECORDING
+                    val adopting = it.phase == RecordPhase.SETUP || it.phase == RecordPhase.COMPASS ||
+                        it.phase == RecordPhase.STARTING || it.phase == RecordPhase.RECORDING
                     if (adopting) {
-                        it.copy(phase = RecordPhase.RECORDING, recording = state, error = null)
+                        it.copy(phase = RecordPhase.RECORDING, recording = state, error = null, compass = null)
                     } else {
                         it.copy(recording = state)
                     }
@@ -105,13 +166,106 @@ class RecordViewModel(
         }
     }
 
-    /** Called once the required permissions are granted. */
+    /**
+     * Called once the required permissions are granted. With north from the compass on, waits in
+     * [RecordPhase.COMPASS] until the user starts the recording from the compass dialog; otherwise
+     * starts recording at once.
+     */
     fun start() {
-        val current = _ui.value
-        if (current.phase != RecordPhase.SETUP) return
+        if (_ui.value.phase != RecordPhase.SETUP) return
+        // STARTING while the config is read, so a second tap cannot start twice.
         _ui.update { it.copy(phase = RecordPhase.STARTING, error = null) }
         viewModelScope.launch {
-            runCatching { controller.start(current.mode, current.carry) }
+            val config = try {
+                calibration.getConfig()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "config not read; using the defaults", e)
+                PipelineConfig()
+            }
+            // A recording adopted meanwhile (one started elsewhere) has moved the phase on.
+            if (_ui.value.phase != RecordPhase.STARTING) return@launch
+            if (config.northFromCompass && hasCompassSensors()) enterCompass() else startRecording()
+        }
+    }
+
+    /**
+     * "Start recording" in the compass dialog, once north is locked. The button stays tappable while it
+     * animates out after the lock was lost, so the status is checked here too; "Start anyway" is
+     * [skipCompass].
+     */
+    fun confirmCompass() {
+        val ui = _ui.value
+        if (ui.phase != RecordPhase.COMPASS || ui.compass?.status != CompassStatus.LOCKED) return
+        leaveCompass()
+        startRecording()
+    }
+
+    /**
+     * "Start anyway": records before the compass locked. The pipeline still takes north from the
+     * compass at the start of the trip, which may then be several degrees off, and nothing in its
+     * diagnostics can tell; the log's meta notes say so instead ([RecordUiState.COMPASS_SKIPPED_NOTE]),
+     * and the Debug screen shows them.
+     */
+    fun skipCompass() {
+        if (_ui.value.phase != RecordPhase.COMPASS) return
+        Log.i(TAG, "recording started without a compass lock")
+        leaveCompass()
+        startRecording(notes = RecordUiState.COMPASS_SKIPPED_NOTE)
+    }
+
+    /**
+     * Cancel or Back in the compass dialog, or the app going to the background: stops the preview and
+     * returns to the setup.
+     */
+    fun cancelCompass() {
+        if (_ui.value.phase != RecordPhase.COMPASS) return
+        leaveCompass()
+        controller.stopCompassPreview()
+        _ui.update { it.copy(phase = RecordPhase.SETUP, compass = null, compassWaitS = 0) }
+    }
+
+    private fun hasCompassSensors(): Boolean {
+        val available = controller.sensorLogger.available
+        return available[SensorKind.ROT_VEC] == true && available[SensorKind.GAME_ROT] == true &&
+            available[SensorKind.MAG] == true
+    }
+
+    private fun enterCompass() {
+        controller.startCompassPreview()
+        val enteredNs = SystemClock.elapsedRealtimeNanos()
+        _ui.update {
+            it.copy(
+                phase = RecordPhase.COMPASS,
+                compass = CompassReading(CompassStatus.WAITING),
+                compassWaitS = 0,
+                error = null,
+            )
+        }
+        compassJob?.cancel()
+        compassJob = viewModelScope.launch {
+            CompassFeed.readings(controller.sensorLogger).collect { reading ->
+                val waitedS = ((SystemClock.elapsedRealtimeNanos() - enteredNs) / 1_000_000_000L).toInt()
+                _ui.update {
+                    if (it.phase == RecordPhase.COMPASS) it.copy(compass = reading, compassWaitS = waitedS) else it
+                }
+            }
+        }
+    }
+
+    /** Stops feeding the dialog. The preview's sensors keep running: a recording may be taking them over. */
+    private fun leaveCompass() {
+        compassJob?.cancel()
+        compassJob = null
+    }
+
+    private fun startRecording(notes: String = "") {
+        val current = _ui.value
+        _ui.update { it.copy(phase = RecordPhase.STARTING, error = null, compass = null) }
+        viewModelScope.launch {
+            // On failure the controller also stops a compass preview that was running for this start.
+            runCatching { controller.start(current.mode, current.carry, notes) }
                 .onFailure { e ->
                     Log.e(TAG, "start failed", e)
                     _ui.update {
@@ -158,6 +312,12 @@ class RecordViewModel(
 
     fun dismissMessage() {
         _ui.update { it.copy(message = null) }
+    }
+
+    override fun onCleared() {
+        // The preview runs in the controller's scope and would otherwise keep the sensors at the fastest
+        // rate with nobody watching.
+        if (_ui.value.phase == RecordPhase.COMPASS) controller.stopCompassPreview()
     }
 
     private suspend fun finish(tripId: Long) {

@@ -82,8 +82,9 @@ if a release is wanted after one of those. So:
 
 - **Pipeline purity:** `pipeline/` has no Android imports, no clock, no randomness and no I/O
   outside `log/`. Output must be deterministic, because tests compare `toJson()` of two runs.
-- **Frames:** the world frame is ENU in metres, and headings are radians clockwise from north in
-  (-pi, pi]. Only `vio/` converts ARCore coordinates to ENU.
+- **Frames:** the world frame is ENU in metres (+Y is magnetic north when the diagnostic
+  `northReference` is "magnetic"), and headings are radians clockwise from north in (-pi, pi]. Only
+  `vio/` converts ARCore coordinates to ENU.
 - **Timestamps:** record and sample timestamps (`tNs`) are on the
   `SystemClock.elapsedRealtimeNanos()` clock.
   - Sensor records keep `SensorEvent.timestamp`, which is already on that clock, so do not
@@ -117,7 +118,8 @@ if a release is wanted after one of those. So:
 - `tools/replay.py` lags the Kotlin PDR and does not port VIO. `tools/README.md` lists the gaps
   under "Not covered", and `--compare` differences in those areas are expected.
 - `ConfigSchema` and `ProposalParser` (assisted tuning) do not know `autoReorient`,
-  `carryChangeTiltRad` or `carryChangeSettleS`.
+  `carryChangeTiltRad` or `carryChangeSettleS`. They do know `northFromCompass`, marked as not
+  tunable.
 - The Debug config editor (`ConfigFields`) lacks `baroStillGapS`. Saving there, and every run
   started there (Re-process, PDR only, VIO only), uses 4.0 whatever the calibration holds.
 - `docs/PLAN.md` names classes that do not exist (`LogCodec`, `VioFuser`, `ProcessTrip`,

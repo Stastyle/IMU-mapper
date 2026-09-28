@@ -86,6 +86,22 @@ paths:
     `tools/samples/README.md`.
   - VIO trips repeat the `PdrSolver` keys with a `pdr.` prefix.
   - `loopClosure` is written by both `PdrProcessor` and `VioProcessor`, so rename it in both.
+  - `northReference` and its values `magnetic` and `relative: ` (a prefix followed by the reason)
+    are read by the app: `CalibrationMath` through the `OrientationEstimator` constants
+    (`NORTH_REFERENCE`, `MAGNETIC`, `RELATIVE`), and the heading calibration, which refuses a walk
+    whose north is not magnetic. Use the constants, never a literal, so a rename reaches the app.
+    `VioProcessor` copies the key through the same constant, and `replay.py` has its own copies
+    (`NORTH_*`).
+  - `yawCorrectionFinalDeg` is read by the heading calibration through
+    `OrientationEstimator.YAW_CORRECTION_FINAL` to reject a walk on which the compass moved. The
+    walk forces `useMagnetometer` on, so the key is written whenever the game vector is turned onto
+    north.
+  - `northOffsetDeg` and `northReferenceAtS` are written in `OrientationEstimator.correctYaw` and
+    in `correct_yaw` in `replay.py`, in the same order, and `master_prompt.md` explains them.
+    `ConfigSchema` descriptions also name `northReference` and `northOffsetDeg`. The heading
+    calibration reads `northReferenceAtS` through `OrientationEstimator.NORTH_REFERENCE_AT`
+    (`CalibrationMath.northCameLate`) and refuses a walk that has it, because its start was
+    disturbed.
 - **New value in a core enum:**
   - The compiler lists the app's exhaustive `when`s, for example `PathScene`,
     `CalibrationFormat`, `CaptureSupport`, `RecordScreen`, `SettingsScreen` and
