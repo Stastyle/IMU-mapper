@@ -208,7 +208,7 @@ class OrientationEstimator(
             prevAngle = angle
             corr[i] = unwrapped
         }
-        diag["yawCorrectionFinalDeg"] = Diag.num(Math.toDegrees(corr[n - 1]), 2)
+        diag[YAW_CORRECTION_FINAL] = Diag.num(Math.toDegrees(corr[n - 1]), 2)
         diag["yawCorrection"] = "applied"
         diag[NORTH_REFERENCE] = if (config.northFromCompass) MAGNETIC else NORTH_OFF
 
@@ -252,5 +252,11 @@ class OrientationEstimator(
         const val RELATIVE: String = "relative: "
         const val NO_ORIENTATION: String = RELATIVE + "no orientation samples"
         const val NORTH_OFF: String = RELATIVE + "north from compass is off"
+
+        /**
+         * Diagnostics key: the drift correction applied by the end of the trip, degrees. The heading
+         * calibration reads it to reject a walk on which the compass moved.
+         */
+        const val YAW_CORRECTION_FINAL: String = "yawCorrectionFinalDeg"
     }
 }

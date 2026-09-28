@@ -92,6 +92,8 @@ paths:
     whose north is not magnetic. Use the constants, never a literal, so a rename reaches the app.
     `VioProcessor` copies the key through the same constant, and `replay.py` has its own copies
     (`NORTH_*`).
+  - `yawCorrectionFinalDeg` is read by the heading calibration through
+    `OrientationEstimator.YAW_CORRECTION_FINAL` to reject a walk on which the compass moved.
   - `northOffsetDeg` and `northReferenceAtS` are written in `OrientationEstimator.correctYaw` and
     in `correct_yaw` in `replay.py`, in the same order, and `master_prompt.md` explains them.
     `ConfigSchema` descriptions also name `northReference` and `northOffsetDeg`.

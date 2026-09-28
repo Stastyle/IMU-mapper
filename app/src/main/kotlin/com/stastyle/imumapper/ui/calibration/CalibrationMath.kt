@@ -36,7 +36,7 @@ object CalibrationMath {
      * a trip, in degrees: how far the fused-minus-game yaw moved after the start. Present only when the
      * correction ran (`useMagnetometer` on).
      */
-    const val YAW_CORRECTION_FINAL_DIAG: String = "yawCorrectionFinalDeg"
+    const val YAW_CORRECTION_FINAL_DIAG: String = OrientationEstimator.YAW_CORRECTION_FINAL
 
     /**
      * Largest drift correction a heading walk may end with. The walk is short and starts on a settled
