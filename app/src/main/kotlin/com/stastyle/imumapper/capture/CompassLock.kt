@@ -231,13 +231,20 @@ class CompassLock {
     }
 
     companion object {
-        /** Longest gap to the game sample a fused sample is paired with; farther ones are ignored. */
+        /**
+         * Longest gap to the game sample a fused sample is paired with. The live streams arrive at
+         * about 50 Hz each, so the nearest game sample is normally 20 ms away; one much farther off may
+         * show another orientation while the phone turns, and its yaw difference would be wrong.
+         */
         const val PAIR_WINDOW_NS: Long = 100_000_000L
 
         /** Game samples kept for pairing, well beyond [PAIR_WINDOW_NS] so late fused samples still pair. */
         private const val GAME_KEEP_NS: Long = 500_000_000L
 
-        /** The fused vector counts as silent (status WAITING) after this long without a sample. */
+        /**
+         * The fused vector counts as silent (status WAITING) after this long without a sample: the same
+         * threshold the stall detector uses, far above its 50 Hz spacing.
+         */
         const val STALE_NS: Long = 1_000_000_000L
 
         /**
