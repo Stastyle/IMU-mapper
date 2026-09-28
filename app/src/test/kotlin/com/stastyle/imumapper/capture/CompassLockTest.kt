@@ -221,7 +221,7 @@ class CompassLockTest {
     }
 
     @Test
-    fun aJumpJustOverSixDegreesReleasesTheLockAndOneJustUnderDoesNot() {
+    fun aJumpJustOverSixDegreesReleasesTheLockAtOnceAndOneJustUnderDoesNot() {
         // Under the jump limit the lock holds through the jump; only the drift test can release it,
         // and not within half a second (see aStepUnderTheJumpLimitThatHoldsIsADrift).
         val under = CompassLock()
