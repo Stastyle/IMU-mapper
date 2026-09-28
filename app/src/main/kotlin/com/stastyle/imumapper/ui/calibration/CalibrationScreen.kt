@@ -49,6 +49,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.stastyle.imumapper.data.db.TripEntity
 import com.stastyle.imumapper.ui.common.appContainer
+import com.stastyle.imumapper.ui.common.findActivity
 import com.stastyle.imumapper.ui.record.CompassDialog
 
 /** Calibration flows: still bias, stride walk, heading offset, square test, ARCore vs PDR, assisted tuning. */
@@ -70,16 +71,19 @@ fun CalibrationScreen(onBack: () -> Unit, onOpenTuning: () -> Unit) {
     val snackbar = remember { SnackbarHostState() }
 
     // A flow must not keep the fastest sensor rate running once the screen is gone or the app is
-    // in the background, and the screen should not lock while the user is walking a square.
+    // in the background, and the screen should not lock while the user is walking a square. A
+    // recreation (split screen or pop-up view changes the screen layout, which the manifest does not
+    // handle) stops and disposes the screen too, but the view model and its flow survive it: keep them.
     val lifecycleOwner = LocalLifecycleOwner.current
+    val activity = remember(context) { context.findActivity() }
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_STOP) vm.cancelActive()
+            if (event == Lifecycle.Event.ON_STOP && activity?.isChangingConfigurations != true) vm.cancelActive()
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
-            vm.cancelActive()
+            if (activity?.isChangingConfigurations != true) vm.cancelActive()
         }
     }
     val view = LocalView.current

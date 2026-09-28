@@ -74,6 +74,7 @@ import com.stastyle.imumapper.pipeline.core.AnnotationKind
 import com.stastyle.imumapper.pipeline.core.CarryPosition
 import com.stastyle.imumapper.pipeline.core.TripMode
 import com.stastyle.imumapper.ui.common.appContainer
+import com.stastyle.imumapper.ui.common.findActivity
 
 /**
  * Recording screen for the given [mode]. Calls [onFinished] with the new trip id once the
@@ -109,15 +110,18 @@ fun RecordScreen(
 
     // The compass preview runs the sensors at the fastest rate; like the calibration flows it must not
     // outlive the screen or keep running while the app is in the background, where nobody can tap Start.
+    // A recreation (split screen or pop-up view changes the screen layout, which the manifest does not
+    // handle) stops and disposes the screen too, but the view model and its wait survive it: keep them.
     val lifecycleOwner = LocalLifecycleOwner.current
+    val activity = remember(context) { context.findActivity() }
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_STOP) vm.cancelCompass()
+            if (event == Lifecycle.Event.ON_STOP && activity?.isChangingConfigurations != true) vm.cancelCompass()
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
-            vm.cancelCompass()
+            if (activity?.isChangingConfigurations != true) vm.cancelCompass()
         }
     }
 

@@ -1,9 +1,7 @@
 package com.stastyle.imumapper.ui.record
 
 import android.Manifest
-import android.app.Activity
 import android.content.Context
-import android.content.ContextWrapper
 import android.content.pm.PackageManager
 import android.hardware.display.DisplayManager
 import android.opengl.GLSurfaceView
@@ -62,6 +60,7 @@ import com.stastyle.imumapper.capture.arcore.rotationDegrees
 import com.stastyle.imumapper.capture.modeLabel
 import com.stastyle.imumapper.pipeline.core.TrackingState
 import com.stastyle.imumapper.pipeline.core.TripMode
+import com.stastyle.imumapper.ui.common.findActivity
 
 /**
  * Camera half of the recording screen for the ARCore modes: the live camera preview with the tracking
@@ -296,13 +295,3 @@ private fun CenterMessage(
 
 private fun hasCameraPermission(context: Context): Boolean =
     ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
-
-/** The activity behind a Compose context, needed by ARCore's install flow. */
-private fun Context.findActivity(): Activity? {
-    var current: Context? = this
-    while (current is ContextWrapper) {
-        if (current is Activity) return current
-        current = current.baseContext
-    }
-    return null
-}
