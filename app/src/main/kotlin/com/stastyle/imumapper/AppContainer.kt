@@ -14,6 +14,9 @@ import com.stastyle.imumapper.pipeline.core.Processor
 import com.stastyle.imumapper.process.DefaultTripProcessor
 import com.stastyle.imumapper.process.TripProcessor
 import com.stastyle.imumapper.update.UpdateManager
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.serialization.json.Json
 
 /**
@@ -23,6 +26,9 @@ import kotlinx.serialization.json.Json
 class AppContainer(context: Context) {
 
     val appContext: Context = context.applicationContext
+
+    /** Process-wide scope for work that must not depend on a screen, such as startup maintenance. */
+    val applicationScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     val json: Json = Json { ignoreUnknownKeys = true; encodeDefaults = true; prettyPrint = false }
 

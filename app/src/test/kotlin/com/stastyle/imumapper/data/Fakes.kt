@@ -103,15 +103,22 @@ class FakeTripRepository(private val files: TripFiles) : TripRepository {
     }
 }
 
+/** In-memory [CalibrationRepository]. Set [saveFailure] to make [saveConfig] throw. */
 class FakeCalibrationRepository(var config: PipelineConfig = PipelineConfig()) : CalibrationRepository {
     private val carry = MutableStateFlow(CarryPosition.HAND)
     private val configFlow = MutableStateFlow(config)
 
+    /** Notes of every successful [saveConfig], oldest first. */
+    val savedNotes = ArrayList<String>()
+    var saveFailure: Throwable? = null
+
     override fun observeConfig(): Flow<PipelineConfig> = configFlow
     override suspend fun getConfig(): PipelineConfig = config
     override suspend fun saveConfig(config: PipelineConfig, notes: String) {
+        saveFailure?.let { throw it }
         this.config = config
         configFlow.value = config
+        savedNotes += notes
     }
 
     override fun observeCarryPosition(): Flow<CarryPosition> = carry

@@ -1,0 +1,87 @@
+package com.stastyle.imumapper.data
+
+import com.stastyle.imumapper.pipeline.core.HeadingAxisMode
+import com.stastyle.imumapper.pipeline.core.PipelineConfig
+import com.stastyle.imumapper.pipeline.core.Vec3
+import kotlinx.coroutines.runBlocking
+import java.io.IOException
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
+
+class HeadingOffsetResetTest {
+
+    private class Flag(var done: Boolean = false) {
+        var marks = 0
+        suspend fun isDone(): Boolean = done
+        suspend fun markDone() {
+            done = true
+            marks++
+        }
+    }
+
+    private val calibrated = PipelineConfig(
+        strideLengthM = 0.78,
+        weinbergK = 0.45,
+        headingOffsetRad = Math.toRadians(-63.0),
+        headingAxis = HeadingAxisMode.CAMERA,
+        useMagnetometer = false,
+        gyroBias = Vec3(0.001, -0.002, 0.003),
+        smoothingWindow = 5,
+    )
+
+    @Test
+    fun resetsTheOffsetAndAxisAndKeepsEverythingElse() = runBlocking {
+        val repo = FakeCalibrationRepository(calibrated)
+        val flag = Flag()
+        assertTrue(HeadingOffsetReset.runOnce(repo, flag::isDone, flag::markDone))
+        assertEquals(calibrated.copy(headingOffsetRad = 0.0, headingAxis = HeadingAxisMode.AUTO), repo.config)
+        assertEquals(listOf(HeadingOffsetReset.NOTE), repo.savedNotes)
+        assertTrue(flag.done)
+    }
+
+    @Test
+    fun runsOnlyOnce() = runBlocking {
+        val repo = FakeCalibrationRepository(calibrated)
+        val flag = Flag()
+        HeadingOffsetReset.runOnce(repo, flag::isDone, flag::markDone)
+        // An offset calibrated after the reset is the user's own and must survive later starts.
+        val recalibrated =
+            repo.config.copy(headingOffsetRad = Math.toRadians(12.0), headingAxis = HeadingAxisMode.FORWARD)
+        repo.saveConfig(recalibrated, "Heading offset 12.0°")
+        assertFalse(HeadingOffsetReset.runOnce(repo, flag::isDone, flag::markDone))
+        assertEquals(recalibrated, repo.config)
+        assertEquals(1, flag.marks)
+    }
+
+    @Test
+    fun anAxisAloneIsResetToo() = runBlocking {
+        val repo = FakeCalibrationRepository(PipelineConfig(headingAxis = HeadingAxisMode.FORWARD))
+        val flag = Flag()
+        assertTrue(HeadingOffsetReset.runOnce(repo, flag::isDone, flag::markDone))
+        assertEquals(PipelineConfig(), repo.config)
+    }
+
+    @Test
+    fun nothingToResetStillMarksItDone() = runBlocking {
+        val repo = FakeCalibrationRepository(PipelineConfig(strideLengthM = 0.8))
+        val flag = Flag()
+        assertFalse(HeadingOffsetReset.runOnce(repo, flag::isDone, flag::markDone))
+        assertTrue(repo.savedNotes.isEmpty())
+        assertTrue(flag.done)
+    }
+
+    @Test
+    fun aFailedSaveIsTriedAgainAtTheNextStart() = runBlocking {
+        val repo = FakeCalibrationRepository(calibrated)
+        repo.saveFailure = IOException("disk full")
+        val flag = Flag()
+        assertFailsWith<IOException> { HeadingOffsetReset.runOnce(repo, flag::isDone, flag::markDone) }
+        assertFalse(flag.done)
+        repo.saveFailure = null
+        assertTrue(HeadingOffsetReset.runOnce(repo, flag::isDone, flag::markDone))
+        assertEquals(0.0, repo.config.headingOffsetRad)
+    }
+}
