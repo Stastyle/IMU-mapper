@@ -155,7 +155,8 @@ private fun RecordingSection(
     SectionCard(title = "Recording") {
         Text("Carry position", style = MaterialTheme.typography.labelLarge)
         Text(
-            "Where the phone is while you walk. The heading offset and stride calibration are tied to it.",
+            "Where the phone is while you walk. The stride calibration is tied to it; the heading offset " +
+                "belongs to the pose the phone is in when a recording starts.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -190,7 +191,8 @@ private fun RecordingSection(
                 Text("North from compass", style = MaterialTheme.typography.labelLarge)
                 Text(
                     "North on the map is taken from the compass before each recording. " +
-                        "Off keeps the path in the gyroscope's own frame, which differs per trip.",
+                        "Off keeps the path in the gyroscope's own frame, which differs per trip. " +
+                        "Also applies when trips are re-processed, since processing uses the current calibration.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
