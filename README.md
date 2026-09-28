@@ -17,7 +17,9 @@ such as caves.
   Every mode logs the full raw sensor stream, so dead reckoning covers any stretch where ARCore
   loses tracking.
 - **Annotations while walking.** Buttons mark waypoints, junctions, chambers and notes, plus
-  "re-orient" when you change how the phone is carried and "back at start", which closes the loop.
+  "re-orient" and "back at start", which closes the loop. Moving the phone into or out of a pocket
+  is detected on its own and does not turn the path; "re-orient" is only for turning the phone in
+  your hand without tilting it, and you tap it as you do so.
   While the app is on screen, a volume key marks a waypoint.
 - **3D viewer.** Orbit, zoom and pan, with a floor grid and north arrow. The path can be coloured
   by time, altitude or source. Markers and photos can be tapped. You can switch to the path before

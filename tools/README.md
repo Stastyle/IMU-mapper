@@ -99,11 +99,11 @@ floating-point rounding on the samples, the Madgwick fallback (a log without rot
 the fused-only source, hardware steps with the Weinberg stride, and a REORIENT annotation.
 
 The Kotlin pipeline has since gained the features listed under "Not covered", so parity is now
-close but not exact. Measured on 2026-09-27 against `DefaultProcessor` (pipeline version 3):
+close but not exact. Measured on 2026-09-28 against `DefaultProcessor` (pipeline version 4):
 
 - `synthetic_square.imul`: 30 steps and distance 20.0064 m in both. The closure error is
   0.7525 m in the replay and 0.7526 m in Kotlin.
-- `synthetic_carry_change.imul`: 30 steps and distance 19.9945 m in both.
+- `synthetic_carry_change.imul`: 30 steps and distance 19.9948 m in both.
 - In both samples x and y match. z differs by up to 2.3 mm, because of the barometer still-gap
   below.
 - `--compare` reports `headingAxisMode` as a diagnostics key that only Kotlin emits.
