@@ -9,6 +9,7 @@ import com.stastyle.imumapper.pipeline.core.Vec3
 import java.util.Random
 import kotlin.math.abs
 import kotlin.math.exp
+import kotlin.math.sqrt
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -61,6 +62,37 @@ class CompassLockTest {
             t += 20
         }
         return null
+    }
+
+    /** Outcome of [reconverge]: times in ms after the drift began, and the reading at the end. */
+    private class Reconvergence(val releasedMs: Long?, val relockedMs: Long?, val releases: Int, val end: CompassReading)
+
+    /**
+     * Locks on 40 degrees for two seconds, then moves the yaw difference by [amplitudeDeg] with a [tauS]
+     * time constant for 12 s; both with Gaussian jitter of [noiseDeg].
+     */
+    private fun reconverge(amplitudeDeg: Double, tauS: Double, noiseDeg: Double, seed: Long): Reconvergence {
+        val random = Random(seed)
+        val lock = CompassLock()
+        lock.feed(0, 2000, gameYawDeg = { 40.0 + random.nextGaussian() * noiseDeg })
+        assertEquals(CompassStatus.LOCKED, lock.reading(ns(2000)).status, "seed $seed did not lock first")
+        var released: Long? = null
+        var relocked: Long? = null
+        var releases = 0
+        var previous = CompassStatus.LOCKED
+        var t = 2020L
+        while (t <= 14_000) {
+            val drift = amplitudeDeg * (1.0 - exp(-(t - 2000) / 1000.0 / tauS))
+            val status = lock.statusAfter(t, 40.0 + drift + random.nextGaussian() * noiseDeg)
+            if (previous == CompassStatus.LOCKED && status != CompassStatus.LOCKED) {
+                releases++
+                if (released == null) released = t - 2000
+            }
+            if (released != null && relocked == null && status == CompassStatus.LOCKED) relocked = t - 2000
+            previous = status
+            t += 20
+        }
+        return Reconvergence(released, relocked, releases, lock.reading(ns(14_000)))
     }
 
     @Test
@@ -185,6 +217,8 @@ class CompassLockTest {
 
     @Test
     fun aJumpJustOverSixDegreesReleasesTheLockAndOneJustUnderDoesNot() {
+        // Under the jump limit the lock holds through the jump; only the drift test can release it,
+        // and not within half a second (see aStepUnderTheJumpLimitThatHoldsIsADrift).
         val under = CompassLock()
         under.feed(0, 2000)
         under.feed(2020, 2500, gameYawDeg = { 45.5 })
@@ -309,6 +343,82 @@ class CompassLockTest {
     fun jitterOfOnePointTwoDegreesLocksToo() {
         // Before lone outliers were skipped, none of these runs locked within a minute.
         for (seed in 0L until 30L) assertNotNull(lockTimeMs(1.2, seed), "seed $seed never locked within a minute")
+    }
+
+    @Test
+    fun aReconvergenceUnderTheJumpLimitReleasesTheLockUntilItSettles() {
+        // After the lock the fused vector re-anchors and moves 5.5 degrees with a 2 s time constant: never
+        // 6 degrees from the locked north, but north is moving, and a recording started now would take it
+        // part-way.
+        val r = reconverge(amplitudeDeg = 5.5, tauS = 2.0, noiseDeg = 0.0, seed = 0)
+        val released = assertNotNull(r.releasedMs, "the lock held through the drift")
+        // Released with more than 2 degrees still to go.
+        assertTrue(5.5 * exp(-released / 2000.0) > 2.0, "released at $released ms")
+        val relocked = assertNotNull(r.relockedMs, "never locked again")
+        assertTrue(relocked <= 5000, "locked again at $relocked ms")
+        assertEquals(1, r.releases)
+        assertEquals(CompassStatus.LOCKED, r.end.status)
+        assertEquals(-45.5, assertNotNull(r.end.offsetDeg), 0.5)
+    }
+
+    @Test
+    fun aJitteryReconvergenceReleasesTheLockToo() {
+        // With half a degree of jitter on top, the trend alone rarely fails on most of half a second: the
+        // jitter keeps trimming the window short. The window's mean leaving the locked north catches it.
+        for (seed in 100L until 108L) {
+            val r = reconverge(amplitudeDeg = 5.5, tauS = 2.0, noiseDeg = 0.5, seed = seed)
+            val released = assertNotNull(r.releasedMs, "seed $seed: the lock held through the drift")
+            assertTrue(released <= 3000, "seed $seed: released at $released ms")
+            assertNotNull(r.relockedMs, "seed $seed: never locked again")
+            assertEquals(1, r.releases, "seed $seed")
+            assertEquals(CompassStatus.LOCKED, r.end.status, "seed $seed")
+            assertEquals(-45.5, assertNotNull(r.end.offsetDeg), 0.5, "seed $seed")
+        }
+    }
+
+    @Test
+    fun handSwayDoesNotFlickerTheLock() {
+        // Sway of 0.7 degrees (standard deviation): 60 % of the variance a random wander with a 0.15 s time
+        // constant, the rest white jitter. It fails the drift test on a sample now and then, not on most of
+        // half a second.
+        val sigma = 0.7
+        val a = exp(-0.02 / 0.15)
+        val wanderStep = sqrt(0.6) * sigma * sqrt(1 - a * a)
+        val white = sqrt(0.4) * sigma
+        for (seed in 200L until 205L) {
+            val random = Random(seed)
+            val lock = CompassLock()
+            lock.feed(0, 2000)
+            assertEquals(CompassStatus.LOCKED, lock.reading(ns(2000)).status)
+            var wander = 0.0
+            var t = 2020L
+            while (t <= 62_000) {
+                wander = a * wander + random.nextGaussian() * wanderStep
+                val status = lock.statusAfter(t, 40.0 + wander + random.nextGaussian() * white)
+                assertEquals(CompassStatus.LOCKED, status, "seed $seed at $t ms")
+                t += 20
+            }
+        }
+    }
+
+    @Test
+    fun aStepUnderTheJumpLimitThatHoldsIsADrift() {
+        // North moves 4.5 degrees at once and stays there. Under the jump limit, so the lock holds at first;
+        // once the window holds the new north, its mean is off the locked one on most of half a second, and
+        // the lock waits for two steady seconds as after a jump.
+        val lock = CompassLock()
+        lock.feed(0, 2000)
+        lock.feed(2020, 2500, gameYawDeg = { 44.5 })
+        assertEquals(CompassStatus.LOCKED, lock.reading(ns(2500)).status)
+        lock.feed(2520, 3000, gameYawDeg = { 44.5 })
+        assertEquals(CompassStatus.SETTLING, lock.reading(ns(3000)).status)
+        // The window kept the new north since its second sample (the first was skipped as a glitch).
+        lock.feed(3020, 4020, gameYawDeg = { 44.5 })
+        assertEquals(CompassStatus.SETTLING, lock.reading(ns(4020)).status)
+        lock.feed(4040, 4040, gameYawDeg = { 44.5 })
+        val r = lock.reading(ns(4040))
+        assertEquals(CompassStatus.LOCKED, r.status)
+        assertEquals(-44.5, assertNotNull(r.offsetDeg), 1e-6)
     }
 
     @Test

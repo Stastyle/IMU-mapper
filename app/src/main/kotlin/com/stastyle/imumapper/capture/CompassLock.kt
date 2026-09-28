@@ -30,8 +30,8 @@ enum class CompassStatus {
     SETTLING,
 
     /**
-     * North has held steady long enough. Stays until CALIBRATE or INTERFERENCE, a gap in the samples or
-     * a jump of the yaw difference releases it.
+     * North has held steady long enough. Stays until CALIBRATE or INTERFERENCE, a gap in the samples, a
+     * jump of the yaw difference or a drift of it away from the locked north releases it.
      */
     LOCKED,
 }
@@ -78,8 +78,12 @@ data class CompassReading(
  * one sample late.
  *
  * The lock latches until the magnetometer asks for a figure 8, interference shows, the samples stop
- * for longer than [MAX_GAP_NS], or two differences in a row land more than [RELEASE_DEVIATION_RAD] from
- * the locked mean.
+ * for longer than [MAX_GAP_NS], two differences in a row land more than [RELEASE_DEVIATION_RAD] from
+ * the locked mean, or north drifts: on most samples of the last [DRIFT_RELEASE_NS] the window has a
+ * small spread but a trend, or a mean more than [MAX_DEVIATION_RAD] from the locked mean. That catches
+ * a fused vector re-converging by less than the jump limit, and the debounce keeps hand sway, which
+ * fails those tests only now and then, from flickering the lock. A drift release keeps the window, so
+ * the lock returns as soon as the samples since the drift began are steady again.
  *
  * Feed it the live sensor streams in arrival order and call [reading] for the current state. Not
  * thread-safe; the caller confines it to one thread or locks around it. [CompassFeed] does both.
@@ -109,6 +113,9 @@ class CompassLock {
     private var calibrating = false
     private var interference = false
 
+    /** One drift test while locked: whether the window looked like north moving away from the lock. */
+    private class DriftCheck(val tNs: Long, val drifting: Boolean)
+
     /** The steady yaw differences, oldest first. */
     private val window = ArrayDeque<Delta>()
     private var lastDeltaNs = Long.MIN_VALUE
@@ -119,6 +126,10 @@ class CompassLock {
 
     /** The previous yaw difference was skipped as a lone outlier, so the next outlier goes in. */
     private var skippedOutlier = false
+
+    /** Drift tests of the last [DRIFT_RELEASE_NS] while locked, oldest first, and how many found a drift. */
+    private val driftChecks = ArrayDeque<DriftCheck>()
+    private var driftingChecks = 0
 
     /** Routes one record of the live stream to [onGame], [onFused] or [onMag]; other records are ignored. */
     fun feed(record: LogRecord) {
@@ -264,11 +275,40 @@ class CompassLock {
         // The newest sample at or before the window's start stays too, so a steady stream spans the
         // whole LOCK_WINDOW_NS whatever the sample times are.
         while (window.size >= 2 && window[1].tNs <= tNs - LOCK_WINDOW_NS) window.removeFirst()
+        if (locked) checkDrift(tNs)
         while (window.size > 1 && !(spreadOk() && trendOk())) window.removeFirst()
         if (window.size >= MIN_WINDOW_SAMPLES && windowSpanNs() >= LOCK_WINDOW_NS) {
+            if (!locked) clearDriftChecks()
             locked = true
             lockedMeanRad = meanRad(0, window.size)
         }
+    }
+
+    /**
+     * While locked, tests the window before the steadiness trim hides a drift: a small spread with a
+     * trend, or with a mean off the locked north by more than the spread allows, means north is moving.
+     * Releases the lock, and keeps the window, when that held on most samples of the last
+     * [DRIFT_RELEASE_NS]: sway fails a test now and then, a re-converging fused vector keeps failing it.
+     */
+    private fun checkDrift(tNs: Long) {
+        val drifting = window.size >= MIN_TREND_SAMPLES && spreadOk() &&
+            (!trendOk() || abs(wrapRad(meanRad(0, window.size) - lockedMeanRad)) > MAX_DEVIATION_RAD)
+        driftChecks.addLast(DriftCheck(tNs, drifting))
+        if (drifting) driftingChecks++
+        // As in the window, the newest test at or before the start stays, so full history spans the time.
+        while (driftChecks.size >= 2 && driftChecks[1].tNs <= tNs - DRIFT_RELEASE_NS) {
+            if (driftChecks.removeFirst().drifting) driftingChecks--
+        }
+        val full = tNs - driftChecks.first().tNs >= DRIFT_RELEASE_NS
+        if (full && driftingChecks * 2 > driftChecks.size) {
+            locked = false
+            clearDriftChecks()
+        }
+    }
+
+    private fun clearDriftChecks() {
+        driftChecks.clear()
+        driftingChecks = 0
     }
 
     /** Every difference within [MAX_DEVIATION_RAD] of the window's circular mean. */
@@ -324,6 +364,7 @@ class CompassLock {
         locked = false
         window.clear()
         skippedOutlier = false
+        clearDriftChecks()
     }
 
     companion object {
@@ -395,9 +436,17 @@ class CompassLock {
          * Once locked, two yaw differences in a row this far from the locked mean release the lock (one
          * alone is skipped as a glitch). Well above the 3 to 5 degrees a hand-held phone wobbles by at
          * worst, so the lock does not flicker; a jump this large means the fused vector re-anchored, and
-         * north has moved.
+         * north has moved. A smaller move is for the drift test ([DRIFT_RELEASE_NS]) to catch.
          */
         val RELEASE_DEVIATION_RAD: Double = Math.toRadians(6.0)
+
+        /**
+         * How long the drift test looks back while locked: the lock lets go when the window drifted on
+         * most samples of the last half second. A fused vector re-converging by a few degrees fails the
+         * test on most samples for a second or more; hand sway of under a degree fails it on a sample now
+         * and then, and on most of half a second too rarely to flicker the lock.
+         */
+        const val DRIFT_RELEASE_NS: Long = 500_000_000L
 
         /**
          * The Earth's field is 25 to 65 microtesla everywhere; outside a margin around that range the
