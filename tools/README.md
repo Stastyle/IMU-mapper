@@ -53,8 +53,9 @@ and `baroStillGapS`, which `--set` rejects. The differences listed under "Not co
    unknown record types are reported, not fatal, just like `LogReader`.
 2. The **config** in effect.
 3. The pipeline **diagnostics** (same keys as `PathResult.diagnostics` from the Kotlin code:
-   orientation source, magnetometer gate pass fraction, software vs hardware step counts, stride
-   model, heading axis and offsets, barometer reference, loop closure).
+   orientation source, magnetometer gate pass fraction, where north comes from (`northReference`,
+   `northOffsetDeg`), software vs hardware step counts, stride model, heading axis and offsets,
+   barometer reference, loop closure).
 4. **Stats**: distance, steps, duration, vertical range, closure error, and the end point.
 5. With `--compare`: per-stat differences, end-point distance, and the mean and maximum position
    error over the points that share a timestamp.
@@ -99,13 +100,19 @@ floating-point rounding on the samples, the Madgwick fallback (a log without rot
 the fused-only source, hardware steps with the Weinberg stride, and a REORIENT annotation.
 
 The Kotlin pipeline has since gained the features listed under "Not covered", so parity is now
-close but not exact. Measured on 2026-09-27 against `DefaultProcessor` (pipeline version 3):
+close but not exact. Measured on 2026-09-28 against `DefaultProcessor` (pipeline version 5):
 
 - `synthetic_square.imul`: 30 steps and distance 20.0064 m in both. The closure error is
   0.7525 m in the replay and 0.7526 m in Kotlin.
-- `synthetic_carry_change.imul`: 30 steps and distance 19.9945 m in both.
+- `synthetic_carry_change.imul`: 30 steps and distance 19.9948 m in both.
 - In both samples x and y match. z differs by up to 2.3 mm, because of the barometer still-gap
   below.
+- Both samples report `northReference` "magnetic" in both. Their game and fused rotation vectors
+  agree at the start, so the turn onto north is tiny (`northOffsetDeg` -0.1 and 0.0). To check
+  the turn itself, scratch logs whose game vector starts 40° off (`SyntheticWalk(gameYawOffsetRad
+  = ...)`, not committed) were compared with every combination of `useMagnetometer` and
+  `northFromCompass`, with and without magnetometer samples: x and y match to 1e-15 m, and the
+  diagnostics have the same keys, values and order apart from `headingAxisMode`.
 - `--compare` reports `headingAxisMode` as a diagnostics key that only Kotlin emits.
 
 When you change the Kotlin pipeline, get a Kotlin result and check the replay against it with
