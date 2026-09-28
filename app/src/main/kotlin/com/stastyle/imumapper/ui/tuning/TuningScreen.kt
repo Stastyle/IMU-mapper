@@ -62,6 +62,7 @@ fun TuningScreen(onBack: () -> Unit) {
             calibration = container.calibrationRepository,
             tripProcessor = container.tripProcessor,
             processor = container.processor,
+            markHeadingOffsetResetDone = container.updateManager.preferences::markHeadingOffsetResetDone,
         )
     }
     val ui by vm.ui.collectAsStateWithLifecycle()

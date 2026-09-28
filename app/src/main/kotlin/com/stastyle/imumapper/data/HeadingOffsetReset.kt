@@ -1,6 +1,8 @@
 package com.stastyle.imumapper.data
 
 import com.stastyle.imumapper.pipeline.core.HeadingAxisMode
+import com.stastyle.imumapper.pipeline.core.PipelineConfig
+import kotlinx.coroutines.CancellationException
 
 /**
  * Clears the saved heading offset once, for the release that takes north from the compass. Before
@@ -8,10 +10,18 @@ import com.stastyle.imumapper.pipeline.core.HeadingAxisMode
  * yaw differs from one recording to the next, so a stored offset holds a random session angle rather
  * than how the phone sits relative to the walking direction. Applied to compass-referenced trips it
  * would turn every path by that random angle.
+ *
+ * Every screen that saves a heading offset the user chose goes through [saveCalibration], which marks
+ * the reset done as well: an offset calibrated after the update is the user's own, and a reset that
+ * failed at the first start and runs again at a later one must not wipe it.
  */
 object HeadingOffsetReset {
 
-    /** Calibration note saved with the reset, so the Calibration screen shows why the offset changed. */
+    /**
+     * Calibration note saved with the reset. It is stored in the calibration row, which no screen
+     * shows; it tells anyone reading the stored calibration why the offset changed, until the next
+     * save with a note of its own replaces it.
+     */
     const val NOTE = "Heading offset reset: north now comes from the compass"
 
     /**
@@ -33,5 +43,40 @@ object HeadingOffsetReset {
         }
         markDone()
         return stale
+    }
+
+    /** True when [saved] has another heading offset or axis than [previous]: a value the user chose. */
+    fun changesOffset(previous: PipelineConfig, saved: PipelineConfig): Boolean =
+        saved.headingOffsetRad != previous.headingOffsetRad || saved.headingAxis != previous.headingAxis
+
+    /**
+     * Saves [config] with [notes] as the calibration, and records the reset as done with [markDone] when
+     * the heading offset in it is the user's own: [offsetMeasured] (the heading calibration just
+     * measured it), or an offset or axis other than the stored one ([changesOffset]). A config that
+     * only carries the stored offset along leaves the reset alone, so a stale offset is still reset.
+     *
+     * A failed save propagates and marks nothing. A failure of [markDone] is returned instead of thrown,
+     * for the caller to log: the config is saved by then, and reporting the save as failed would be
+     * wrong. Marking comes second so that a failure leaves the offset exposed to the reset (it falls
+     * back to zero, visibly) rather than a stale random offset protected from it.
+     */
+    suspend fun saveCalibration(
+        calibration: CalibrationRepository,
+        config: PipelineConfig,
+        notes: String,
+        markDone: suspend () -> Unit,
+        offsetMeasured: Boolean = false,
+    ): Exception? {
+        val previous = calibration.getConfig()
+        calibration.saveConfig(config, notes)
+        if (!offsetMeasured && !changesOffset(previous, config)) return null
+        return try {
+            markDone()
+            null
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            e
+        }
     }
 }

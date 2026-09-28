@@ -12,6 +12,7 @@ import com.stastyle.imumapper.capture.CompassReading
 import com.stastyle.imumapper.capture.CompassStatus
 import com.stastyle.imumapper.capture.SensorLogger
 import com.stastyle.imumapper.data.CalibrationRepository
+import com.stastyle.imumapper.data.HeadingOffsetReset
 import com.stastyle.imumapper.data.TripFiles
 import com.stastyle.imumapper.data.TripRepository
 import com.stastyle.imumapper.data.db.TripEntity
@@ -171,6 +172,8 @@ class CalibrationViewModel(
     private val calibration: CalibrationRepository,
     private val trips: TripRepository,
     private val files: TripFiles,
+    /** Records the one-time [HeadingOffsetReset] as done; a saved heading offset makes it moot. */
+    private val markHeadingOffsetResetDone: suspend () -> Unit,
 ) : ViewModel() {
 
     private val _ui = MutableStateFlow(CalibrationUiState())
@@ -405,8 +408,17 @@ class CalibrationViewModel(
         val newConfig = change.first
         val note = change.second
         viewModelScope.launch {
-            val outcome = runCatching { calibration.saveConfig(newConfig, note) }
+            val outcome = runCatching {
+                HeadingOffsetReset.saveCalibration(
+                    calibration = calibration,
+                    config = newConfig,
+                    notes = note,
+                    markDone = markHeadingOffsetResetDone,
+                    offsetMeasured = result is FlowResult.Heading,
+                )
+            }
             outcome.exceptionOrNull()?.let { if (it is CancellationException) throw it }
+            outcome.getOrNull()?.let { Log.w(TAG, "heading offset reset not marked done", it) }
             outcome.fold(
                 onSuccess = {
                     setPhase(kind, FlowPhase.Idle)

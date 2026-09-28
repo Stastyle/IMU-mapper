@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.stastyle.imumapper.capture.SensorLogger
 import com.stastyle.imumapper.capture.SensorStats
 import com.stastyle.imumapper.data.CalibrationRepository
+import com.stastyle.imumapper.data.HeadingOffsetReset
 import com.stastyle.imumapper.data.TripFiles
 import com.stastyle.imumapper.data.TripRepository
 import com.stastyle.imumapper.data.db.PathResultEntity
@@ -101,6 +102,8 @@ class DebugViewModel(
     private val calibration: CalibrationRepository,
     private val tripProcessor: TripProcessor,
     private val json: Json,
+    /** Records the one-time [HeadingOffsetReset] as done; a heading offset the user saves makes it moot. */
+    private val markHeadingOffsetResetDone: suspend () -> Unit,
 ) : ViewModel() {
 
     private val _ui = MutableStateFlow(DebugUiState(tripId = initialTripId))
@@ -332,8 +335,12 @@ class DebugViewModel(
     fun saveDraftAsCalibration() {
         val config = draftConfig() ?: return
         viewModelScope.launch {
-            val outcome = runCatching { calibration.saveConfig(config, "debug editor") }
+            // An edited heading offset or axis is the user's own; saving it marks the one-time reset done.
+            val outcome = runCatching {
+                HeadingOffsetReset.saveCalibration(calibration, config, "debug editor", markHeadingOffsetResetDone)
+            }
             outcome.exceptionOrNull()?.let { if (it is CancellationException) throw it }
+            outcome.getOrNull()?.let { Log.w(TAG, "heading offset reset not marked done", it) }
             val message = outcome.fold({ "Saved as the current calibration" }, { e -> "Save failed: " + describe(e) })
             _ui.update { it.copy(draftDirty = !outcome.isSuccess, message = message) }
         }

@@ -57,7 +57,8 @@ class UpdatePreferences(context: Context) {
     }
 
     /**
-     * True once [com.stastyle.imumapper.data.HeadingOffsetReset] has run. Reads the store directly,
+     * True once [com.stastyle.imumapper.data.HeadingOffsetReset] has run, or the user has saved a heading
+     * offset of their own since the update, which leaves nothing to reset. Reads the store directly,
      * without the empty fallback: an unreadable file throws, so the reset is skipped for this start
      * instead of wiping an offset the user calibrated after it.
      */

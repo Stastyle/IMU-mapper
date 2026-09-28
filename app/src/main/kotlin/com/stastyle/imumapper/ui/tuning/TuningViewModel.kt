@@ -9,6 +9,7 @@ import androidx.core.content.FileProvider
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.stastyle.imumapper.data.CalibrationRepository
+import com.stastyle.imumapper.data.HeadingOffsetReset
 import com.stastyle.imumapper.data.TripExporter
 import com.stastyle.imumapper.data.TripFiles
 import com.stastyle.imumapper.data.TripRepository
@@ -111,6 +112,8 @@ class TuningViewModel(
     private val calibration: CalibrationRepository,
     private val tripProcessor: TripProcessor,
     private val processor: Processor,
+    /** Records the one-time [HeadingOffsetReset] as done; a heading offset the user saves makes it moot. */
+    private val markHeadingOffsetResetDone: suspend () -> Unit,
 ) : ViewModel() {
 
     private val _ui = MutableStateFlow(TuningUiState())
@@ -354,8 +357,18 @@ class TuningViewModel(
             evaluated.proposal.reasoning?.let { append(". ").append(it.take(400)) }
         }
         viewModelScope.launch {
-            val outcome = runCatching { calibration.saveConfig(evaluated.proposal.config, note) }
+            // A proposal that changes the heading offset or axis is the user's choice; saving it marks the
+            // one-time reset done.
+            val outcome = runCatching {
+                HeadingOffsetReset.saveCalibration(
+                    calibration = calibration,
+                    config = evaluated.proposal.config,
+                    notes = note,
+                    markDone = markHeadingOffsetResetDone,
+                )
+            }
             outcome.exceptionOrNull()?.let { if (it is CancellationException) throw it }
+            outcome.getOrNull()?.let { Log.w(TAG, "heading offset reset not marked done", it) }
             _ui.update { st ->
                 outcome.fold(
                     { st.copy(applied = true, message = "Saved as the current calibration") },

@@ -9,6 +9,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class HeadingOffsetResetTest {
@@ -71,6 +72,65 @@ class HeadingOffsetResetTest {
         assertFalse(HeadingOffsetReset.runOnce(repo, flag::isDone, flag::markDone))
         assertTrue(repo.savedNotes.isEmpty())
         assertTrue(flag.done)
+    }
+
+    @Test
+    fun aHeadingOffsetCalibratedAfterAFailedResetSurvivesTheRetry() = runBlocking {
+        val repo = FakeCalibrationRepository(calibrated)
+        val flag = Flag()
+        // The first start's reset fails, so the stale offset stays and the reset is not marked done.
+        repo.saveFailure = IOException("disk full")
+        assertFailsWith<IOException> { HeadingOffsetReset.runOnce(repo, flag::isDone, flag::markDone) }
+        repo.saveFailure = null
+        // The user calibrates the heading before the next start and happens to measure the same -63
+        // degrees: measured, so the user's own although nothing changed.
+        val measured = calibrated
+        val failure = HeadingOffsetReset.saveCalibration(
+            repo, measured, "Heading offset -63.0°", flag::markDone, offsetMeasured = true,
+        )
+        assertNull(failure)
+        assertTrue(flag.done)
+        // The retry at the next start leaves the offset the user just measured.
+        assertFalse(HeadingOffsetReset.runOnce(repo, flag::isDone, flag::markDone))
+        assertEquals(measured, repo.config)
+    }
+
+    @Test
+    fun aTypedOffsetCountsAsTheUsersOwnButACarriedAlongOneDoesNot() = runBlocking {
+        val repo = FakeCalibrationRepository(calibrated)
+        val flag = Flag()
+        // Saving another value keeps the stored (stale) offset: the reset still has to run.
+        HeadingOffsetReset.saveCalibration(repo, repo.config.copy(strideLengthM = 0.8), "debug editor", flag::markDone)
+        assertFalse(flag.done)
+        // An offset or an axis the user changed is theirs.
+        val axisChanged = repo.config.copy(headingAxis = HeadingAxisMode.FORWARD)
+        HeadingOffsetReset.saveCalibration(repo, axisChanged, "", flag::markDone)
+        assertTrue(flag.done)
+        val retyped = Flag()
+        HeadingOffsetReset.saveCalibration(repo, repo.config.copy(headingOffsetRad = 0.2), "", retyped::markDone)
+        assertTrue(retyped.done)
+    }
+
+    @Test
+    fun aFailedMarkIsReportedButTheSaveStands() = runBlocking {
+        val repo = FakeCalibrationRepository(calibrated)
+        val measured = calibrated.copy(headingOffsetRad = 0.1)
+        val failure = HeadingOffsetReset.saveCalibration(
+            repo, measured, "Heading offset", { throw IOException("store unreadable") }, offsetMeasured = true,
+        )
+        assertTrue(failure is IOException)
+        assertEquals(measured, repo.config)
+    }
+
+    @Test
+    fun aFailedCalibrationSaveMarksNothing() = runBlocking {
+        val repo = FakeCalibrationRepository(calibrated)
+        repo.saveFailure = IOException("disk full")
+        val flag = Flag()
+        assertFailsWith<IOException> {
+            HeadingOffsetReset.saveCalibration(repo, calibrated.copy(headingOffsetRad = 0.1), "", flag::markDone, true)
+        }
+        assertFalse(flag.done)
     }
 
     @Test
