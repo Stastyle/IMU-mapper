@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
 import java.io.File
+import java.util.Collections
 import java.util.concurrent.atomic.AtomicInteger
 
 /** In-memory [TripRepository] with the same id and runId rules as the Room one. */
@@ -137,7 +138,8 @@ class FakeProcessor(
     var failure: Throwable? = null,
     var onProcess: (RawLog, PipelineConfig) -> Unit = { _, _ -> },
 ) : Processor {
-    val calls = ArrayList<PipelineConfig>()
+    /** Synchronized: the overlap tests run two processes at once, and a plain list loses or corrupts an add. */
+    val calls: MutableList<PipelineConfig> = Collections.synchronizedList(ArrayList())
     val running = AtomicInteger(0)
     val maxConcurrent = AtomicInteger(0)
 
