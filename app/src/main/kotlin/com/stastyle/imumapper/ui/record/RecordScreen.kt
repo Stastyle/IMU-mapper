@@ -196,8 +196,7 @@ fun RecordScreen(
     if (ui.phase == RecordPhase.COMPASS) {
         CompassDialog(
             reading = ui.compass,
-            hint = "Start with the phone in your hand (or in the pose you calibrated the heading offset in), " +
-                "away from metal.",
+            hint = startPose(ui) + ", away from metal.",
             startLabel = "Start recording",
             onStart = vm::confirmCompass,
             onCancel = vm::cancelCompass,
@@ -537,21 +536,28 @@ private fun modeDescription(mode: TripMode): String = when (mode) {
 }
 
 /**
- * Where north comes from for the next trip, and how to hold the phone at the start: the heading offset
- * belongs to the pose the phone is in when the recording starts.
+ * How to hold the phone when the recording starts. A calibrated heading offset is applied to the start
+ * of every recording, so with one the recording must start in the pose it was calibrated in; a start in
+ * the hand would turn the map by the offset.
  */
+private fun startPose(ui: RecordUiState): String =
+    if (ui.offsetCalibrated) {
+        "Start in the pose you calibrated the heading offset in"
+    } else {
+        "Start with the phone in your hand"
+    }
+
+/** Where north comes from for the next trip, and how to hold the phone at the start ([startPose]). */
 private fun northText(ui: RecordUiState): String {
-    val keeps = "the path keeps its direction when you put it in a pocket."
+    val start = startPose(ui) + "; the path keeps its direction when you put the phone in a pocket."
     return when {
-        ui.northFromCompass ->
-            "North is taken from the compass before the recording starts. Start with the phone in your hand " +
-                "(or in the pose you calibrated the heading offset in); $keeps"
+        ui.northFromCompass -> "North is taken from the compass before the recording starts. $start"
         !ui.compassSensors ->
             "This phone lacks the sensors to find north with the compass, so north on the map is the " +
-                "gyroscope's own direction for this trip. Start with the phone in your hand; $keeps"
+                "gyroscope's own direction for this trip. $start"
         else ->
             "North on the map is the gyroscope's own direction for this trip, not the compass's; Settings can " +
-                "turn North from compass on. Start with the phone in your hand; $keeps"
+                "turn North from compass on. $start"
     }
 }
 

@@ -14,6 +14,7 @@ import com.stastyle.imumapper.capture.SensorStats
 import com.stastyle.imumapper.data.CalibrationRepository
 import com.stastyle.imumapper.pipeline.core.AnnotationKind
 import com.stastyle.imumapper.pipeline.core.CarryPosition
+import com.stastyle.imumapper.pipeline.core.HeadingAxisMode
 import com.stastyle.imumapper.pipeline.core.PipelineConfig
 import com.stastyle.imumapper.pipeline.core.TripMode
 import com.stastyle.imumapper.process.TripProcessor
@@ -60,6 +61,11 @@ data class RecordUiState(
     val compassNorthSetting: Boolean = true,
     /** The phone has the rotation vector, game rotation vector and magnetometer the compass step needs. */
     val compassSensors: Boolean = true,
+    /**
+     * The saved calibration has a heading offset or axis. The pipeline applies them to the start of every
+     * recording, so a recording must start in the pose they were calibrated in, not in the hand.
+     */
+    val offsetCalibrated: Boolean = false,
 ) {
     /** North of the next trip comes from the compass: the setting is on and the sensors exist. */
     val northFromCompass: Boolean
@@ -109,12 +115,13 @@ class RecordViewModel(
         viewModelScope.launch {
             try {
                 calibration.observeConfig().collect { c ->
-                    _ui.update { it.copy(compassNorthSetting = c.northFromCompass) }
+                    val offset = c.headingOffsetRad != 0.0 || c.headingAxis != HeadingAxisMode.AUTO
+                    _ui.update { it.copy(compassNorthSetting = c.northFromCompass, offsetCalibrated = offset) }
                 }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                // Only the setup text depends on it; start() reads the config again.
+                // Only the texts depend on it; start() reads the config again.
                 Log.w(TAG, "config not observed", e)
             }
         }

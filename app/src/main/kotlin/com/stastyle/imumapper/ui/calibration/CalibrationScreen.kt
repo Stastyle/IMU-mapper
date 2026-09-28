@@ -169,7 +169,7 @@ private fun CurrentConfigCard(ui: CalibrationUiState) {
             Text(
                 "Values apply to every new recording and re-processing. The carry position is chosen on the " +
                     "recording screen. The heading offset belongs to the pose the phone is in when a recording " +
-                    "starts, so calibrate it in that pose.",
+                    "starts, so calibrate it in that pose and start every recording in it.",
                 style = MaterialTheme.typography.bodySmall,
             )
         }

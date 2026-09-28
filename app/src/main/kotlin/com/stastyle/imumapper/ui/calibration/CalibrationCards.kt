@@ -173,9 +173,9 @@ fun HeadingResult(r: FlowResult.Heading) {
     ValueRow("Walked", Fmt.metres(r.walkedM) + " · ${r.steps} steps")
     Text(
         "The offset is the angle between where the phone points and where you walk, for the pose the phone " +
-            "was in when the walk started; it applies to recordings that start in that pose. It is right only " +
-            "if you walked toward magnetic north: it turns the walk you just made into north on the map. With " +
-            "the phone held in front of you it should be near 0°.",
+            "was in when the walk started. It is applied to every recording, so every recording must start in " +
+            "that pose. It is right only if you walked toward magnetic north: it turns the walk you just made " +
+            "into north on the map. With the phone held in front of you it should be near 0°.",
         style = MaterialTheme.typography.bodySmall,
     )
 }
