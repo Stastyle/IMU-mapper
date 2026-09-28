@@ -65,7 +65,12 @@ class CompassLockTest {
     }
 
     /** Outcome of [reconverge]: times in ms after the drift began, and the reading at the end. */
-    private class Reconvergence(val releasedMs: Long?, val relockedMs: Long?, val releases: Int, val end: CompassReading)
+    private class Reconvergence(
+        val releasedMs: Long?,
+        val relockedMs: Long?,
+        val releases: Int,
+        val end: CompassReading,
+    )
 
     /**
      * Locks on 40 degrees for two seconds, then moves the yaw difference by [amplitudeDeg] with a [tauS]
