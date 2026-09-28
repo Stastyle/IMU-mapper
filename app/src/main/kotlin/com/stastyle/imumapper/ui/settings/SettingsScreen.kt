@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -34,6 +35,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -42,6 +44,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -55,7 +58,7 @@ import com.stastyle.imumapper.update.UpdateManager
 import com.stastyle.imumapper.update.UpdateState
 import kotlin.math.roundToInt
 
-/** Carry position, default trip mode, check for updates, about. */
+/** Carry position, default trip mode, north from compass, check for updates, about. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(onBack: () -> Unit) {
@@ -66,6 +69,7 @@ fun SettingsScreen(onBack: () -> Unit) {
     }
     val carryPosition by vm.carryPosition.collectAsStateWithLifecycle()
     val tripMode by vm.defaultTripMode.collectAsStateWithLifecycle()
+    val northFromCompass by vm.northFromCompass.collectAsStateWithLifecycle()
     val updateState by vm.updateState.collectAsStateWithLifecycle()
 
     Scaffold(
@@ -93,6 +97,8 @@ fun SettingsScreen(onBack: () -> Unit) {
                 onCarryPosition = vm::setCarryPosition,
                 tripMode = tripMode,
                 onTripMode = vm::setDefaultTripMode,
+                northFromCompass = northFromCompass,
+                onNorthFromCompass = vm::setNorthFromCompass,
             )
             UpdatesSection(
                 state = updateState,
@@ -143,6 +149,8 @@ private fun RecordingSection(
     onCarryPosition: (CarryPosition) -> Unit,
     tripMode: TripMode,
     onTripMode: (TripMode) -> Unit,
+    northFromCompass: Boolean,
+    onNorthFromCompass: (Boolean) -> Unit,
 ) {
     SectionCard(title = "Recording") {
         Text("Carry position", style = MaterialTheme.typography.labelLarge)
@@ -170,6 +178,25 @@ private fun RecordingSection(
             label = ::tripModeLabel,
             onSelect = onTripMode,
         )
+        HorizontalDivider()
+        // The whole row toggles, so the target is large and TalkBack reads label and state together.
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .toggleable(value = northFromCompass, role = Role.Switch, onValueChange = onNorthFromCompass),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                Text("North from compass", style = MaterialTheme.typography.labelLarge)
+                Text(
+                    "North on the map is taken from the compass before each recording. " +
+                        "Off keeps the path in the gyroscope's own frame, which differs per trip.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(checked = northFromCompass, onCheckedChange = null)
+        }
     }
 }
 
