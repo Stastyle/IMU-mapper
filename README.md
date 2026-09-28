@@ -19,9 +19,11 @@ such as caves.
 - **Annotations while walking.** Buttons mark waypoints, junctions, chambers and notes, plus
   "re-orient" when you change how the phone is carried and "back at start", which closes the loop.
   While the app is on screen, a volume key marks a waypoint.
-- **3D viewer.** Orbit, zoom and pan, with a floor grid and north arrow. The path can be coloured
-  by time, altitude or source. Markers and photos can be tapped. You can switch to the path before
-  loop closure and smoothing, or overlay an earlier processing run.
+- **3D viewer.** Orbit, zoom and pan, with a floor grid and a north arrow. North is magnetic north,
+  read from the compass as the recording starts, unless the "North from compass" setting is off;
+  then it is wherever the gyro started. The path can be coloured by time, altitude or source.
+  Markers and photos can be tapped. You can switch to the path before loop closure and smoothing,
+  or overlay an earlier processing run.
 - **Re-processing.** Raw logs are kept, and every processing run is stored as a new version, so an
   old trip can be run again with a better algorithm or calibration.
 - **Calibration.** Guided flows measure still bias, stride (Weinberg `k`) and heading offset, run a

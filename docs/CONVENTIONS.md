@@ -17,6 +17,10 @@ Short rules every contributor (human or agent) follows. See `PLAN.md` for the de
 ## Frames, units, time
 
 - Pipeline world frame is **ENU**: x = east, y = north, z = up, metres, origin at the trip start.
+  North is magnetic north when the result's `northReference` diagnostic is `magnetic`: the
+  orientation estimator turns the trip onto the compass at its start
+  (`PipelineConfig.northFromCompass`). Otherwise `northReference` is `relative: ` and the reason,
+  and north is the arbitrary yaw the gyro started with.
 - Headings are radians **clockwise from north**, range (-pi, pi]. Use `Quat.headingOf`.
 - Android sensor frame: x = right edge of screen, y = top of phone, z = out of the screen.
   `Quat.rotate` takes sensor-frame vectors to ENU when the quaternion comes from a rotation
