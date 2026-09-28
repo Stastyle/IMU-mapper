@@ -109,7 +109,7 @@ class HeadingMathTest {
         assertEquals(5.01, assertNotNull(moved("5.01")), 1e-12)
         assertNull(moved("5.00"))
         assertNull(moved("-0.3"))
-        // Not reported (the magnetometer correction was off) or unreadable: nothing to hold against the walk.
+        // Not reported (north came from the fused vector alone, so no drift correction ran) or unreadable.
         assertNull(moved(null))
         assertNull(moved("n/a"))
     }

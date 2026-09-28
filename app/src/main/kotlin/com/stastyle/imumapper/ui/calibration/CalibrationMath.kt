@@ -33,8 +33,9 @@ object CalibrationMath {
 
     /**
      * Key of the orientation diagnostic with the drift correction the magnetometer applied by the end of
-     * a trip, in degrees: how far the fused-minus-game yaw moved after the start. Present only when the
-     * correction ran (`useMagnetometer` on).
+     * a trip, in degrees: how far the fused-minus-game yaw moved after the start. Present whenever the
+     * correction ran: `useMagnetometer` on, which the heading walk forces, and a game rotation vector
+     * turned onto north. A walk without it had its north from the fused vector alone.
      */
     const val YAW_CORRECTION_FINAL_DIAG: String = OrientationEstimator.YAW_CORRECTION_FINAL
 

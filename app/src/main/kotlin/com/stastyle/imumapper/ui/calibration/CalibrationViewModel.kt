@@ -635,7 +635,13 @@ class CalibrationViewModel(
         // The saved axis belongs to the saved offset; the walk picks its own and saves it with the result.
         // North always comes from the compass here, whatever the Settings switch says: the offset turns
         // the walk onto magnetic north, and against the gyro's own north it would hold an arbitrary angle.
-        val walkConfig = config.copy(headingAxis = HeadingAxisMode.AUTO, northFromCompass = true)
+        // The drift correction always runs too, whatever the saved config says, so the walk always reports
+        // how far the compass moved and a saved setting cannot switch that check off.
+        val walkConfig = config.copy(
+            headingAxis = HeadingAxisMode.AUTO,
+            northFromCompass = true,
+            useMagnetometer = true,
+        )
         val result = PdrProcessor().process(log, walkConfig)
         val problem = CalibrationMath.northProblem(result.diagnostics)
         if (problem != null) {
