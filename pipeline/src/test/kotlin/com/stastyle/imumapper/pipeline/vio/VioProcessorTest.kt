@@ -5,6 +5,7 @@ import com.stastyle.imumapper.pipeline.core.AnnotationRecord
 import com.stastyle.imumapper.pipeline.core.EventKind
 import com.stastyle.imumapper.pipeline.core.EventRecord
 import com.stastyle.imumapper.pipeline.core.KeyframeSample
+import com.stastyle.imumapper.pipeline.core.MagSample
 import com.stastyle.imumapper.pipeline.core.PathResult
 import com.stastyle.imumapper.pipeline.core.PipelineConfig
 import com.stastyle.imumapper.pipeline.core.PoseSample
@@ -26,6 +27,7 @@ import kotlin.math.sin
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class VioProcessorTest {
@@ -94,11 +96,13 @@ class VioProcessorTest {
         val imu = walk().still(1.0).walkTo(0.0, 10.0).still(0.5).buildRecords()
         val aligned = run(v.buildWith(imu.filterIsInstance<RotationSample>()))
         assertEquals("GAME", aligned.diagnostics["yawAlignmentSource"])
+        assertEquals("relative: no magnetometer samples", aligned.diagnostics["northReference"])
         assertNear(Vec3(0.0, 10.0, 0.0), aligned.points.last().p, 0.3, "aligned end")
         assertTrue(abs(Angles.diff(aligned.points.last().headingRad, 0.0)) < Math.toRadians(3.0))
 
         val raw = run(v.build())
         assertEquals("NONE", raw.diagnostics["yawAlignmentSource"])
+        assertEquals("relative: no orientation samples", raw.diagnostics["northReference"])
         val h = Math.toRadians(-50.0)
         assertNear(Vec3(10.0 * sin(h), 10.0 * cos(h), 0.0), raw.points.last().p, 0.05, "unaligned end")
 
@@ -106,7 +110,68 @@ class VioProcessorTest {
         val fusedOnly = imu.filterIsInstance<RotationSample>().map { it.copy(source = RotationSource.FUSED) }
         val fused = run(v.buildWith(fusedOnly))
         assertEquals("FUSED", fused.diagnostics["yawAlignmentSource"])
+        assertEquals("magnetic", fused.diagnostics["northReference"])
         assertNear(Vec3(0.0, 10.0, 0.0), fused.points.last().p, 0.3, "fused-aligned end")
+    }
+
+    /** A walker whose game rotation vector starts 40 degrees (counter-clockwise) off true north. */
+    private fun offsetWalk(): SyntheticWalk =
+        SyntheticWalk(speedMps = speed, cadenceHz = cadence, gameYawOffsetRad = Math.toRadians(40.0))
+
+    /** Where a walk of [lengthM] north ends in a game frame 40 degrees off: north appears at -40 degrees. */
+    private fun relativeEnd(lengthM: Double): Vec3 {
+        val h = Math.toRadians(-40.0)
+        return Vec3(lengthM * sin(h), lengthM * cos(h), 0.0)
+    }
+
+    @Test
+    fun arcoreIsTurnedOntoMagneticNorthThroughThePdrContext() {
+        // ARCore's -Z points at 50 degrees and the game vector is 40 degrees off; the walk goes north
+        // with a 3 s loss that PDR fills. Both frames must end up on the compass's north, once each.
+        val w = offsetWalk().still(2.0).walkTo(0.0, 20.0).still(1.0)
+        val v = vio(headingDeg = 50.0).still(2.0).walkTo(0.0, 20.0).still(1.0).lose(8.0, 11.0, paused = true)
+        val log = v.buildWith(w.buildRecords())
+        val r = run(log)
+        assertEquals("GAME", r.diagnostics["yawAlignmentSource"])
+        assertEquals("magnetic", r.diagnostics["northReference"])
+        assertEquals("magnetic", r.diagnostics["pdr.northReference"])
+        assertEquals("pdr", r.diagnostics["trackingLostFill"])
+        assertEquals("1", r.diagnostics["trackingLossCount"])
+        for (i in r.points.indices) {
+            val truth = v.truthAt(secondsOf(r, i))
+            assertNear(truth, r.points[i].p, 0.8, "point $i (${r.points[i].source}) at ${secondsOf(r, i)} s")
+        }
+        assertNear(Vec3(0.0, 20.0, 0.0), r.points.last().p, 0.8, "end")
+        assertTrue(maxJump(r) <= 0.5, "largest jump ${maxJump(r)}")
+        assertEquals(r.toJson(), run(log).toJson(), "processing must be deterministic")
+
+        // With north from the compass off, VIO and PDR share the game vector's frame instead.
+        val rel = run(log, config().copy(northFromCompass = false))
+        assertEquals("relative: north from compass is off", rel.diagnostics["northReference"])
+        assertEquals("relative: north from compass is off", rel.diagnostics["pdr.northReference"])
+        assertNear(relativeEnd(20.0), rel.points.last().p, 0.8, "relative end")
+        assertTrue(maxJump(rel) <= 0.5, "the PDR fill continues the VIO line: ${maxJump(rel)}")
+    }
+
+    @Test
+    fun withoutAPdrContextTheCompassStillSetsNorth() {
+        // Rotation vectors and magnetometer only, no accelerometer and no steps: there is no PDR
+        // context, so ImuHeading runs the orientation estimator itself.
+        val v = vio(headingDeg = 50.0).still(1.0).walkTo(0.0, 10.0).still(0.5)
+        val imu = offsetWalk().still(1.0).walkTo(0.0, 10.0).still(0.5).buildRecords()
+        val log = v.buildWith(imu.filter { it is RotationSample || it is MagSample })
+        val r = run(log)
+        assertNull(r.diagnostics["pdr.orientationSource"], "no PDR context")
+        assertEquals("GAME", r.diagnostics["yawAlignmentSource"])
+        assertEquals("magnetic", r.diagnostics["northReference"])
+        assertNear(Vec3(0.0, 10.0, 0.0), r.points.last().p, 0.3, "aligned end")
+        assertTrue(abs(Angles.diff(r.points.last().headingRad, 0.0)) < Math.toRadians(3.0))
+        assertEquals(r.toJson(), run(log).toJson(), "processing must be deterministic")
+
+        // Without the magnetometer the fused heading cannot be trusted, so the game frame stays.
+        val bare = run(v.buildWith(imu.filterIsInstance<RotationSample>()))
+        assertEquals("relative: no magnetometer samples", bare.diagnostics["northReference"])
+        assertNear(relativeEnd(10.0), bare.points.last().p, 0.3, "relative end")
     }
 
     @Test
@@ -322,6 +387,7 @@ class VioProcessorTest {
         val reference = PdrProcessor().process(log, config())
         assertEquals(reference.points, r.points)
         assertEquals(reference.stats, r.stats)
+        assertEquals(reference.diagnostics["northReference"], r.diagnostics["northReference"])
     }
 
     @Test

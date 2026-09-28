@@ -14,11 +14,20 @@ import kotlin.math.sin
  *
  * Source priority: the game rotation vector (gyro + accel, drift-free tilt, slowly drifting yaw);
  * then the fused rotation vector alone if that is all the log has; then a [MadgwickFilter] over
- * raw gyro (bias removed) and accel. When the game vector is primary and the config allows the
- * magnetometer, the yaw difference between the fused and the game vector is low-passed over
- * [yawCorrectionTimeConstantS] and applied as a correction, but only from moments where the
- * magnetic field passed the [MagGate]. The correction is relative to the difference seen in the
- * first second, so the trip still starts in the game vector's frame and only the drift is removed.
+ * raw gyro (bias removed) and accel.
+ *
+ * The game vector's yaw starts wherever the sensor happened to start, a different angle in every
+ * recording, so on its own the path would come out turned by a random angle. When the game vector
+ * is primary, the yaw difference between the fused vector (referenced to magnetic north) and the
+ * game vector is measured per fused sample, but only at moments where the magnetic field passed the
+ * [MagGate]. Its circular mean over the first [referenceWindowS] is the reference: with
+ * [PipelineConfig.northFromCompass] on, the whole trip is turned by it, so +Y is magnetic north
+ * (diagnostics `northReference` = "magnetic", `northOffsetDeg` = the reference). With
+ * [PipelineConfig.useMagnetometer] on, the difference is also low-passed over
+ * [yawCorrectionTimeConstantS] and its change since the reference is applied as a drift correction;
+ * with it off, the reference alone is applied and the magnetometer is ignored after the start.
+ * With the fused vector primary the track is magnetic already. Otherwise the yaw stays arbitrary
+ * and `northReference` starts with "relative: " followed by the reason.
  */
 class OrientationEstimator(
     private val madgwickBeta: Double = 0.1,
@@ -37,10 +46,11 @@ class OrientationEstimator(
             val base = OrientationTrack.fromRotationSamples(game)
             diag["orientationSource"] = Source.GAME.name
             diag["rotationSamples"] = game.size.toString()
-            val track = if (config.useMagnetometer && fused.isNotEmpty()) {
+            val track = if ((config.useMagnetometer || config.northFromCompass) && fused.isNotEmpty()) {
                 correctYaw(base, fused, log, config, diag)
             } else {
                 diag["yawCorrection"] = if (!config.useMagnetometer) "disabled" else "no fused rotation samples"
+                diag[NORTH_REFERENCE] = relativeNorth(config, "no fused rotation samples")
                 base
             }
             return Result(track, Source.GAME, diag)
@@ -49,16 +59,19 @@ class OrientationEstimator(
             diag["orientationSource"] = Source.FUSED.name
             diag["rotationSamples"] = fused.size.toString()
             diag["yawCorrection"] = "not needed: fused rotation vector is the primary source"
+            diag[NORTH_REFERENCE] = MAGNETIC
             return Result(OrientationTrack.fromRotationSamples(fused), Source.FUSED, diag)
         }
         if (log.gyro.isNotEmpty() && log.accel.isNotEmpty()) {
             diag["orientationSource"] = Source.MADGWICK.name
             diag["yawCorrection"] = "not available without rotation vector samples"
             diag["madgwickBeta"] = madgwickBeta.toString()
+            diag[NORTH_REFERENCE] = RELATIVE + "no rotation vector samples"
             return Result(madgwick(log, config), Source.MADGWICK, diag)
         }
         diag["orientationSource"] = Source.NONE.name
         diag["orientationWarning"] = "no rotation vector, gyro or accel samples; identity orientation used"
+        diag[NORTH_REFERENCE] = NO_ORIENTATION
         return Result(OrientationTrack.EMPTY, Source.NONE, diag)
     }
 
@@ -87,6 +100,11 @@ class OrientationEstimator(
         return builder.build()
     }
 
+    /**
+     * Turns the game track onto magnetic north and removes its yaw drift, as the config asks; see the
+     * class comment. Only moments where the magnetic field passed the gate are trusted, so a trip that
+     * starts in a disturbed field keeps the game vector's yaw and says why in `northReference`.
+     */
     private fun correctYaw(
         base: OrientationTrack,
         fused: List<RotationSample>,
@@ -96,7 +114,7 @@ class OrientationEstimator(
     ): OrientationTrack {
         val gate = MagGate.fromStart(log.mag, base, config.magGateTolerance, referenceWindowS)
         if (gate == null) {
-            diag["yawCorrection"] = "skipped: no magnetometer samples to gate the fused heading"
+            skip(config, diag, "no magnetometer samples to gate the fused heading", "no magnetometer samples")
             return base
         }
         diag["magRefMagnitudeUt"] = Diag.num(gate.refMagnitudeUt, 2)
@@ -124,11 +142,12 @@ class OrientationEstimator(
         }
         diag["magGatePassFraction"] = Diag.num(passed.toDouble() / n, 3)
         if (passed == 0) {
-            diag["yawCorrection"] = "skipped: magnetic field never passed the gate"
+            skip(config, diag, "magnetic field never passed the gate", "magnetic field never passed the gate")
             return base
         }
 
-        // Reference difference over the first second (gated), so only drift after that is removed.
+        // Reference difference over the first second (gated): the yaw that turns the game frame onto
+        // magnetic north, and the zero of the drift correction below.
         val refEnd = times[0] + (referenceWindowS * 1e9).toLong()
         var rc = 0.0
         var rs = 0.0
@@ -141,10 +160,22 @@ class OrientationEstimator(
             refCount++
         }
         if (refCount == 0) {
-            diag["yawCorrection"] = "skipped: magnetic field disturbed during the reference second"
+            val reason = "magnetic field disturbed during the reference second"
+            skip(config, diag, reason, reason)
             return base
         }
         val ref = atan2(rs, rc)
+        diag["northOffsetDeg"] = Diag.num(Math.toDegrees(ref), 1)
+
+        if (!config.useMagnetometer) {
+            // North from the start only: one constant turn, and the magnetometer is ignored afterwards.
+            diag["yawCorrection"] = "disabled"
+            diag[NORTH_REFERENCE] = MAGNETIC
+            val turn = Quat.yaw(ref)
+            val out = OrientationTrack.Builder(base.size)
+            for (k in 0 until base.size) out.add(base.timeAt(k), (turn * base.quatAt(k)).normalized())
+            return out.build()
+        }
 
         // Exponential average of the gated difference, tracked as a unit vector to avoid wrap-around,
         // then unwrapped into a continuous angle so linear interpolation between samples is safe.
@@ -169,7 +200,10 @@ class OrientationEstimator(
         }
         diag["yawCorrectionFinalDeg"] = Diag.num(Math.toDegrees(corr[n - 1]), 2)
         diag["yawCorrection"] = "applied"
+        diag[NORTH_REFERENCE] = if (config.northFromCompass) MAGNETIC else NORTH_OFF
 
+        // corr is the drift since the reference; adding the reference itself puts north on +Y.
+        val anchor = if (config.northFromCompass) ref else 0.0
         val out = OrientationTrack.Builder(base.size)
         var ci = 0
         for (k in 0 until base.size) {
@@ -181,8 +215,32 @@ class OrientationEstimator(
             } else {
                 corr[ci]
             }
-            out.add(t, (Quat.yaw(c) * base.quatAt(k)).normalized())
+            out.add(t, (Quat.yaw(c + anchor) * base.quatAt(k)).normalized())
         }
         return out.build()
+    }
+
+    /**
+     * A trip whose game track cannot be turned onto north. With the magnetometer off there was no
+     * drift correction to skip, so `yawCorrection` stays "disabled" and only the north reason is new.
+     */
+    private fun skip(config: PipelineConfig, diag: MutableMap<String, String>, correction: String, north: String) {
+        diag["yawCorrection"] = if (config.useMagnetometer) "skipped: $correction" else "disabled"
+        diag[NORTH_REFERENCE] = relativeNorth(config, north)
+    }
+
+    /** A relative `northReference`; switching north off is the reason whatever else went wrong. */
+    private fun relativeNorth(config: PipelineConfig, reason: String): String =
+        if (config.northFromCompass) RELATIVE + reason else NORTH_OFF
+
+    companion object {
+        /** Diagnostics key: [MAGNETIC] when +Y of the result is magnetic north, else [RELATIVE] and the reason. */
+        const val NORTH_REFERENCE: String = "northReference"
+        const val MAGNETIC: String = "magnetic"
+
+        /** Prefix of every [NORTH_REFERENCE] value that is not [MAGNETIC]: the yaw is the gyro's own. */
+        const val RELATIVE: String = "relative: "
+        const val NO_ORIENTATION: String = RELATIVE + "no orientation samples"
+        const val NORTH_OFF: String = RELATIVE + "north from compass is off"
     }
 }

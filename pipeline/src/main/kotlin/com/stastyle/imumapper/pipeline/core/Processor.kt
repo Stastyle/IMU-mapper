@@ -9,8 +9,10 @@ import com.stastyle.imumapper.pipeline.log.RawLog
  * 3: carry changes are detected from the tilt and re-estimate the heading offset (autoReorient).
  * 4: the walking heading is carried through every move of the phone (carry change or REORIENT)
  *    instead of being re-estimated from the gait, so moving the phone no longer turns the path.
+ * 5: +Y is magnetic north, set from the fused rotation vector at the start of the trip
+ *    (northFromCompass); before, every trip kept the game rotation vector's arbitrary yaw.
  */
-const val PIPELINE_VERSION: Int = 4
+const val PIPELINE_VERSION: Int = 5
 
 /**
  * Turns a raw log into a path. Implementations must be deterministic: the same log and config

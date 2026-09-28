@@ -29,7 +29,10 @@ data class PipelineConfig(
     val headingOffsetRad: Double = 0.0,
     /** Device axis [headingOffsetRad] was calibrated on; see [HeadingAxisMode]. */
     val headingAxis: HeadingAxisMode = HeadingAxisMode.AUTO,
-    /** Use the magnetometer-corrected rotation vector to bound gyro yaw drift. */
+    /**
+     * Use the magnetometer-corrected rotation vector to bound gyro yaw drift during the trip. Where
+     * north is comes from [northFromCompass], not from this.
+     */
     val useMagnetometer: Boolean = true,
     /**
      * Turn the path so +Y is magnetic north, taken from the fused rotation vector at the start of the
