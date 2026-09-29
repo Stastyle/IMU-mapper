@@ -379,6 +379,19 @@ internal fun viewerSubtitle(surveyMode: Boolean, run: String?, raw: Boolean): St
     else -> run
 }
 
+/**
+ * The line under the Raw path switch. It says why the switch changes nothing when it cannot (the run
+ * predates stored raw paths, or loop closure and smoothing moved no point), and otherwise what raw
+ * means. Survey mode draws no dimmed corrected path ([ViewerUiState.sceneOverlay]), so it says that
+ * its stations, placed by time, follow the raw path instead.
+ */
+internal fun rawPathHint(ui: ViewerUiState): String = when {
+    ui.rawUnavailable -> "Re-process this run to store its raw path"
+    ui.showRaw && ui.rawResult == null && ui.result != null -> "Nothing was corrected in this run"
+    ui.surveyMode -> "Before loop closure and smoothing; stations follow by time"
+    else -> "Before loop closure and smoothing; the corrected path is dimmed"
+}
+
 /** The ruler: enters and leaves Survey mode, tinted while it is on. */
 @Composable
 private fun SurveyToggle(surveyMode: Boolean, onToggle: () -> Unit) {
@@ -416,7 +429,7 @@ private fun SurveyMenu(ui: ViewerUiState, vm: ViewerViewModel, onDetail: () -> U
             },
             enabled = survey != null && !survey.state.readOnly,
         )
-        ToggleItem("Raw path", ui.showRaw, vm::toggleRaw)
+        RawPathItem(ui, vm)
         if (ui.runs.isNotEmpty()) {
             HorizontalDivider()
             Text(
@@ -600,19 +613,20 @@ private fun ViewMenu(ui: ViewerUiState, vm: ViewerViewModel) {
         ToggleItem("Point cloud", ui.options.showPointCloud, vm::togglePointCloud)
         ToggleItem("Markers", ui.options.showMarkers, vm::toggleMarkers)
         HorizontalDivider()
-        ToggleItem("Raw path", ui.showRaw, vm::toggleRaw)
-        val hint = when {
-            ui.rawUnavailable -> "Re-process this run to store its raw path"
-            ui.showRaw && ui.rawResult == null && ui.result != null -> "Nothing was corrected in this run"
-            else -> "Before loop closure and smoothing; the corrected path is dimmed"
-        }
-        Text(
-            hint,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp).widthIn(max = 260.dp),
-        )
+        RawPathItem(ui, vm)
     }
+}
+
+/** The Raw path switch and, under it, [rawPathHint]; the View menu and Survey mode's menu both draw it. */
+@Composable
+private fun RawPathItem(ui: ViewerUiState, vm: ViewerViewModel) {
+    ToggleItem("Raw path", ui.showRaw, vm::toggleRaw)
+    Text(
+        rawPathHint(ui),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp).widthIn(max = 260.dp),
+    )
 }
 
 @Composable
