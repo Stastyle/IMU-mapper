@@ -10,8 +10,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ChevronLeft
-import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -228,13 +228,16 @@ private fun LegNumbers(leg: LegMeasure, magnetic: Boolean) {
     )
 }
 
-/** Slider over distance along the path, so standing still takes no room; the arrows step one point. */
+/**
+ * Slider over distance along the path, so standing still takes no room; the arrows step one point.
+ * The arrows are auto-mirrored because the Row and the Slider mirror on a right-to-left locale.
+ */
 @Composable
 private fun Scrubber(survey: SurveyUi, onCursor: (Double) -> Unit, onStep: (Int) -> Unit) {
     val timeline = survey.geometry.timeline
     Row(verticalAlignment = Alignment.CenterVertically) {
         IconButton(onClick = { onStep(-1) }) {
-            Icon(Icons.Filled.ChevronLeft, contentDescription = "Previous point")
+            Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "Previous point")
         }
         Slider(
             value = timeline.distanceAt(survey.state.cursorNs).toFloat(),
@@ -244,7 +247,7 @@ private fun Scrubber(survey: SurveyUi, onCursor: (Double) -> Unit, onStep: (Int)
             modifier = Modifier.weight(1f),
         )
         IconButton(onClick = { onStep(1) }) {
-            Icon(Icons.Filled.ChevronRight, contentDescription = "Next point")
+            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Next point")
         }
     }
 }
