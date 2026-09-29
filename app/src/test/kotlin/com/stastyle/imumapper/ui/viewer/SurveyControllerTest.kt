@@ -6,6 +6,7 @@ import com.stastyle.imumapper.pipeline.survey.Station
 import com.stastyle.imumapper.pipeline.survey.StationKind
 import com.stastyle.imumapper.pipeline.survey.SurveyAngles
 import com.stastyle.imumapper.pipeline.survey.SurveyDoc
+import com.stastyle.imumapper.pipeline.survey.SurveyStations
 import com.stastyle.imumapper.render.LayerSelection
 import kotlin.math.cos
 import kotlin.math.sin
@@ -89,6 +90,41 @@ class SurveyControllerTest {
         assertSame(state, SurveyController.tapStation(state, 99))
         assertEquals(SurveySelection.None, tap(state, 4, 1).selection)
         assertEquals(SurveySelection.None, SurveyController.clearSelection(state).selection)
+    }
+
+    /** Start (1) and End (3) as one spot, as on a loop closed with "Back at start". */
+    private fun tapSpot(state: SurveyState): SurveyState = SurveyController.tapStations(state, listOf(1, 3))
+
+    @Test
+    fun stationsOnOneSpotTakeTurnsAndThenLetGo() {
+        var state = tapSpot(seeded())
+        assertEquals(SurveySelection.Chain(listOf(1)), state.selection)
+        state = tapSpot(state)
+        assertEquals(SurveySelection.Chain(listOf(3)), state.selection)
+        assertEquals(SurveySelection.None, tapSpot(state).selection)
+        // The ids may come in any order; the spot still starts with the earliest.
+        assertEquals(SurveySelection.Chain(listOf(1)), SurveyController.tapStations(seeded(), listOf(3, 1)).selection)
+        val unknown = tap(seeded(), 4)
+        assertSame(unknown, SurveyController.tapStations(unknown, listOf(98, 99)))
+    }
+
+    @Test
+    fun aTapOnTheSpotAfterAStationTakesTheOneThatComesAfterIt() {
+        // C1, then the spot where the loop closed: the leg is C1 to End, not back along the walk to Start.
+        var state = tapSpot(tap(seeded(), 4))
+        assertEquals(SurveySelection.Chain(listOf(4, 3)), state.selection)
+        assertEquals(listOf("C1", "End"), assertIs<SurveyReadout.Chain>(SurveyController.readout(state, geo)).names)
+        state = tapSpot(state)
+        assertEquals(SurveySelection.Chain(listOf(4, 1)), state.selection)
+        state = tapSpot(state)
+        assertEquals(SurveySelection.Chain(listOf(4)), state.selection)
+        // Start, C1, then the spot closes the loop on End.
+        assertEquals(SurveySelection.Chain(listOf(1, 4, 3)), tapSpot(tap(tapSpot(seeded()), 4)).selection)
+        // After the last station in time, the spot starts over with its earliest.
+        val stations = seeded().doc.stations
+        val lateMark = Station(id = 9, kind = StationKind.MARK, name = "Late", tNs = t(30))
+        val withLate = loaded(SurveyStations.ordered(stations + lateMark))
+        assertEquals(SurveySelection.Chain(listOf(9, 1)), tapSpot(tap(withLate, 9)).selection)
     }
 
     @Test

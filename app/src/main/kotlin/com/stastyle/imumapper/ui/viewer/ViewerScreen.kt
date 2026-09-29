@@ -94,6 +94,8 @@ fun ViewerScreen(
     var showSetAzimuth by remember { mutableStateOf(false) }
     var showNorth by remember { mutableStateOf(false) }
     var stationSheetId by remember { mutableStateOf<Int?>(null) }
+    // Stations drawn on one spot under a long press: the user picks which one the sheet is for.
+    var stationChoiceIds by remember { mutableStateOf<List<Int>?>(null) }
 
     // Survey mode draws the north-corrected path without the overlay run or the scene's markers:
     // stations take the markers' place, so a tap can only mean one thing.
@@ -123,10 +125,11 @@ fun ViewerScreen(
             },
             onSurveyTap = vm::surveyTap,
             onSurveyLongPress = { hit ->
-                if (hit is SurveyHit.OnStation) {
-                    stationSheetId = hit.stationId
-                } else if (hit is SurveyHit.OnPath) {
-                    vm.addStationAt(hit.distanceM)
+                when (hit) {
+                    is SurveyHit.OnStation -> stationSheetId = hit.stationId
+                    is SurveyHit.OnStations -> stationChoiceIds = hit.stationIds
+                    is SurveyHit.OnPath -> vm.addStationAt(hit.distanceM)
+                    SurveyHit.Miss -> Unit
                 }
             },
         )
@@ -261,6 +264,17 @@ fun ViewerScreen(
                     showLegs = false
                 },
                 onDismiss = { showLegs = false },
+            )
+        }
+        val choices = stationChoiceIds?.let { ids -> survey.state.doc.stations.filter { it.id in ids } }.orEmpty()
+        if (choices.isNotEmpty()) {
+            StationChooser(
+                stations = choices,
+                onChoose = { id ->
+                    stationChoiceIds = null
+                    stationSheetId = id
+                },
+                onDismiss = { stationChoiceIds = null },
             )
         }
         val sheetStation = stationSheetId?.let { id -> survey.state.doc.stations.firstOrNull { it.id == id } }

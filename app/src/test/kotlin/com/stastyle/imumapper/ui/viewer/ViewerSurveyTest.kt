@@ -227,6 +227,10 @@ class ViewerSurveyTest {
         vm.surveyTap(SurveyHit.OnStation(4))
         assertEquals(SurveySelection.Chain(listOf(1, 4)), survey(vm).state.selection)
         assertIs<SurveyReadout.Chain>(survey(vm).readout)
+
+        // Stations drawn on one spot: the one after C1 joins the chain.
+        vm.surveyTap(SurveyHit.OnStations(listOf(1, 3)))
+        assertEquals(SurveySelection.Chain(listOf(1, 4, 3)), survey(vm).state.selection)
     }
 
     @Test

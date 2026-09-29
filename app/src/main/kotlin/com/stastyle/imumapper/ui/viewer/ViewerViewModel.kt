@@ -419,6 +419,7 @@ class ViewerViewModel(
     fun surveyTap(hit: SurveyHit) = changeSurvey { state, geometry ->
         when (hit) {
             is SurveyHit.OnStation -> SurveyController.tapStation(state, hit.stationId)
+            is SurveyHit.OnStations -> SurveyController.tapStations(state, hit.stationIds)
             is SurveyHit.OnPath -> SurveyController.tapPath(state, geometry, hit.distanceM)
             SurveyHit.Miss -> state
         }

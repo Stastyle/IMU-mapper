@@ -2,6 +2,8 @@ package com.stastyle.imumapper.render
 
 import com.stastyle.imumapper.SurveyFixtures
 import com.stastyle.imumapper.SurveyFixtures.tNs
+import com.stastyle.imumapper.pipeline.core.PathPoint
+import com.stastyle.imumapper.pipeline.core.PositionSource
 import com.stastyle.imumapper.pipeline.core.Vec3
 import com.stastyle.imumapper.pipeline.survey.PathTimeline
 import com.stastyle.imumapper.pipeline.survey.Station
@@ -120,6 +122,40 @@ class ProjectedSurveyTest {
         val onPath = assertIs<SurveyHit.OnPath>(p.hitTest(corner.x - 30f, corner.y, density = 1f))
         assertEquals(10.0, onPath.distanceM, 0.1)
         assertEquals(SurveyHit.OnStation(4), p.hitTest(corner.x - 30f, corner.y, density = 2f))
+    }
+
+    @Test
+    fun stationsOnOneSpotAreAllHitInTraverseOrder() {
+        // A loop closed with "Back at start" ends exactly on the origin, so End is drawn on Start. A mark
+        // made just before Stop is clamped onto the end and sorts before End by its lower id.
+        val loop = listOf(Vec3.ZERO, Vec3(0.0, 10.0, 0.0), Vec3(10.0, 10.0, 0.0), Vec3(10.0, 0.0, 0.0), Vec3.ZERO)
+            .mapIndexed { i, p -> PathPoint(tNs(i), p, PositionSource.PDR, 0.0, i - 1) }
+        val onLoop = listOf(
+            Station(id = 1, kind = StationKind.START, name = "Start", tNs = tNs(0)),
+            Station(id = 4, kind = StationKind.CORNER, name = "C1", tNs = tNs(1)),
+            Station(id = 2, kind = StationKind.MARK, name = "Exit", tNs = tNs(4)),
+            Station(id = 3, kind = StationKind.END, name = "End", tNs = tNs(4)),
+        )
+        val loopCamera = OrbitCamera().withPreset(CameraPreset.TOP, Bounds.of(loop.map { it.p }), width, height)
+        val loopProjector = Projector(loopCamera, width, height)
+        val p = ProjectedSurvey(SurveyLayer.build(PathTimeline(loop), onLoop, LayerSelection(), null))
+        assertTrue(p.update(loopCamera, width, height))
+        val origin = assertNotNull(loopProjector.project(Vec3.ZERO))
+
+        assertEquals(listOf(0, 2, 3), p.hitTestStations(origin.x + 5f, origin.y, 24f, sameSpotPx = 1f))
+        assertEquals(SurveyHit.OnStations(listOf(1, 2, 3)), p.hitTest(origin.x + 5f, origin.y, density = 1f))
+        // A station alone on its spot is still a plain hit.
+        val corner = assertNotNull(loopProjector.project(Vec3(0.0, 10.0, 0.0)))
+        assertEquals(SurveyHit.OnStation(4), p.hitTest(corner.x, corner.y, density = 1f))
+        assertEquals(emptyList<Int>(), p.hitTestStations(origin.x + 500f, origin.y, 24f, sameSpotPx = 1f))
+    }
+
+    @Test
+    fun stationsCloseButApartOnScreenAreNotOneSpot() {
+        // A radius wide enough to reach every station still hits only the nearest when none share its spot.
+        val p = projected()
+        val corner = screenOf(Vec3(0.0, 10.0, 0.0))
+        assertEquals(listOf(2), p.hitTestStations(corner.x, corner.y, 1000f, sameSpotPx = 1f))
     }
 
     @Test

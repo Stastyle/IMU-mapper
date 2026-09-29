@@ -148,14 +148,31 @@ object SurveyController {
     }
 
     /** Taps build a chain; tapping its last station again takes it back, so a mis-tap costs one tap. */
-    fun tapStation(state: SurveyState, stationId: Int): SurveyState {
-        if (state.doc.stations.none { it.id == stationId }) return state
+    fun tapStation(state: SurveyState, stationId: Int): SurveyState = tapStations(state, listOf(stationId))
+
+    /**
+     * A tap on stations drawn on one spot (End on Start after a closed loop, a mark on Start or End).
+     * The first of them after the chain's last station in traverse order joins the chain, or the
+     * earliest when none comes after, so C7 then the spot gives C7 to End. Tapping the spot again
+     * swaps in the next of them in turn, and after the last turn takes it back, so each of them can be
+     * chosen and a mis-tap is still undone by tapping on. One station is the plain case above.
+     */
+    fun tapStations(state: SurveyState, stationIds: List<Int>): SurveyState {
+        val spot = SurveyStations.ordered(state.doc.stations.filter { it.id in stationIds })
+        if (spot.isEmpty()) return state
         val chain = (state.selection as? SurveySelection.Chain)?.stationIds.orEmpty()
-        val next = when {
-            chain.isEmpty() -> listOf(stationId)
-            chain.last() == stationId -> chain.dropLast(1)
-            else -> chain + stationId
-        }
+        val onSpot = chain.isNotEmpty() && spot.any { it.id == chain.last() }
+        val before = if (onSpot) chain.dropLast(1) else chain
+        val previous = before.lastOrNull()?.let { id -> state.doc.stations.firstOrNull { it.id == id } }
+        // A station never follows itself in a chain.
+        val choices = spot.filter { it.id != previous?.id }
+        if (choices.isEmpty()) return state
+        val first = previous
+            ?.let { p -> choices.indexOfFirst { it.tNs > p.tNs || (it.tNs == p.tNs && it.id > p.id) } }
+            ?.takeIf { it >= 0 }
+            ?: 0
+        val pick = if (onSpot) (choices.indexOfFirst { it.id == chain.last() } + 1) % choices.size else first
+        val next = if (onSpot && pick == first) before else before + choices[pick].id
         return state.copy(selection = if (next.isEmpty()) SurveySelection.None else SurveySelection.Chain(next))
     }
 

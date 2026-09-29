@@ -3,6 +3,14 @@ package com.stastyle.imumapper.render
 /** What a survey tap or long press landed on. Stations lie on the path, so a station always wins. */
 sealed interface SurveyHit {
     data class OnStation(val stationId: Int) : SurveyHit
+
+    /**
+     * Two or more stations drawn on one spot, in traverse order: a loop closed with "Back at start"
+     * puts End on Start, and a mark made before the first step or after the last sits on Start or End.
+     * Nearest-wins would always pick the first of them, so each gets its own way in.
+     */
+    data class OnStations(val stationIds: List<Int>) : SurveyHit
+
     data class OnPath(val distanceM: Double) : SurveyHit
     data object Miss : SurveyHit
 }
@@ -83,6 +91,24 @@ class ProjectedSurvey(val layer: SurveyLayer) {
         return best
     }
 
+    /**
+     * Indices into layer.stations of the nearest station on screen within [radiusPx] and every other
+     * visible station within [sameSpotPx] of it, in traverse order; empty when none is in reach.
+     */
+    fun hitTestStations(xPx: Float, yPx: Float, radiusPx: Float, sameSpotPx: Float): List<Int> {
+        val nearest = hitTestStation(xPx, yPx, radiusPx)
+        if (nearest < 0) return emptyList()
+        val nx = stationScreen[nearest * 2]
+        val ny = stationScreen[nearest * 2 + 1]
+        val s2 = sameSpotPx * sameSpotPx
+        return stationVisible.indices.filter { i ->
+            if (!stationVisible[i]) return@filter false
+            val dx = stationScreen[i * 2] - nx
+            val dy = stationScreen[i * 2 + 1] - ny
+            dx * dx + dy * dy <= s2
+        }
+    }
+
     /** Distance along the path of the nearest point on a visible screen segment within [radiusPx], or -1.0. */
     fun hitTestPath(xPx: Float, yPx: Float, radiusPx: Float): Double {
         val r2 = radiusPx * radiusPx
@@ -109,10 +135,14 @@ class ProjectedSurvey(val layer: SurveyLayer) {
         return best
     }
 
-    /** Station within STATION_HIT_DP, else path within PATH_HIT_DP, else Miss; radii scaled by [density]. */
+    /**
+     * Station within STATION_HIT_DP (OnStations when others are drawn on the same spot), else path
+     * within PATH_HIT_DP, else Miss; radii scaled by [density].
+     */
     fun hitTest(xPx: Float, yPx: Float, density: Float): SurveyHit {
-        val station = hitTestStation(xPx, yPx, STATION_HIT_DP * density)
-        if (station >= 0) return SurveyHit.OnStation(layer.stations[station].id)
+        val stations = hitTestStations(xPx, yPx, STATION_HIT_DP * density, SAME_SPOT_DP * density)
+        if (stations.size == 1) return SurveyHit.OnStation(layer.stations[stations[0]].id)
+        if (stations.size > 1) return SurveyHit.OnStations(stations.map { layer.stations[it].id })
         val distance = hitTestPath(xPx, yPx, PATH_HIT_DP * density)
         return if (distance >= 0.0) SurveyHit.OnPath(distance) else SurveyHit.Miss
     }
@@ -144,5 +174,11 @@ class ProjectedSurvey(val layer: SurveyLayer) {
 
         /** Wider than a station's so a tap need not land on a thin line. */
         const val PATH_HIT_DP: Float = 32f
+
+        /**
+         * Stations this close on screen are one spot to the finger. Coinciding stations are exactly on
+         * top of each other at every zoom; ones merely close come apart when the user zooms in.
+         */
+        const val SAME_SPOT_DP: Float = 1f
     }
 }

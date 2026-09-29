@@ -136,6 +136,44 @@ fun StationSheet(
     }
 }
 
+/**
+ * A long press on stations drawn on one spot, such as End on Start after a closed loop: the user
+ * picks the one to rename or delete, which a long press alone could never reach past the first.
+ */
+@Composable
+fun StationChooser(stations: List<Station>, onChoose: (stationId: Int) -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Stations on this spot") },
+        text = {
+            Column {
+                Text(
+                    "These stations are drawn on top of each other. Choose one to rename or delete.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(8.dp))
+                for (station in stations) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onChoose(station.id) }
+                            .padding(vertical = 8.dp),
+                    ) {
+                        Text(station.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            kindLabel(station.kind),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
 /** How finely corners are found; each choice shows how many corners it would give now. */
 @Composable
 fun DetailDialog(current: Detail, counts: Map<Detail, Int>, onSelect: (Detail) -> Unit, onDismiss: () -> Unit) {
