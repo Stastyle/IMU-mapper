@@ -55,6 +55,24 @@ class SurveyStationsTest {
     }
 
     @Test
+    fun seedClampsMarksToThePathSoStartAndEndStayOutermost() {
+        // A mark tapped while standing after the last step (PDR ends there), and one before the path starts
+        // (VIO starts at the first tracking frame): both sit at the nearest end, inside Start and End.
+        val annotations = listOf(
+            PathAnnotation(tNs(30) + 1_000_000_000L, AnnotationKind.CHAMBER, "Sump", lWalk.positionAt(tNs(30))),
+            PathAnnotation(T0 - 500_000_000L, AnnotationKind.WAYPOINT, "Entrance", lWalk.positionAt(T0)),
+        )
+        val expected = listOf(
+            Station(1, StationKind.START, "Start", T0),
+            Station(2, StationKind.MARK, "Entrance", T0),
+            Station(5, StationKind.CORNER, "C1", tNs(20)),
+            Station(3, StationKind.MARK, "Sump", tNs(30)),
+            Station(4, StationKind.END, "End", tNs(30)),
+        )
+        assertEquals(expected, SurveyStations.seed(lWalk, annotations))
+    }
+
+    @Test
     fun seedWithoutMarksIsStartEndAndCorners() {
         val stations = SurveyStations.seed(lWalk, emptyList(), Detail.COARSE)
         assertEquals(

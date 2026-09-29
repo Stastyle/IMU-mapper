@@ -464,8 +464,11 @@ object SurveyStations {
     fun ordered(stations: List<Station>): List<Station>
     /**
      * First-open stations: START "Start" (id 1) at startNs, one MARK per MARK_KINDS annotation in time
-     * order (ids 2, 3, ...), END "End" at endNs (next id), then the CORNER stations of [detail] with every
-     * other station kept (next ids, named C1, C2, ... in time order). Returned in traverse order.
+     * order (ids 2, 3, ...) at its time clamped to the path, END "End" at endNs (next id), then the CORNER
+     * stations of [detail] with every other station kept (next ids, named C1, C2, ... in time order).
+     * Returned in traverse order. A mark can fall outside the path: PDR ends at the last step, so a mark
+     * made while standing before STOP is later, and VIO starts at the first tracking frame. The walker
+     * stood at that end, and by the id order a clamped mark stays after START and before END.
      */
     fun seed(timeline: PathTimeline, annotations: List<PathAnnotation>, detail: Detail = Detail.NORMAL): List<Station>
     /** The trimmed note, or the kind in title case and its 1-based [ordinal] among that kind ("Junction 2"). */

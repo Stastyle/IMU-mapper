@@ -17,8 +17,11 @@ object SurveyStations {
 
     /**
      * First-open stations: START "Start" (id 1) at startNs, one MARK per MARK_KINDS annotation in time
-     * order (ids 2, 3, ...), END "End" at endNs (next id), then the CORNER stations of [detail] with every
-     * other station kept (next ids, named C1, C2, ... in time order). Returned in traverse order.
+     * order (ids 2, 3, ...) at its time clamped to the path, END "End" at endNs (next id), then the CORNER
+     * stations of [detail] with every other station kept (next ids, named C1, C2, ... in time order).
+     * Returned in traverse order. A mark can fall outside the path: PDR ends at the last step, so a mark
+     * made while standing before STOP is later, and VIO starts at the first tracking frame. The walker
+     * stood at that end, and by the id order a clamped mark stays after START and before END.
      */
     fun seed(
         timeline: PathTimeline,
@@ -31,7 +34,8 @@ object SurveyStations {
         for (a in annotations.filter { it.kind in MARK_KINDS }.sortedBy { it.tNs }) {
             val ordinal = (ordinals[a.kind] ?: 0) + 1
             ordinals[a.kind] = ordinal
-            out.add(Station(out.size + 1, StationKind.MARK, markName(a.kind, a.note, ordinal), a.tNs))
+            val tNs = a.tNs.coerceIn(timeline.startNs, timeline.endNs)
+            out.add(Station(out.size + 1, StationKind.MARK, markName(a.kind, a.note, ordinal), tNs))
         }
         out.add(Station(out.size + 1, StationKind.END, "End", timeline.endNs))
         return regenerateCorners(out, timeline, detail)
