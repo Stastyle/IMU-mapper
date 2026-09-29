@@ -7,6 +7,7 @@ import com.stastyle.imumapper.pipeline.survey.Station
 import com.stastyle.imumapper.pipeline.survey.StationKind
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
@@ -31,7 +32,7 @@ class SurveyEditsTest {
 
     @Test
     fun addedStationIsS1InTimeOrderWithOneUndoEntry() {
-        val state = SurveyController.addStation(seeded, t(15))
+        val state = SurveyController.addStation(seeded, geo, t(15))
         assertEquals(listOf(1, 2, 5, 4, 3), state.doc.stations.map { it.id })
         assertEquals(Station(id = 5, kind = StationKind.USER, name = "S1", tNs = t(15)), state.station(5))
         assertEquals(listOf(seeded.doc), state.undo)
@@ -39,7 +40,7 @@ class SurveyEditsTest {
 
     @Test
     fun undoRestoresTheDocButNotTheCursor() {
-        val added = SurveyController.addStation(seeded, t(15))
+        val added = SurveyController.addStation(seeded, geo, t(15))
         val selected = SurveyController.setCursor(tap(added, 5), geo, 12.5)
         val undone = SurveyController.undo(selected)
         assertEquals(seeded.doc, undone.doc)
@@ -52,7 +53,7 @@ class SurveyEditsTest {
 
     @Test
     fun movedCornerBecomesAUserStationThatADetailChangeKeeps() {
-        val moved = SurveyController.moveStation(seeded, 4, t(25))
+        val moved = SurveyController.moveStation(seeded, geo, 4, t(25))
         val expected = Station(id = 4, kind = StationKind.USER, name = "C1", tNs = t(25))
         assertEquals(expected, moved.station(4))
         assertEquals(listOf(1, 2, 4, 3), moved.doc.stations.map { it.id })
@@ -67,11 +68,51 @@ class SurveyEditsTest {
     }
 
     @Test
+    fun noStationIsAddedOnAnotherStationsPoint() {
+        // The scrubber starts on Start and its far end is End: a station there would hide under them
+        // and leave a 0.0 m leg in the table and the CSV.
+        assertSame(seeded, SurveyController.addStation(seeded, geo, t(0)))
+        assertSame(seeded, SurveyController.addStation(seeded, geo, t(30)))
+        assertSame(seeded, SurveyController.addStation(seeded, geo, t(10)))
+        // A moment later is still the same point along the path.
+        assertSame(seeded, SurveyController.addStation(seeded, geo, t(0) + 1_000L))
+        assertEquals("Start", SurveyController.stationAt(seeded, geo, t(0))?.name)
+        assertEquals("End", SurveyController.stationAt(seeded, geo, t(30))?.name)
+        assertNull(SurveyController.stationAt(seeded, geo, t(1)))
+        // One step on is a leg of its own.
+        assertEquals(5, SurveyController.addStation(seeded, geo, t(1)).doc.stations.size)
+    }
+
+    @Test
+    fun aMomentStandingStillOnAStationsPointIsThatPoint() {
+        // The walker stands 4 s at the entrance before the first step, so a moment then is Start's point.
+        val walk = SurveyFixtures.lWalk()
+        val standing = walk.copy(
+            points = walk.points.mapIndexed { i, p -> if (i == 0) p else p.copy(tNs = p.tNs + 4_000_000_000L) },
+        )
+        val standingGeo = SurveyGeometry.of(standing, runId = 1, raw = false)
+        val waiting = t(0) + 2_000_000_000L
+        assertEquals("Start", SurveyController.stationAt(seeded, standingGeo, waiting)?.name)
+        assertSame(seeded, SurveyController.addStation(seeded, standingGeo, waiting))
+    }
+
+    @Test
+    fun noStationIsMovedOntoAnotherButOneMayStayOnItsOwnPoint() {
+        // "Move here" on the corner before the scrubber was touched puts the cursor on Start.
+        assertSame(seeded, SurveyController.moveStation(seeded, geo, 4, t(0)))
+        assertSame(seeded, SurveyController.moveStation(seeded, geo, 4, t(10)))
+        assertSame(seeded, SurveyController.moveStation(seeded, geo, 4, t(30)))
+        // Its own point is no clash: moved there, the corner still becomes a user station.
+        assertNull(SurveyController.stationAt(seeded, geo, t(20), exceptId = 4))
+        assertEquals(StationKind.USER, SurveyController.moveStation(seeded, geo, 4, t(20)).station(4).kind)
+    }
+
+    @Test
     fun startEndAndMarksDoNotMove() {
-        assertSame(seeded, SurveyController.moveStation(seeded, 1, t(5)))
-        assertSame(seeded, SurveyController.moveStation(seeded, 2, t(5)))
-        assertSame(seeded, SurveyController.moveStation(seeded, 3, t(5)))
-        assertSame(seeded, SurveyController.moveStation(seeded, 99, t(5)))
+        assertSame(seeded, SurveyController.moveStation(seeded, geo, 1, t(5)))
+        assertSame(seeded, SurveyController.moveStation(seeded, geo, 2, t(5)))
+        assertSame(seeded, SurveyController.moveStation(seeded, geo, 3, t(5)))
+        assertSame(seeded, SurveyController.moveStation(seeded, geo, 99, t(5)))
     }
 
     @Test
@@ -103,7 +144,7 @@ class SurveyEditsTest {
         assertEquals(renamed.doc, SurveyController.undo(fine).doc)
 
         // Moved 2.5 m on, it leaves room for that corner, which takes C1: the old corner's name is free.
-        val moved = SurveyController.moveStation(renamed, 4, t(25))
+        val moved = SurveyController.moveStation(renamed, geo, 4, t(25))
         val movedFine = SurveyController.setDetail(moved, geo, Detail.FINE)
         assertEquals("Squeeze", movedFine.station(4).name)
         assertEquals(listOf(t(20)), movedFine.cornerTimes())
@@ -148,7 +189,7 @@ class SurveyEditsTest {
         val noCorner = SurveyController.deleteStation(seeded, 4)
         assertEquals(one, SurveyController.cornerCounts(noCorner, geo))
         // A station 0.5 m past the corner keeps any corner from being placed within 1.5 m of it.
-        val crowded = SurveyController.addStation(noCorner, t(21))
+        val crowded = SurveyController.addStation(noCorner, geo, t(21))
         val none = mapOf(Detail.COARSE to 0, Detail.NORMAL to 0, Detail.FINE to 0)
         assertEquals(none, SurveyController.cornerCounts(crowded, geo))
     }
@@ -167,8 +208,8 @@ class SurveyEditsTest {
         val readOnly = SurveyController.open(SurveyLoad.Malformed("bad"), geo).state
         val selected = tap(readOnly, 4)
         assertEquals(SurveySelection.Chain(listOf(4)), selected.selection)
-        assertSame(selected, SurveyController.addStation(selected, t(15)))
-        assertSame(selected, SurveyController.moveStation(selected, 4, t(25)))
+        assertSame(selected, SurveyController.addStation(selected, geo, t(15)))
+        assertSame(selected, SurveyController.moveStation(selected, geo, 4, t(25)))
         assertSame(selected, SurveyController.renameStation(selected, 4, "X"))
         assertSame(selected, SurveyController.deleteStation(selected, 4))
         assertSame(selected, SurveyController.setDetail(selected, geo, Detail.FINE))

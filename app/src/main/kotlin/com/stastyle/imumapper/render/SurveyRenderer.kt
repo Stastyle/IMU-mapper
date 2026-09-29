@@ -126,7 +126,7 @@ object SurveyRenderer {
             if (!projected.stationVisible[i]) continue
             val station = stations[i]
             val center = Offset(screen[i * 2], screen[i * 2 + 1])
-            val radius = radiusOf(station)
+            val radius = radiusOf(station.selected)
             val ring = (if (station.selected) SELECTED_RING_DP else RING_DP).dp.toPx()
             drawCircle(Color(station.color), radius, center)
             drawCircle(ringColor, radius, center, style = Stroke(width = ring))
@@ -138,7 +138,8 @@ object SurveyRenderer {
      * origin past the right or bottom edge. The chain number is measured first and drawn from that
      * layout, which lays nothing out against the canvas edge; it is drawn only while the station's
      * centre is on the canvas, a positive test that a NaN fails as well. Text is drawn after every
-     * circle so no station covers another one's name.
+     * circle so no station covers another one's name. Stations on one spot (End on Start after a
+     * closed loop) draw one SpotText between them, so their names and numbers never overprint.
      *
      * A mark station is named after its note, which the recorder lets run to several lines, so a
      * name is cut to one line of at most [NAME_MAX_WIDTH_DP] with an ellipsis; drawn whole it would be
@@ -151,16 +152,17 @@ object SurveyRenderer {
         val screen = projected.stationScreen
         for (i in stations.indices) {
             if (!projected.stationVisible[i]) continue
-            val station = stations[i]
+            val text = stations[i].text ?: continue
             val x = screen[i * 2]
             val y = screen[i * 2 + 1]
-            if (station.order > 0 && x >= 0f && y >= 0f && x < size.width && y < size.height) {
-                val layout = textMeasurer.measure(station.order.toString(), orderStyle)
+            if (text.order != null && x >= 0f && y >= 0f && x < size.width && y < size.height) {
+                val layout = textMeasurer.measure(text.order, orderStyle)
                 drawText(layout, topLeft = Offset(x - layout.size.width / 2f, y - layout.size.height / 2f))
             }
-            val origin = PathRenderer.labelOrigin(x + radiusOf(station), y, size.width, size.height) ?: continue
+            val radius = radiusOf(text.selected)
+            val origin = PathRenderer.labelOrigin(x + radius, y, size.width, size.height) ?: continue
             val name = textMeasurer.measure(
-                text = station.name,
+                text = text.names,
                 style = nameStyle,
                 overflow = TextOverflow.Ellipsis,
                 maxLines = 1,
@@ -170,6 +172,6 @@ object SurveyRenderer {
         }
     }
 
-    private fun DrawScope.radiusOf(station: LayerStation): Float =
-        (if (station.selected) SELECTED_RADIUS_DP else STATION_RADIUS_DP).dp.toPx()
+    private fun DrawScope.radiusOf(selected: Boolean): Float =
+        (if (selected) SELECTED_RADIUS_DP else STATION_RADIUS_DP).dp.toPx()
 }

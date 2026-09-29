@@ -95,6 +95,42 @@ class SurveyLayerTest {
     }
 
     @Test
+    fun eachStationAloneOnItsSpotCarriesItsOwnText() {
+        val layer = build(LayerSelection(chainIds = listOf(1, 4)))
+        assertEquals(SpotText("Start", order = "1", selected = true), stationOf(layer, 1).text)
+        assertEquals(SpotText("C1", order = "2", selected = true), stationOf(layer, 4).text)
+        assertEquals(SpotText("S1", order = null, selected = false), stationOf(layer, 5).text)
+    }
+
+    @Test
+    fun stationsOnOneSpotShareOneTextInsteadOfPrintingOverEachOther() {
+        // A loop closed with "Back at start" ends on the origin, give or take rounding, so End is drawn on
+        // Start; a mark made just before Stop is clamped onto the end.
+        val loop = listOf(
+            Vec3.ZERO,
+            Vec3(0.0, 10.0, 0.0),
+            Vec3(10.0, 10.0, 0.0),
+            Vec3(10.0, 0.0, 0.0),
+            Vec3(1e-12, -1e-12, 0.0),
+        ).mapIndexed { i, p -> PathPoint(tNs(i), p, PositionSource.PDR, 0.0, i - 1) }
+        val onLoop = listOf(
+            Station(id = 1, kind = StationKind.START, name = "Start", tNs = tNs(0)),
+            Station(id = 4, kind = StationKind.CORNER, name = "C1", tNs = tNs(1)),
+            Station(id = 2, kind = StationKind.MARK, name = "Exit", tNs = tNs(4)),
+            Station(id = 3, kind = StationKind.END, name = "End", tNs = tNs(4)),
+        )
+        // Start, C1, then End closes the loop: both places in the chain show on the one spot.
+        val layer = SurveyLayer.build(PathTimeline(loop), onLoop, LayerSelection(chainIds = listOf(1, 4, 3)), null)
+        assertEquals(SpotText("Start / Exit / End", order = "1/3", selected = true), stationOf(layer, 1).text)
+        assertEquals(SpotText("C1", order = "2", selected = true), stationOf(layer, 4).text)
+        assertNull(stationOf(layer, 2).text)
+        assertNull(stationOf(layer, 3).text)
+        // Only End ringed: the text still starts past the larger ring.
+        val endOnly = SurveyLayer.build(PathTimeline(loop), onLoop, LayerSelection(chainIds = listOf(3)), null)
+        assertEquals(SpotText("Start / Exit / End", order = "1", selected = true), stationOf(endOnly, 1).text)
+    }
+
+    @Test
     fun unknownChainIdsAreSkipped() {
         val layer = build(LayerSelection(chainIds = listOf(1, 99, 4)))
         assertEquals(1, stationOf(layer, 1).order)

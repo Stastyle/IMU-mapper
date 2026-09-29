@@ -4,6 +4,7 @@ import com.stastyle.imumapper.pipeline.core.Vec3
 import com.stastyle.imumapper.pipeline.survey.PathTimeline
 import com.stastyle.imumapper.pipeline.survey.Station
 import com.stastyle.imumapper.pipeline.survey.StationKind
+import kotlin.math.abs
 
 /**
  * ARGB colours of the survey layer. START and END are the scene's own, so a station reads as the
@@ -37,6 +38,23 @@ data class LayerStation(
     val color: Int,
     val selected: Boolean,
     val order: Int,
+    /** What is written by and on its spot; null when an earlier station on the same spot carries it. */
+    val text: SpotText?,
+)
+
+/**
+ * The text of the stations drawn on one spot. Usually that is one station, but End sits on Start after
+ * a loop closed with "Back at start", and a mark made before the first step or after the last sits on
+ * Start or End; their names and numbers would print over each other, so the first of them carries
+ * everything.
+ */
+data class SpotText(
+    /** Their names in traverse order, joined with " / ". */
+    val names: String,
+    /** Their places in the chain, ascending and joined with "/"; null when none is in the chain. */
+    val order: String?,
+    /** Some station on the spot is ringed, so drawn larger, and the names start past that ring. */
+    val selected: Boolean,
 )
 
 /** The selection in render terms, so render does not depend on ui.viewer. */
@@ -74,6 +92,12 @@ class SurveyLayer(
         const val MAX_PATH_VERTICES: Int = 4000
         const val MAX_STRETCH_VERTICES: Int = 2000
 
+        /**
+         * Stations this close are drawn on one spot at any zoom and share one [SpotText]. It covers the
+         * rounding that leaves End a hair off Start after a loop closure.
+         */
+        const val SAME_SPOT_M: Double = 0.01
+
         fun build(
             timeline: PathTimeline,
             stations: List<Station>,
@@ -88,14 +112,26 @@ class SurveyLayer(
             chain.forEachIndexed { k, id -> order[id] = k + 1 }
             val ringed = order.keys + selection.stretchIds
 
-            val layerStations = stations.map { s ->
+            val positions = stations.map { timeline.positionAt(it.tNs) }
+            // Keyed by the first station on each spot, with every station on it in traverse order.
+            val lead = spotLeads(positions)
+            val spots = stations.indices.groupBy({ lead[it] }, { stations[it] })
+            val layerStations = stations.mapIndexed { i, s ->
                 LayerStation(
                     id = s.id,
-                    position = timeline.positionAt(s.tNs),
+                    position = positions[i],
                     name = s.name,
                     color = SurveyColors.forKind(s.kind),
                     selected = s.id in ringed,
                     order = order[s.id] ?: 0,
+                    text = spots[i]?.let { spot ->
+                        val places = spot.mapNotNull { order[it.id] }.sorted()
+                        SpotText(
+                            names = spot.joinToString(" / ") { it.name },
+                            order = if (places.isEmpty()) null else places.joinToString("/"),
+                            selected = spot.any { it.id in ringed },
+                        )
+                    },
                 )
             }
             val positionOf = layerStations.associate { it.id to it.position }
@@ -130,6 +166,27 @@ class SurveyLayer(
                 pathCoords = flatten(keep.map { points[it].p }),
                 pathDistances = pathDistances,
             )
+        }
+
+        /**
+         * For each station, the index of the first station within [SAME_SPOT_M] of it on every axis, or
+         * its own. Quadratic, but a layer holds hundreds of stations at most and the test is a few
+         * subtractions.
+         */
+        private fun spotLeads(positions: List<Vec3>): IntArray {
+            val lead = IntArray(positions.size) { it }
+            for (i in positions.indices) {
+                if (lead[i] != i) continue
+                val p = positions[i]
+                for (j in i + 1 until positions.size) {
+                    if (lead[j] != j) continue
+                    val q = positions[j]
+                    if (abs(q.x - p.x) < SAME_SPOT_M && abs(q.y - p.y) < SAME_SPOT_M && abs(q.z - p.z) < SAME_SPOT_M) {
+                        lead[j] = i
+                    }
+                }
+            }
+            return lead
         }
 
         private fun flatten(vertices: List<Vec3>): DoubleArray {

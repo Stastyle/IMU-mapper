@@ -335,7 +335,7 @@ class ViewerSurveyTest {
     }
 
     @Test
-    fun selectedCornerMovesToTheCursorAndAStationCanBeAddedThere() = runBlocking<Unit> {
+    fun selectedCornerMovesToTheCursorAndAStationCanBeAddedNextToIt() = runBlocking<Unit> {
         val id = processedTrip(SurveyFixtures.lWalk())
         val vm = viewer(id)
         vm.toggleSurvey()
@@ -348,8 +348,39 @@ class ViewerSurveyTest {
         assertEquals(SurveyMessage("Moved C1 to the cursor", undoable = true), vm.ui.value.surveyMessage)
         assertEquals(moved, savedDoc(id).stations.single { it.id == 4 })
 
+        vm.stepSurveyCursor(1)
         vm.addStationAtCursor()
-        assertEquals(t(25), savedDoc(id).stations.single { it.name == "S1" }.tNs)
+        assertEquals(t(26), savedDoc(id).stations.single { it.name == "S1" }.tNs)
+    }
+
+    @Test
+    fun aStationOnAnotherStationsPointIsRefusedWithAMessageThatNamesIt() = runBlocking<Unit> {
+        val id = processedTrip(SurveyFixtures.lWalk())
+        val vm = viewer(id)
+        vm.toggleSurvey()
+        val seeded = savedDoc(id)
+        // Nothing changed, so there is nothing to undo.
+        fun assertRefused(text: String) = assertEquals(SurveyMessage(text, undoable = false), vm.ui.value.surveyMessage)
+
+        // The cursor starts on Start, so "+ Station" before touching the scrubber would hide under it.
+        vm.addStationAtCursor()
+        assertRefused("No station added: Start is already here")
+        // The scrubber's far end is End.
+        vm.setSurveyCursor(15.0)
+        vm.addStationAtCursor()
+        assertRefused("No station added: End is already here")
+        vm.addStationAt(5.0)
+        assertRefused("No station added: Junction 1 is already here")
+
+        // "Move here" onto Junction 1.
+        vm.surveyTap(SurveyHit.OnStation(4))
+        vm.setSurveyCursor(5.0)
+        vm.moveSelectedStationToCursor()
+        assertRefused("C1 not moved: Junction 1 is already here")
+
+        assertEquals(seeded, survey(vm).state.doc)
+        assertTrue(survey(vm).state.undo.isEmpty())
+        assertEquals(seeded, savedDoc(id))
     }
 
     @Test

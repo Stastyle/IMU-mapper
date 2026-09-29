@@ -10,6 +10,7 @@ import com.stastyle.imumapper.pipeline.survey.NorthFrame
 import com.stastyle.imumapper.pipeline.survey.NorthSolver
 import com.stastyle.imumapper.pipeline.survey.PathTimeline
 import com.stastyle.imumapper.pipeline.survey.ReferenceLine
+import com.stastyle.imumapper.pipeline.survey.Station
 import com.stastyle.imumapper.pipeline.survey.StationKind
 import com.stastyle.imumapper.pipeline.survey.StretchMeasure
 import com.stastyle.imumapper.pipeline.survey.SurveyAngles
@@ -125,6 +126,9 @@ object SurveyController {
     const val MAX_FIT_GAP_DEG: Double = 3.0
     const val LARGE_CHANGE_DEG: Double = 15.0
     const val BACK_BEARING_CHANGE_DEG: Double = 45.0
+
+    /** Stations closer than this along the path are on one point: a leg between them reads 0.0 m. */
+    const val SAME_POINT_M: Double = 0.05
 
     // --- selection, cursor and readout: none of these is an edit, so all work read-only ---
 
@@ -271,17 +275,37 @@ object SurveyController {
 
     // --- station edits and undo: each pushes one undo entry and is refused read-only ---
 
-    /** A USER station at [tNs], named after the largest S number in use. */
-    fun addStation(state: SurveyState, tNs: Long): SurveyState {
+    /**
+     * The station other than [exceptId] standing on the path point of [tNs], or null. Points are
+     * compared by distance along [geo]'s path, so a moment while the walker stood still there counts.
+     */
+    fun stationAt(state: SurveyState, geo: SurveyGeometry, tNs: Long, exceptId: Int? = null): Station? {
+        val distanceM = geo.timeline.distanceAt(tNs)
+        return SurveyStations.ordered(state.doc.stations).firstOrNull {
+            it.id != exceptId && abs(geo.timeline.distanceAt(it.tNs) - distanceM) < SAME_POINT_M
+        }
+    }
+
+    /**
+     * A USER station at [tNs], named after the largest S number in use. Refused on another station's
+     * point (see [stationAt]): it would be drawn under that one, and its 0.0 m leg would stay in the
+     * table and the CSV. The scrubber starts on Start and ends on End, so this is easy to do.
+     */
+    fun addStation(state: SurveyState, geo: SurveyGeometry, tNs: Long): SurveyState {
+        if (stationAt(state, geo, tNs) != null) return state
         val stations = state.doc.stations
         val added = SurveyStations.ordered(stations + SurveyStations.user(stations, tNs))
         return edit(state, state.doc.copy(stations = added))
     }
 
-    /** Only corners and user stations move; a moved corner becomes USER so a Detail change keeps it. */
-    fun moveStation(state: SurveyState, stationId: Int, tNs: Long): SurveyState {
+    /**
+     * Only corners and user stations move; a moved corner becomes USER so a Detail change keeps it.
+     * Refused onto another station's point, like [addStation].
+     */
+    fun moveStation(state: SurveyState, geo: SurveyGeometry, stationId: Int, tNs: Long): SurveyState {
         val station = state.doc.stations.firstOrNull { it.id == stationId } ?: return state
         if (station.kind != StationKind.CORNER && station.kind != StationKind.USER) return state
+        if (stationAt(state, geo, tNs, exceptId = stationId) != null) return state
         val moved = station.copy(kind = StationKind.USER, tNs = tNs)
         val stations = state.doc.stations.map { if (it.id == stationId) moved else it }
         return edit(state, state.doc.copy(stations = SurveyStations.ordered(stations)))

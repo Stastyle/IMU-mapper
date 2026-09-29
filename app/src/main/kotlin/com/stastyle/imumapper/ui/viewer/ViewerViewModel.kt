@@ -450,12 +450,18 @@ class ViewerViewModel(
         addStationAtTime(state.cursorNs)
     }
 
-    /** "Move here": the one selected corner or user station goes to the cursor. */
+    /** "Move here": the one selected corner or user station goes to the cursor, unless another stands there. */
     fun moveSelectedStationToCursor() {
         val state = surveyState ?: return
         val id = SurveyController.movableStationId(state) ?: return
         val name = state.doc.stations.firstOrNull { it.id == id }?.name ?: return
-        editSurvey({ "Moved $name to the cursor" }) { s, _ -> SurveyController.moveStation(s, id, s.cursorNs) }
+        editSurvey(
+            message = { "Moved $name to the cursor" },
+            refusal = { s, geometry ->
+                SurveyController.stationAt(s, geometry, s.cursorNs, exceptId = id)
+                    ?.let { "$name not moved: ${it.name} is already here" }
+            },
+        ) { s, geometry -> SurveyController.moveStation(s, geometry, id, s.cursorNs) }
     }
 
     fun renameStation(stationId: Int, name: String) =
@@ -553,9 +559,15 @@ class ViewerViewModel(
 
     fun consumeCsvShare() = _ui.update { it.copy(pendingCsv = null) }
 
+    /** Refused with a message naming the station already there, such as Start under the untouched cursor. */
     private fun addStationAtTime(tNs: Long) {
         val name = SurveyStations.nextUserName(surveyState?.doc?.stations ?: return)
-        editSurvey({ "Added $name" }) { state, _ -> SurveyController.addStation(state, tNs) }
+        editSurvey(
+            message = { "Added $name" },
+            refusal = { state, geometry ->
+                SurveyController.stationAt(state, geometry, tNs)?.let { "No station added: ${it.name} is already here" }
+            },
+        ) { state, geometry -> SurveyController.addStation(state, geometry, tNs) }
     }
 
     private fun showSurvey() {
@@ -573,18 +585,21 @@ class ViewerViewModel(
     }
 
     /**
-     * Runs one doc edit. Read-only refuses it with a message; an edit the controller refused leaves
-     * everything as it was; a real one is saved, and [message] (given the new state) offers Undo.
+     * Runs one doc edit. Read-only refuses it with a message, and so does a [refusal] that gives one;
+     * an edit the controller refused otherwise leaves everything as it was; a real one is saved, and
+     * [message] (given the new state) offers Undo.
      */
     private fun editSurvey(
         message: (SurveyState) -> String? = { null },
+        refusal: (SurveyState, SurveyGeometry) -> String? = { _, _ -> null },
         edit: (SurveyState, SurveyGeometry) -> SurveyState,
     ) {
         if (!_ui.value.surveyMode) return
         val state = surveyState ?: return
         val geometry = surveyGeometry ?: return
-        if (state.readOnly) {
-            _ui.update { it.copy(surveyMessage = SurveyMessage(READ_ONLY_MESSAGE, undoable = false)) }
+        val refused = if (state.readOnly) READ_ONLY_MESSAGE else refusal(state, geometry)
+        if (refused != null) {
+            _ui.update { it.copy(surveyMessage = SurveyMessage(refused, undoable = false)) }
             return
         }
         val next = edit(state, geometry)
