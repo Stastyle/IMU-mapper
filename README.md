@@ -28,6 +28,12 @@ such as caves.
   then it is wherever the gyro started. The path can be coloured by time, altitude or source.
   Markers and photos can be tapped. You can switch to the path before loop closure and smoothing,
   or overlay an earlier processing run.
+- **Survey mode (beta).** The ruler icon in the viewer turns the trip into a north-up plan of
+  stations: the start, the end, the marks made while walking, and every turn of the path, found
+  automatically. Tap a stretch or a chain of stations to read its length, azimuth and slope, add or
+  move stations, and export the legs as a CSV. North can be corrected with a bearing from a hand
+  compass ("this stretch is 045°") or by hand, and the whole map turns about the start without
+  re-processing. The survey is kept in `survey.json` next to the trip and travels in its ZIP.
 - **Re-processing.** Raw logs are kept, and every processing run is stored as a new version, so an
   old trip can be run again with a better algorithm or calibration.
 - **Calibration.** Guided flows measure still bias, stride (Weinberg `k`) and heading offset, run a
@@ -36,7 +42,7 @@ such as caves.
   settings and scores them before you can save them.
 - **Debug screen.** Live sensor plots, a raw-log summary, a config editor that re-processes the
   trip, and the last crash report with Copy and Share.
-- **Export and import.** A trip (raw log, every run, photos) is exported as a ZIP from the trip
+- **Export and import.** A trip (raw log, every run, photos, survey) is exported as a ZIP from the trip
   list, and a ZIP or a bare `.imul` log can be imported.
 - **Self-update** from GitHub Releases.
 
