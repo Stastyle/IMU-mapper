@@ -50,6 +50,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -235,6 +236,10 @@ fun ViewerScreen(
                         onMoveHere = vm::moveSelectedStationToCursor,
                         onShowLegs = { showLegs = true },
                         onSetAzimuth = { showSetAzimuth = true },
+                        // The panel covers the canvas's bottom, so the camera frames the plan above it.
+                        // The snackbar is left out: the view jumping when it times out would move a
+                        // station out from under a finger about to tap it.
+                        modifier = Modifier.onSizeChanged { vm.setBottomInset(it.height.toFloat()) },
                     )
                 } else if (!ui.surveyMode && shown != null) {
                     StatsPanel(shown.stats)

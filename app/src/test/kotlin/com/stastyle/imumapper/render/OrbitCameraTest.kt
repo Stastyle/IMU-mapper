@@ -3,6 +3,10 @@ package com.stastyle.imumapper.render
 import com.stastyle.imumapper.pipeline.core.Vec3
 import kotlin.math.PI
 import kotlin.math.abs
+import kotlin.math.atan
+import kotlin.math.min
+import kotlin.math.sin
+import kotlin.math.tan
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -74,6 +78,95 @@ class OrbitCameraTest {
                         assertTrue(projector.isInsideViewport(p.x, p.y), "$preset corner $x $y $z at ${p.x},${p.y}")
                     }
                 }
+            }
+        }
+    }
+
+    @Test
+    fun noInsetFitsAsBefore() {
+        val bounds = Bounds(Vec3(-12.0, -3.0, -1.0), Vec3(20.0, 30.0, 4.0))
+        for ((w, h) in listOf(width to height, height to width)) {
+            for (preset in CameraPreset.entries) {
+                val start = OrbitCamera(yawRad = 1.1, pitchRad = 0.3)
+                val cam = start.withPreset(preset, bounds, w, h)
+                assertEquals(cam, start.withPreset(preset, bounds, w, h, bottomInsetPx = 0f))
+                assertEquals(bounds.center, cam.target)
+                // The fit the viewer always had: the bounding sphere inside the narrower field of view, plus 8 %.
+                val fovX = 2.0 * atan(tan(cam.fovYRad / 2.0) * (w / h))
+                val expected = bounds.radius / sin(min(cam.fovYRad, fovX) / 2.0) * 1.08
+                assertEquals(expected, cam.distance, 1e-9 * expected)
+            }
+        }
+    }
+
+    @Test
+    fun insetFitCentresAFlatPlanInTheBandAboveThePanel() {
+        val plan = Bounds(Vec3(-12.0, -3.0, 0.0), Vec3(20.0, 30.0, 0.0))
+        for (inset in listOf(300f, 700f, 1100f)) {
+            val cam = OrbitCamera().withPreset(CameraPreset.TOP, plan, width, height, bottomInsetPx = inset)
+            val projector = Projector(cam, width, height)
+            val centre = assertNotNull(projector.project(plan.center))
+            assertEquals(width / 2f, centre.x, 0.5f)
+            assertEquals((height - inset) / 2f, centre.y, 0.5f)
+            val ys = cornersOf(plan).map { assertNotNull(projector.project(it)).y }
+            assertTrue(ys.min() >= 0f && ys.max() <= height - inset, "inset $inset: ${ys.min()}..${ys.max()}")
+            assertEquals((height - inset) / 2f, (ys.min() + ys.max()) / 2f, 0.5f)
+        }
+    }
+
+    @Test
+    fun insetFitKeepsEveryCornerAboveThePanel() {
+        val bounds = Bounds(Vec3(-12.0, -3.0, -1.0), Vec3(20.0, 30.0, 4.0))
+        for ((w, h) in listOf(width to height, height to width)) {
+            for (inset in listOf(200f, h * 0.4f, h * 0.7f)) {
+                for (preset in CameraPreset.entries) {
+                    val cam = OrbitCamera(yawRad = 1.1, pitchRad = 0.3).withPreset(preset, bounds, w, h, inset)
+                    val projector = Projector(cam, w, h)
+                    for (corner in cornersOf(bounds)) {
+                        val p = assertNotNull(projector.project(corner), "$corner behind camera")
+                        val where = "${w}x$h inset $inset $preset corner $corner at ${p.x},${p.y}"
+                        assertTrue(p.x >= 0f && p.x <= w && p.y >= 0f && p.y <= h - inset, where)
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    fun anInsetTallerThanTheViewportStillLeavesAQuarterForThePlan() {
+        val plan = Bounds(Vec3(-12.0, -3.0, 0.0), Vec3(20.0, 30.0, 0.0))
+        val cam = OrbitCamera().withPreset(CameraPreset.TOP, plan, width, height, bottomInsetPx = 5000f)
+        val projector = Projector(cam, width, height)
+        val ys = cornersOf(plan).map { assertNotNull(projector.project(it)).y }
+        assertTrue(ys.min() >= 0f && ys.max() <= height / 4f, "corners span ${ys.min()}..${ys.max()}")
+    }
+
+    @Test
+    fun aChangedInsetMovesTheViewByHalfTheChange() {
+        val cam = OrbitCamera(
+            target = Vec3(2.0, 3.0, 0.0),
+            distance = 30.0,
+            yawRad = 0.4,
+            pitchRad = OrbitCamera.MAX_PITCH_RAD,
+        )
+        val point = Vec3(5.0, -4.0, 0.0)
+        val before = assertNotNull(Projector(cam, width, height).project(point))
+        // The panel grows by 400 px: what was centred above it stays centred, 200 px higher, at the same zoom.
+        val grown = cam.shiftedForInset(300f, 700f, height)
+        val after = assertNotNull(Projector(grown, width, height).project(point))
+        assertEquals(before.x, after.x, 0.01f)
+        assertEquals(before.y - 200f, after.y, 0.01f)
+        assertEquals(cam.distance, grown.distance)
+        // Shrinking back returns the view to where it was, so a selection made and cleared does not drift it.
+        val back = grown.shiftedForInset(700f, 300f, height)
+        assertEquals(0.0, (back.target - cam.target).length, 1e-9)
+        assertEquals(cam, cam.shiftedForInset(300f, 300f, height))
+    }
+
+    private fun cornersOf(bounds: Bounds): List<Vec3> = buildList {
+        for (x in listOf(bounds.min.x, bounds.max.x)) {
+            for (y in listOf(bounds.min.y, bounds.max.y)) {
+                for (z in listOf(bounds.min.z, bounds.max.z)) add(Vec3(x, y, z))
             }
         }
     }

@@ -21,8 +21,10 @@ import com.stastyle.imumapper.pipeline.survey.StationKind
 import com.stastyle.imumapper.pipeline.survey.SurveyCsv
 import com.stastyle.imumapper.pipeline.survey.SurveyDoc
 import com.stastyle.imumapper.process.TripProcessor
+import com.stastyle.imumapper.render.Bounds
 import com.stastyle.imumapper.render.LayerSelection
 import com.stastyle.imumapper.render.OrbitCamera
+import com.stastyle.imumapper.render.Projector
 import com.stastyle.imumapper.render.SurveyHit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -123,6 +125,18 @@ class ViewerSurveyTest {
 
     private fun t(index: Int): Long = SurveyFixtures.tNs(index)
 
+    private fun planPoints(vm: ViewerViewModel): List<Vec3> = assertNotNull(vm.ui.value.sceneResult).points.map { it.p }
+
+    /** Every point of the drawn plan is on screen above the panel's top edge at [panelTop], and centred there. */
+    private fun assertPlanAbove(vm: ViewerViewModel, panelTop: Float) {
+        val projector = Projector(vm.camera.value, 1080f, 1920f)
+        val projected = planPoints(vm).map { assertNotNull(projector.project(it)) }
+        val ys = projected.map { it.y }
+        assertTrue(projected.all { it.x in 0f..1080f }, "plan leaves the sides")
+        assertTrue(ys.min() >= 0f && ys.max() <= panelTop, "plan spans ${ys.min()}..${ys.max()}, panel at $panelTop")
+        assertEquals(panelTop / 2f, (ys.min() + ys.max()) / 2f, 1f)
+    }
+
     private fun assertNear(expected: Vec3, actual: Vec3) {
         assertEquals(expected.x, actual.x, 1e-9)
         assertEquals(expected.y, actual.y, 1e-9)
@@ -174,6 +188,49 @@ class ViewerSurveyTest {
         vm.toggleSurvey()
         assertSame(doc, survey(vm).state.doc)
         assertFalse(files.surveyFile(id).exists())
+    }
+
+    @Test
+    fun thePlanIsFramedAboveTheSurveyPanel() = runBlocking<Unit> {
+        val id = processedTrip(SurveyFixtures.lWalk())
+        val vm = viewer(id)
+        vm.toggleSurvey()
+        // The panel is measured once it is drawn, after the Top view was set: the untouched view is fitted again.
+        vm.setBottomInset(700f)
+        assertPlanAbove(vm, panelTop = 1220f)
+        // A selection's readout grows the panel; nobody moved the fitted view, so it is fitted again.
+        vm.setBottomInset(900f)
+        assertPlanAbove(vm, panelTop = 1020f)
+        // Double-tap fits above the panel too.
+        vm.pan(300f, -600f)
+        vm.fitToPath()
+        assertPlanAbove(vm, panelTop = 1020f)
+    }
+
+    @Test
+    fun aMovedViewFollowsThePanelByHalfItsChangeAndLeavingKeepsIt() = runBlocking<Unit> {
+        val id = processedTrip(SurveyFixtures.lWalk())
+        val vm = viewer(id)
+        vm.toggleSurvey()
+        vm.setBottomInset(700f)
+        vm.zoom(2f)
+        val corner = Vec3(0.0, 10.0, 0.0)
+        val before = assertNotNull(Projector(vm.camera.value, 1080f, 1920f).project(corner))
+        val distance = vm.camera.value.distance
+
+        // The user zoomed, so the panel growing does not refit: the view moves up by half the growth.
+        vm.setBottomInset(900f)
+        val after = assertNotNull(Projector(vm.camera.value, 1080f, 1920f).project(corner))
+        assertEquals(before.x, after.x, 0.01f)
+        assertEquals(before.y - 100f, after.y, 0.01f)
+        assertEquals(distance, vm.camera.value.distance)
+
+        val camera = vm.camera.value
+        vm.toggleSurvey()
+        assertEquals(camera, vm.camera.value)
+        // Outside Survey mode nothing covers the path, so a double-tap fits the whole canvas as before.
+        vm.fitToPath()
+        assertEquals(Bounds.of(planPoints(vm)).center, vm.camera.value.target)
     }
 
     @Test

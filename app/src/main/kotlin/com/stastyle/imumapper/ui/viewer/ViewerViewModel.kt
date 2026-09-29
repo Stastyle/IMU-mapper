@@ -161,6 +161,12 @@ class ViewerViewModel(
     /** The first result to arrive is framed once the viewport size is known. */
     private var needsFit = true
     private var currentBounds: Bounds = Bounds.EMPTY
+    /** Height of the survey panel over the bottom of the canvas, as last measured. */
+    private var surveyPanelPx = 0f
+    /** What fits keep the path clear of: the survey panel in Survey mode, nothing outside it (as before). */
+    private val bottomInset: Float get() = if (_ui.value.surveyMode) surveyPanelPx else 0f
+    /** The camera the last fit or preset produced; while the view is still that one, a panel change refits. */
+    private var lastFit: OrbitCamera? = null
 
     // Survey mode. Declared before init, which may already publish a loaded run.
     /** Kept after leaving Survey mode, so undo survives a re-entry; null until the mode first opens. */
@@ -344,9 +350,27 @@ class ViewerViewModel(
         if (changed && needsFit) fitIfPossible()
     }
 
+    /**
+     * The survey panel's measured height. Fits and presets frame the plan above it in Survey mode, and
+     * when it changes there (a selection's readout grows it) the view follows: a view nobody moved since
+     * the last fit is fitted again, and a moved one keeps its zoom and moves by half the change.
+     */
+    fun setBottomInset(heightPx: Float) {
+        val old = bottomInset
+        surveyPanelPx = heightPx.coerceAtLeast(0f)
+        val now = bottomInset
+        if (now == old || viewportHeight <= 0f) return
+        if (_camera.value == lastFit) {
+            fitToPath()
+        } else {
+            _camera.update { it.shiftedForInset(old, now, viewportHeight) }
+        }
+    }
+
     private fun fitIfPossible() {
         if (viewportWidth <= 0f || _ui.value.result == null) return
-        _camera.update { it.fitted(currentBounds, viewportWidth, viewportHeight) }
+        _camera.update { it.fitted(currentBounds, viewportWidth, viewportHeight, bottomInset) }
+        lastFit = _camera.value
         needsFit = false
     }
 
@@ -365,12 +389,14 @@ class ViewerViewModel(
 
     fun fitToPath() {
         if (viewportWidth <= 0f) return
-        _camera.update { it.fitted(currentBounds, viewportWidth, viewportHeight) }
+        _camera.update { it.fitted(currentBounds, viewportWidth, viewportHeight, bottomInset) }
+        lastFit = _camera.value
     }
 
     fun applyPreset(preset: CameraPreset) {
         if (viewportWidth <= 0f) return
-        _camera.update { it.withPreset(preset, currentBounds, viewportWidth, viewportHeight) }
+        _camera.update { it.withPreset(preset, currentBounds, viewportWidth, viewportHeight, bottomInset) }
+        lastFit = _camera.value
     }
 
     // --- survey mode ---
