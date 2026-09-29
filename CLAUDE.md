@@ -21,11 +21,16 @@ optionally ARCore, and shows the route as a 3D line, for mapping places without 
   - `pdr` and `vio`: the two processors.
   - `post`: loop closure, smoothing, `PathBuilder`.
   - `tuning`: the assisted-tuning prompt, parser and score.
+  - `survey`: Survey mode's pure math (time placement on a path, measurements, corners, the north
+    solve and frame, the traverse, the CSV text). The processor never runs it, so a change there
+    needs no `PIPELINE_VERSION` bump and no `replay.py` port.
 
   `DefaultProcessor` runs VIO when any ARCore pose is TRACKING, otherwise PDR.
 - `app/`: Android app `com.stastyle.imumapper`:
   - `capture/`: the recorder and ARCore.
-  - `data/`: Room, trip files, ZIP export/import.
+  - `data/`: Room, trip files, ZIP export/import, and `SurveyStore` for
+    `files/trips/<id>/survey.json`: the per-trip Survey mode facts (stations, compass readings, the
+    manual rotation). It is user state, not a run, and travels in the ZIP export.
   - `process/TripProcessor`.
   - `render/`: pure scene and camera code (`PathScene`, `OrbitCamera`) and the Compose drawing in
     `PathRenderer`.
