@@ -229,6 +229,40 @@ class SurveyFormatTest {
         assertEquals(listOf("Total", "", "136.4", "", "", "+2.0", "150.1"), SurveyFormat.totalsRow(totals))
     }
 
+    /**
+     * The Δh column holds about 34 dp at 384 dp, and "+123.4" needs about 38, so it was cut to "+12…",
+     * which reads as 12 m. From 100 m on the table drops the tenths; the readout and copied line keep them.
+     */
+    @Test
+    fun legsTableShowsAHundredMetresOrMoreOfHeightInWholeMetres() {
+        val from = Station(id = 1, kind = StationKind.START, name = "Start", tNs = 0L)
+        val to = Station(id = 2, kind = StationKind.END, name = "End", tNs = 1L)
+        fun heightCell(m: Double) = SurveyFormat.tableRow(TraverseLeg(from, to, leg.copy(heightChangeM = m)))[5]
+        fun totalCell(m: Double) =
+            SurveyFormat.totalsRow(LegTotals(lengthM = 900.0, horizontalM = 850.0, heightChangeM = m, pathM = 950.0))[5]
+
+        assertEquals("+123", heightCell(123.4))
+        assertEquals("-123", heightCell(-123.4))
+        assertEquals("+123", totalCell(123.4))
+        assertEquals("-123", totalCell(-123.4))
+        assertEquals("-1235", totalCell(-1234.6))
+        // Below 100 m the tenths stay; 99.96 rounds to 100.0, so it is shown whole, never as "+100.0".
+        assertEquals("+99.9", totalCell(99.94))
+        assertEquals("-99.9", totalCell(-99.94))
+        assertEquals("+100", totalCell(99.96))
+        assertEquals("-100", heightCell(-99.96))
+        // The whole metres come from the value itself, not from the tenths: 123.45 is 123, not 124.
+        assertEquals("+123", totalCell(123.45))
+        assertEquals("+0.0", totalCell(-0.04))
+        // The readout and the copied line keep the tenths.
+        assertEquals("+123.4", SurveyFormat.signedMetres(123.4))
+        assertEquals(true, SurveyFormat.details(leg.copy(heightChangeM = 123.4)).contains("Δh +123.4"))
+        assertEquals(
+            true,
+            SurveyFormat.copyLine("Start", "End", leg.copy(heightChangeM = 123.4), magnetic = true).contains("(Δh +123.4 m)"),
+        )
+    }
+
     /** The azimuth cells carry no suffix and a narrow header can wrap, so the title always says which north. */
     @Test
     fun legsTitleSaysWhichNorthTheAzimuthsAreFrom() {

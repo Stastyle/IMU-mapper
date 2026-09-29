@@ -260,6 +260,8 @@ private const val NAME_LINES = 2
 /**
  * From, To, Length, Azimuth, Slope, Δh, Path. Azimuth cells are short ("047°"), but at 384 dp the column
  * still fits the word "Azimuth" in the header, with the M or R on a second line when it wraps. Length and
- * Slope fit their header on one line there too.
+ * Slope fit their header on one line there too. Δh holds about 39 dp there, room for "+99.9" at a 1.2x
+ * font and for "+123" ([SurveyFormat.tableHeight]) at 1.3x; the name columns give none of it up, since
+ * "Waypoint" needs nearly all of their 55 dp to stay on one line.
  */
-private val COLUMN_WEIGHTS = floatArrayOf(1.3f, 1.3f, 1.05f, 1.3f, 0.9f, 0.85f, 1.1f)
+private val COLUMN_WEIGHTS = floatArrayOf(1.3f, 1.3f, 1.05f, 1.25f, 0.85f, 0.95f, 1.1f)

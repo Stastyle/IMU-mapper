@@ -39,6 +39,14 @@ object SurveyFormat {
     /** Height changes carry their sign even at zero, so up and down read alike. */
     fun signedMetres(m: Double): String = String.format(Locale.US, "%+.1f", tenths(m))
 
+    /**
+     * The legs table's Δh: [signedMetres] below 100 m, whole metres from there ("+123", "-1235"). The
+     * column is narrow, and "+123.4" in it was cut to "+12…", which reads as 12 m. The whole metres
+     * are rounded from [m] itself, so 123.45 is 123; the threshold is on the tenths, so 99.96 is "+100".
+     */
+    fun tableHeight(m: Double): String =
+        if (Math.abs(tenths(m)) < 100.0) signedMetres(m) else String.format(Locale.US, "%+d", Math.round(m))
+
     /** Three digits like a compass card; 359.6 rounds to 000, not 360. */
     fun azimuth(deg: Double?, magnetic: Boolean): String {
         val whole = wholeAzimuth(deg) ?: return DASH
@@ -154,14 +162,14 @@ object SurveyFormat {
             number(m.lengthM),
             azimuth,
             signedDegrees(m.slopeDeg),
-            signedMetres(m.heightChangeM),
+            tableHeight(m.heightChangeM),
             pathNumber(m),
         )
     }
 
     /** Height changes sum to the net climb; azimuth and slope have no meaningful sum. */
     fun totalsRow(totals: LegTotals): List<String> =
-        listOf("Total", "", number(totals.lengthM), "", "", signedMetres(totals.heightChangeM), number(totals.pathM))
+        listOf("Total", "", number(totals.lengthM), "", "", tableHeight(totals.heightChangeM), number(totals.pathM))
 
     /** A typed angle: a comma works as the decimal point (the keypad offers one), and NaN is refused. */
     fun parseDegrees(text: String): Double? =
