@@ -575,6 +575,47 @@ class ViewerSurveyTest {
         assertEquals("{ not json", files.surveyFile(id).readText())
     }
 
+    @Test
+    fun startOverKeepsTheUnreadableFileAndSeedsASurveyThatSaves() = runBlocking<Unit> {
+        val id = processedTrip(SurveyFixtures.lWalk())
+        files.surveyFile(id).writeText("{ not json")
+        val vm = viewer(id)
+        vm.toggleSurvey()
+        assertTrue(survey(vm).state.readOnly)
+
+        vm.startSurveyOver()
+
+        val survey = survey(vm)
+        assertFalse(survey.state.readOnly)
+        assertNull(survey.error)
+        assertEquals(listOf("Start", "Junction 1", "C1", "End"), survey.state.doc.stations.map { it.name })
+        assertEquals(survey.state.doc, savedDoc(id))
+        assertEquals("{ not json", File(files.tripDir(id), "survey.json.bad-1").readText())
+        assertEquals(
+            SurveyMessage("Started over. The unreadable file is kept as survey.json.bad-1", undoable = false),
+            vm.ui.value.surveyMessage,
+        )
+        // Edits are no longer refused, and they reach the file.
+        vm.renameStation(1, "Entrance")
+        assertEquals("Entrance", savedDoc(id).stations.single { it.id == 1 }.name)
+    }
+
+    @Test
+    fun startOverDoesNothingWhenTheSurveyWasRead() = runBlocking<Unit> {
+        val id = processedTrip(SurveyFixtures.lWalk())
+        val vm = viewer(id)
+        vm.toggleSurvey()
+        vm.renameStation(1, "Entrance")
+        val state = survey(vm).state
+        val saved = files.surveyFile(id).readText()
+
+        vm.startSurveyOver()
+
+        assertSame(state, survey(vm).state)
+        assertEquals(saved, files.surveyFile(id).readText())
+        assertEquals(listOf(TripFiles.SURVEY_NAME), files.tripDir(id).list()!!.filter { it.startsWith("survey") })
+    }
+
     // --- north, the manual-rotation prompt and the CSV ---
 
     @Test

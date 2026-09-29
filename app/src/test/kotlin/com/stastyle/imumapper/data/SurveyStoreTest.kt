@@ -16,9 +16,14 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-/** survey.json in a temp directory: what load reports, and that save never leaves half a file behind. */
+/**
+ * survey.json in a temp directory: what load reports, that save never leaves half a file behind, and
+ * that Start over keeps an unreadable file under a new name.
+ */
 class SurveyStoreTest {
 
     private lateinit var tmp: File
@@ -125,5 +130,51 @@ class SurveyStoreTest {
         val load = assertIs<SurveyLoad.Malformed>(store.load(tripId))
         assertTrue(load.message.isNotBlank())
         assertTrue(dir.isDirectory, "the directory is left as it is")
+    }
+
+    // --- Start over: an unreadable file is kept under a new name, never overwritten ---
+
+    @Test
+    fun setAsideKeepsAnUnreadableFileUnderANewNameAndTheNextLoadSeeds() {
+        // What a power cut can leave: the rename reached the disk, the data did not.
+        val zeros = "\u0000".repeat(64)
+        files.surveyFile(tripId).writeText(zeros)
+        assertIs<SurveyLoad.Malformed>(store.load(tripId))
+
+        val kept = assertNotNull(store.setAside(tripId))
+        assertEquals(File(files.tripDir(tripId), "survey.json.bad-1"), kept)
+        assertEquals(zeros, kept.readText())
+        assertEquals(SurveyLoad.Missing, store.load(tripId))
+
+        store.save(tripId, doc)
+        assertEquals(SurveyLoad.Loaded(doc), store.load(tripId))
+        assertEquals(zeros, kept.readText(), "saving the new survey leaves the kept file alone")
+    }
+
+    @Test
+    fun setAsideNeverOverwritesAFileSetAsideBefore() {
+        files.surveyFile(tripId).writeText("first")
+        store.setAside(tripId)
+        files.surveyFile(tripId).writeText("second")
+
+        val kept = assertNotNull(store.setAside(tripId))
+        assertEquals("survey.json.bad-2", kept.name)
+        assertEquals("second", kept.readText())
+        assertEquals("first", File(files.tripDir(tripId), "survey.json.bad-1").readText())
+        assertEquals(SurveyLoad.Missing, store.load(tripId))
+    }
+
+    @Test
+    fun setAsideMovesADirectoryInTheFilesPlaceToo() {
+        files.surveyFile(tripId).mkdirs()
+        val kept = assertNotNull(store.setAside(tripId))
+        assertTrue(kept.isDirectory)
+        assertEquals(SurveyLoad.Missing, store.load(tripId))
+    }
+
+    @Test
+    fun setAsideWithoutAFileDoesNothing() {
+        assertNull(store.setAside(tripId))
+        assertEquals(emptyList(), files.tripDir(tripId).list()!!.toList())
     }
 }

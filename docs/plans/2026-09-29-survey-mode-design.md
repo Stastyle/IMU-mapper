@@ -218,8 +218,10 @@ The survey stores facts; the rotation is solved from them for whichever run is s
 - It holds facts only: stations (id, kind, name, `tNs`), references, the manual rotation and its
   run id, and Detail. Every field has a default, it is read with `ignoreUnknownKeys`, and it holds no
   NaN and no derived value. A `formatVersion` field starts at 1.
-- Written to a temp file and renamed, as `TripProcessor.writeAtomically` does, after each edit.
-- A malformed file puts Survey mode into read-only with an error, and is never overwritten.
+- Written to a temp file and renamed after each edit (`AtomicFiles`). The temp file is synced to the
+  disk before the rename, so a power cut just after an edit cannot leave a renamed file of zeros.
+- A malformed file puts Survey mode into read-only with an error, and is never overwritten. The
+  error banner's Start over renames it to `survey.json.bad-<n>`, keeping it, and seeds a new survey.
 - It is user state, not a run, so "runs are never overwritten" still holds. Deleting a trip removes
   its directory and so the file.
 - The ZIP export includes it, and the import restores it. `MANIFEST_VERSION` stays 1; an older build

@@ -21,7 +21,9 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.SquareFoot
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.ViewInAr
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -95,6 +97,7 @@ fun ViewerScreen(
     var showDetail by remember { mutableStateOf(false) }
     var showSetAzimuth by remember { mutableStateOf(false) }
     var showNorth by remember { mutableStateOf(false) }
+    var confirmStartOver by remember { mutableStateOf(false) }
     var stationSheetId by remember { mutableStateOf<Int?>(null) }
     // Stations drawn on one spot under a long press: the user picks which one the sheet is for.
     var stationChoiceIds by remember { mutableStateOf<List<Int>?>(null) }
@@ -206,7 +209,11 @@ fun ViewerScreen(
                 StatusOverlay(ui, vm, modifier = Modifier.align(Alignment.Center))
             }
             if (survey != null) {
-                SurveyBanners(survey, modifier = Modifier.align(Alignment.TopCenter))
+                SurveyBanners(
+                    survey,
+                    onStartOver = { confirmStartOver = true },
+                    modifier = Modifier.align(Alignment.TopCenter),
+                )
             }
             Column(modifier = Modifier.align(Alignment.BottomCenter)) {
                 // The snackbar stacks above the panels instead of covering them (a Scaffold host would):
@@ -348,6 +355,15 @@ fun ViewerScreen(
                 onAnswer = vm::answerManualRotation,
             )
         }
+        if (confirmStartOver && survey.state.readOnly) {
+            StartOverDialog(
+                onConfirm = {
+                    confirmStartOver = false
+                    vm.startSurveyOver()
+                },
+                onDismiss = { confirmStartOver = false },
+            )
+        }
     }
 }
 
@@ -452,9 +468,12 @@ private fun SurveyMenu(ui: ViewerUiState, vm: ViewerViewModel, onDetail: () -> U
     }
 }
 
-/** A read-only survey and an arbitrary north are said at the top, where the plan is not covered by the panel. */
+/**
+ * A read-only survey and an arbitrary north are said at the top, where the plan is not covered by the
+ * panel. The read-only one offers Start over, so an unreadable survey.json does not lock the trip's survey.
+ */
 @Composable
-private fun SurveyBanners(survey: SurveyUi, modifier: Modifier = Modifier) {
+private fun SurveyBanners(survey: SurveyUi, onStartOver: () -> Unit, modifier: Modifier = Modifier) {
     val error = survey.error
     val north = survey.northWarning
     if (error == null && north == null) return
@@ -463,7 +482,13 @@ private fun SurveyBanners(survey: SurveyUi, modifier: Modifier = Modifier) {
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         if (error != null) {
-            Banner(error, MaterialTheme.colorScheme.errorContainer, MaterialTheme.colorScheme.onErrorContainer)
+            Banner(
+                error,
+                MaterialTheme.colorScheme.errorContainer,
+                MaterialTheme.colorScheme.onErrorContainer,
+                actionLabel = "Start over",
+                onAction = onStartOver,
+            )
         }
         if (north != null) {
             Banner(
@@ -477,15 +502,48 @@ private fun SurveyBanners(survey: SurveyUi, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun Banner(text: String, container: Color, content: Color) {
+private fun Banner(
+    text: String,
+    container: Color,
+    content: Color,
+    actionLabel: String? = null,
+    onAction: () -> Unit = {},
+) {
     Surface(
         color = container,
         contentColor = content,
         shape = MaterialTheme.shapes.medium,
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Text(text, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(12.dp, 8.dp))
+        Column {
+            Text(text, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(12.dp, 8.dp))
+            if (actionLabel != null) {
+                TextButton(
+                    onClick = onAction,
+                    colors = ButtonDefaults.textButtonColors(contentColor = content),
+                    modifier = Modifier.align(Alignment.End),
+                ) { Text(actionLabel) }
+            }
+        }
     }
+}
+
+/** Start over keeps the unreadable file, so the dialog says that nothing is deleted. */
+@Composable
+private fun StartOverDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Start the survey over?") },
+        text = {
+            Text(
+                "The stations, names and compass readings in survey.json cannot be read. Starting over " +
+                    "renames that file and keeps it with the trip, so nothing is deleted, then starts a " +
+                    "new survey from the automatic stations. Its edits are saved again.",
+            )
+        },
+        confirmButton = { TextButton(onClick = onConfirm) { Text("Start over") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 @Composable

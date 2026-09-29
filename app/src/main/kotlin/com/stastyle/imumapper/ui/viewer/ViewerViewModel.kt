@@ -7,6 +7,7 @@ import android.media.ExifInterface
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.stastyle.imumapper.data.SurveyCsvFile
+import com.stastyle.imumapper.data.SurveyLoad
 import com.stastyle.imumapper.data.SurveyStore
 import com.stastyle.imumapper.data.TripFiles
 import com.stastyle.imumapper.data.TripRepository
@@ -187,6 +188,8 @@ class ViewerViewModel(
     private var boundsSource: PathResult? = null
     /** Why survey.json could not be read; shown while the survey is read-only. */
     private var surveyError: String? = null
+    /** A Start over is moving survey.json aside; a second one must not move the survey it then seeds. */
+    private var startingOver = false
     /** The raw log's START, read with survey.json; see SurveyUi.tripStartNs. */
     private var tripStartNs: Long? = null
     /** "Not now" on the manual-rotation prompt, for this run and this screen only. */
@@ -446,18 +449,60 @@ class ViewerViewModel(
             // Leaving while the file was read, or a second entry that got there first, makes this load stale.
             if (!_ui.value.surveyMode || surveyState != null) return@launch
             tripStartNs = startNs
-            val ui = _ui.value
-            val current = ui.shownResult?.takeIf { it.points.isNotEmpty() } ?: return@launch
-            val runId = ui.selectedRunId ?: return@launch
-            // A new doc has no correction yet, so it is seeded on the uncorrected path.
-            val geometry = SurveyGeometry.of(current, runId, raw = ui.showRaw && ui.rawResult != null)
-            val opened = SurveyController.open(load, geometry)
-            surveyGeometry = geometry
-            surveyState = opened.state
-            surveyError = opened.error
-            if (opened.seeded) persist(opened.state.doc)
-            showSurvey()
+            if (openSurvey(load)) showSurvey()
         }
+    }
+
+    /**
+     * The read-only banner's Start over. survey.json is renamed to survey.json.bad-<n>, so the unreadable
+     * file is kept and never overwritten, and a new survey is seeded and saved as on a first entry. The
+     * camera stays where it is. Nothing happens unless the survey is read-only.
+     */
+    fun startSurveyOver() {
+        val state = surveyState
+        if (!_ui.value.surveyMode || state == null || !state.readOnly || startingOver) return
+        startingOver = true
+        viewModelScope.launch {
+            try {
+                val kept = runCatching { withContext(ioDispatcher) { surveys.setAside(tripId) } }.getOrElse { e ->
+                    val message = SurveyMessage("Could not start over: ${describe(e)}", undoable = false)
+                    _ui.update { it.copy(surveyMessage = message) }
+                    return@launch
+                }
+                // The file is gone either way, so a survey left in memory would be the unreadable one.
+                surveyState = null
+                surveyError = null
+                beforeTap = null
+                afterTap = null
+                if (_ui.value.surveyMode) openSurvey(SurveyLoad.Missing)
+                publishSurvey()
+                val text = if (kept != null) {
+                    "Started over. The unreadable file is kept as ${kept.name}"
+                } else {
+                    "Started over"
+                }
+                _ui.update { it.copy(surveyMessage = SurveyMessage(text, undoable = false)) }
+            } finally {
+                startingOver = false
+            }
+        }
+    }
+
+    /**
+     * Opens [load] on the shown run, saving a newly seeded doc; false when nothing is shown. A new doc has
+     * no correction yet, so it is seeded on the uncorrected path.
+     */
+    private fun openSurvey(load: SurveyLoad): Boolean {
+        val ui = _ui.value
+        val current = ui.shownResult?.takeIf { it.points.isNotEmpty() } ?: return false
+        val runId = ui.selectedRunId ?: return false
+        val geometry = SurveyGeometry.of(current, runId, raw = ui.showRaw && ui.rawResult != null)
+        val opened = SurveyController.open(load, geometry)
+        surveyGeometry = geometry
+        surveyState = opened.state
+        surveyError = opened.error
+        if (opened.seeded) persist(opened.state.doc)
+        return true
     }
 
     /** A tap in Survey mode: a station extends the chain, the path selects a stretch, a miss does nothing. */
