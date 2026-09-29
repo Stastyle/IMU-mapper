@@ -3,6 +3,7 @@ package com.stastyle.imumapper.ui.viewer
 import com.stastyle.imumapper.data.SurveyLoad
 import com.stastyle.imumapper.pipeline.core.PathResult
 import com.stastyle.imumapper.pipeline.survey.ChainMeasure
+import com.stastyle.imumapper.pipeline.survey.Detail
 import com.stastyle.imumapper.pipeline.survey.Measure
 import com.stastyle.imumapper.pipeline.survey.NorthFrame
 import com.stastyle.imumapper.pipeline.survey.PathTimeline
@@ -114,6 +115,7 @@ data class AzimuthPreview(
 object SurveyController {
     const val PATH_START_NAME: String = "Path start"
     const val PATH_END_NAME: String = "Path end"
+    const val MAX_UNDO: Int = 50
 
     // --- selection, cursor and readout: none of these is an edit, so all work read-only ---
 
@@ -241,6 +243,58 @@ object SurveyController {
         }
     }
 
+    // --- station edits and undo: each pushes one undo entry and is refused read-only ---
+
+    /** A USER station at [tNs], named after the largest S number in use. */
+    fun addStation(state: SurveyState, tNs: Long): SurveyState {
+        val stations = state.doc.stations
+        val added = SurveyStations.ordered(stations + SurveyStations.user(stations, tNs))
+        return edit(state, state.doc.copy(stations = added))
+    }
+
+    /** Only corners and user stations move; a moved corner becomes USER so a Detail change keeps it. */
+    fun moveStation(state: SurveyState, stationId: Int, tNs: Long): SurveyState {
+        val station = state.doc.stations.firstOrNull { it.id == stationId } ?: return state
+        if (station.kind != StationKind.CORNER && station.kind != StationKind.USER) return state
+        val moved = station.copy(kind = StationKind.USER, tNs = tNs)
+        val stations = state.doc.stations.map { if (it.id == stationId) moved else it }
+        return edit(state, state.doc.copy(stations = SurveyStations.ordered(stations)))
+    }
+
+    /** Trimmed; a blank name is refused, since the table and the CSV name every leg by its stations. */
+    fun renameStation(state: SurveyState, stationId: Int, name: String): SurveyState {
+        val trimmed = name.trim()
+        if (trimmed.isEmpty()) return state
+        val stations = state.doc.stations.map { if (it.id == stationId) it.copy(name = trimmed) else it }
+        return edit(state, state.doc.copy(stations = stations))
+    }
+
+    /** No tombstone: a deleted corner comes back only when Detail changes. */
+    fun deleteStation(state: SurveyState, stationId: Int): SurveyState =
+        edit(state, state.doc.copy(stations = state.doc.stations.filter { it.id != stationId }))
+
+    /** Regenerates the corners on the shown path; new corners may reuse ids, so the selection is cleared. */
+    fun setDetail(state: SurveyState, geo: SurveyGeometry, detail: Detail): SurveyState {
+        if (detail == state.doc.detail) return state
+        val stations = SurveyStations.regenerateCorners(state.doc.stations, geo.timeline, detail)
+        val next = edit(state, state.doc.copy(detail = detail, stations = stations))
+        return if (next === state) state else next.copy(selection = SurveySelection.None)
+    }
+
+    /** How many corners each Detail would give now, so the dialog shows the effect before the choice. */
+    fun cornerCounts(state: SurveyState, geo: SurveyGeometry): Map<Detail, Int> =
+        Detail.entries.associateWith { detail ->
+            SurveyStations.regenerateCorners(state.doc.stations, geo.timeline, detail)
+                .count { it.kind == StationKind.CORNER }
+        }
+
+    /** Back to the doc before the last edit; the selection is pruned against it, the cursor stays. */
+    fun undo(state: SurveyState): SurveyState {
+        if (state.readOnly) return state
+        val previous = state.undo.lastOrNull() ?: return state
+        return state.copy(doc = previous, undo = state.undo.dropLast(1), selection = prune(state.selection, previous))
+    }
+
     // --- helpers ---
 
     private fun seededDoc(geo: SurveyGeometry): SurveyDoc =
@@ -248,4 +302,38 @@ object SurveyController {
 
     private fun stationTime(state: SurveyState, stationId: Int): Long? =
         state.doc.stations.firstOrNull { it.id == stationId }?.tNs
+
+    /**
+     * The one way a doc changes: refused read-only or when nothing changed; otherwise the old doc goes
+     * on the undo stack (the oldest dropped past MAX_UNDO) and the selection loses deleted stations.
+     */
+    private fun edit(state: SurveyState, doc: SurveyDoc): SurveyState {
+        if (state.readOnly || doc == state.doc) return state
+        return state.copy(
+            doc = doc,
+            undo = (state.undo + state.doc).takeLast(MAX_UNDO),
+            selection = prune(state.selection, doc),
+        )
+    }
+
+    /** Drops stations [doc] no longer has; a chain keeps its order without the same station twice in a row. */
+    private fun prune(selection: SurveySelection, doc: SurveyDoc): SurveySelection {
+        val ids = doc.stations.mapTo(HashSet()) { it.id }
+        return when (selection) {
+            SurveySelection.None -> selection
+            is SurveySelection.Chain -> {
+                val kept = selection.stationIds.filter { it in ids }
+                val chain = kept.filterIndexed { i, id -> i == 0 || kept[i - 1] != id }
+                when {
+                    chain.isEmpty() -> SurveySelection.None
+                    chain == selection.stationIds -> selection
+                    else -> SurveySelection.Chain(chain)
+                }
+            }
+            is SurveySelection.Stretch -> {
+                val ends = listOfNotNull(selection.fromId, selection.toId)
+                if (ends.all { it in ids }) selection else SurveySelection.None
+            }
+        }
+    }
 }
