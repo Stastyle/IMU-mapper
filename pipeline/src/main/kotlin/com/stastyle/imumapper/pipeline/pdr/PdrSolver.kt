@@ -63,6 +63,11 @@ class PdrContext(
     val stepHeadingRad: DoubleArray,
     val stepStrideM: DoubleArray,
     val altitude: AltitudeTrack?,
+    /**
+     * The barometric height change of each step when [PipelineConfig.baroConfirmSteps] is on; null
+     * when the path follows [altitude].
+     */
+    val climbs: Climbs?,
     val diagnostics: Map<String, String>,
 ) {
     fun segmentAt(tNs: Long): HeadingSegment {
@@ -136,10 +141,21 @@ class PdrSolver(
         val altitude = AltitudeTrack.fromBaro(log.baro, config.baroSmoothingS)
         diag["baro"] = if (altitude == null) "absent" else "present"
         if (altitude != null) diag["baroP0hPa"] = Diag.num(altitude.p0hPa, 2)
+        val climbs = if (altitude != null && config.baroConfirmSteps > 0) {
+            // Climbs are judged and measured on the unsmoothed height; see Climbs.
+            val raw = AltitudeTrack.fromBaro(log.baro, 0.0)!!
+            Climbs.detect(
+                raw, steps, pauses, log.firstTimestampNs, config.baroConfirmSteps, config.baroConfirmStepM,
+                maxOf(0.0, config.baroMaxHeldM),
+            )
+                .also { addClimbDiagnostics(it, steps, log.firstTimestampNs, diag) }
+        } else {
+            null
+        }
 
         return PdrContext(
             log, config, orientation.track, orientation.source, world, steps, software.size, hardware.size,
-            pauses, segments, headings, strides, altitude, diag,
+            pauses, segments, headings, strides, altitude, climbs, diag,
         )
     }
 
@@ -168,17 +184,21 @@ class PdrSolver(
         var z = start.z
         var prevNs = fromNs
         val altitude = ctx.altitude
+        val climbs = ctx.climbs
         val pauses = ctx.pauses
         val hold = ctx.config.baroHoldWhenStill
         val stillGapNs = (ctx.config.baroStillGapS * 1e9).toLong()
         val settleNs = (SETTLING_TIME_CONSTANTS * ctx.config.baroSmoothingS * 1e9).toLong()
+        val climbChanges = climbs?.changes(first, last, fromNs)
         for (i in first until last) {
             val t = steps.tNs[i]
             val h = Angles.wrap(ctx.stepHeadingRad[i] + correction)
             val d = ctx.stepStrideM[i]
             x += d * sin(h)
             y += d * cos(h)
-            if (altitude != null) {
+            if (climbChanges != null) {
+                z += climbChanges[i - first]
+            } else if (altitude != null) {
                 if (!hold || t - prevNs <= stillGapNs) {
                     z += altitudeDelta(altitude, pauses, prevNs, t)
                 } else {
@@ -352,6 +372,30 @@ class PdrSolver(
         var delta = 0.0
         pauses.forEachUnpaused(fromNs, toNs) { a, b -> delta += altitude.at(b) - altitude.at(a) }
         return delta
+    }
+
+    /**
+     * baroClimbs and baroClimbsHeld count the climbs (ways back included) and the held-out runs,
+     * baroHeldM adds up the sizes of those runs, baroLimitM is what the baroMaxHeldM limit let
+     * through, and baroClimbTimesS gives each climb as start-end seconds, from the step before it to
+     * its last step.
+     */
+    private fun addClimbDiagnostics(
+        climbs: Climbs,
+        steps: DetectedSteps,
+        startNs: Long,
+        diag: MutableMap<String, String>,
+    ) {
+        diag["baroClimbs"] = climbs.size.toString()
+        diag["baroClimbsHeld"] = climbs.heldRuns.toString()
+        diag["baroHeldM"] = Diag.num(climbs.heldM, 2)
+        diag["baroLimitM"] = Diag.num(climbs.limitM, 2)
+        if (climbs.size > 0) {
+            diag["baroClimbTimesS"] = (0 until climbs.size).joinToString(";") { k ->
+                Diag.num((steps.tNs[climbs.firstStep(k) - 1] - startNs) / 1e9, 1) + "-" +
+                    Diag.num((steps.tNs[climbs.lastStep(k)] - startNs) / 1e9, 1)
+            }
+        }
     }
 
     companion object {

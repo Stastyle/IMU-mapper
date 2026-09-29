@@ -95,7 +95,7 @@ if a release is wanted after one of those. So:
 - **Pauses:** the recorder keeps logging through PAUSE..RESUME. The pipeline still runs
   orientation, step detection and carry-change detection across a pause, but takes no step,
   altitude change or VIO pose from inside one. New code that turns samples into displacement must
-  do the same with `PauseIntervals`, as `PdrSolver.excludePaused`, `altitudeDelta` and
+  do the same with `PauseIntervals`, as `PdrSolver.excludePaused`, `altitudeDelta`, `Climbs` and
   `VioProcessor` do. Do not filter the raw streams themselves.
 - **`PipelineConfig`:** every field needs a default. Old calibration rows, `results/run-<n>.json`
   files and `LogMeta` must keep decoding, and unknown keys are ignored, so a rename silently drops

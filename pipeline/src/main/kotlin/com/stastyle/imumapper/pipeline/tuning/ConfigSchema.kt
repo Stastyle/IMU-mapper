@@ -118,17 +118,39 @@ object ConfigSchema {
         ),
         ConfigFieldSpec(
             "baroSmoothingS", FieldKind.NUMBER, "s", 0.0, 60.0,
-            "Low-pass time constant of the barometric altitude. Raise it when the height wobbles on flat ground; " +
-                "lower it when stairs come out smeared or too low.",
+            "Low-pass time constant of the barometric altitude, used only while baroConfirmSteps is 0. Raise it " +
+                "when the height wobbles on flat ground; lower it when stairs come out smeared or too low.",
         ),
         ConfigFieldSpec(
             "baroHoldWhenStill", FieldKind.BOOLEAN, "", 0.0, 1.0,
-            "Freeze the altitude while no steps happen, which removes pressure noise when standing.",
+            "Freeze the altitude while no steps happen, which removes pressure noise when standing. Used only " +
+                "while baroConfirmSteps is 0.",
         ),
         ConfigFieldSpec(
             "baroStillGapS", FieldKind.NUMBER, "s", 0.5, 60.0,
             "A gap between steps longer than this counts as standing still for baroHoldWhenStill. Must stay " +
-                "above the slowest step period (2 s at stepBandLowHz = 0.5).",
+                "above the slowest step period (2 s at stepBandLowHz = 0.5). Used only while baroConfirmSteps is 0.",
+        ),
+        ConfigFieldSpec(
+            "baroConfirmSteps", FieldKind.INTEGER, "steps", 0.0, 50.0,
+            "A height change counts only when the height keeps moving the same way step after step, with at " +
+                "least this many steps of baroConfirmStepM or more, as on stairs or a slope, and is not shaped " +
+                "like a jump; sudden changes (pressure zones indoors, doors) are held out at any count, while " +
+                "changes spread over a second or more and wobble slower than about 4 s pass in part. 0 turns the " +
+                "filter off. Raise it when the height moves on flat ground in a listed climb; lower it when short " +
+                "flights of stairs are missing, but not below 3, where noise starts to pass as climbs.",
+        ),
+        ConfigFieldSpec(
+            "baroConfirmStepM", FieldKind.NUMBER, "m", 0.0, 0.5,
+            "Height change of one step from which it counts toward baroConfirmSteps; a smaller step the same " +
+                "way neither counts nor breaks the run. Lower it when a short gentle slope comes out flat.",
+        ),
+        ConfigFieldSpec(
+            "baroMaxHeldM", FieldKind.NUMBER, "m", 0.0, 50.0,
+            "With baroConfirmSteps on, the height stays within this of the barometer's: held-out change beyond " +
+                "it comes through. It acts only once that much is held out, so lower it only when a long gentle " +
+                "slope has lost about this much (baroLimitM above 0); raise it when pressure zones larger than " +
+                "it show as steps on one floor with no gentle slope or held-out climb the same way before them.",
         ),
         ConfigFieldSpec(
             "loopClosure", FieldKind.BOOLEAN, "", 0.0, 1.0,
@@ -168,6 +190,9 @@ object ConfigSchema {
         "baroSmoothingS" -> num(c.baroSmoothingS)
         "baroHoldWhenStill" -> c.baroHoldWhenStill.toString()
         "baroStillGapS" -> num(c.baroStillGapS)
+        "baroConfirmSteps" -> c.baroConfirmSteps.toString()
+        "baroConfirmStepM" -> num(c.baroConfirmStepM)
+        "baroMaxHeldM" -> num(c.baroMaxHeldM)
         "loopClosure" -> c.loopClosure.toString()
         "smoothingWindow" -> c.smoothingWindow.toString()
         "pdrFallbackWhenTrackingLost" -> c.pdrFallbackWhenTrackingLost.toString()

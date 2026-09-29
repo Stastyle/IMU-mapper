@@ -86,6 +86,9 @@ object ProposalParser {
                 "baroSmoothingS" -> number(key, value, errors)?.let { c = c.copy(baroSmoothingS = it) }
                 "baroHoldWhenStill" -> bool(key, value, errors)?.let { c = c.copy(baroHoldWhenStill = it) }
                 "baroStillGapS" -> number(key, value, errors)?.let { c = c.copy(baroStillGapS = it) }
+                "baroConfirmSteps" -> number(key, value, errors)?.let { c = c.copy(baroConfirmSteps = it.toInt()) }
+                "baroConfirmStepM" -> number(key, value, errors)?.let { c = c.copy(baroConfirmStepM = it) }
+                "baroMaxHeldM" -> number(key, value, errors)?.let { c = c.copy(baroMaxHeldM = it) }
                 "loopClosure" -> bool(key, value, errors)?.let { c = c.copy(loopClosure = it) }
                 "smoothingWindow" -> number(key, value, errors)?.let { c = c.copy(smoothingWindow = it.toInt()) }
                 "pdrFallbackWhenTrackingLost" -> bool(key, value, errors)?.let { c = c.copy(pdrFallbackWhenTrackingLost = it) }

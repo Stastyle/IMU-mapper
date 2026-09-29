@@ -9,6 +9,7 @@ import com.stastyle.imumapper.pipeline.core.Vec3
 import com.stastyle.imumapper.pipeline.log.RawLog
 import kotlin.math.PI
 import kotlin.math.abs
+import kotlin.math.sin
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -77,7 +78,7 @@ class PdrProcessorTest {
         val cfg = PipelineConfig(strideLengthM = w.strideM * 1.04, useMagnetometer = false)
         val log = w.build(cfg)
         val r = PdrProcessor().process(log, cfg)
-        assertEquals(5, r.pipelineVersion)
+        assertEquals(6, r.pipelineVersion)
         assertEquals(r.points.size, r.rawPoints.size, "post-processing moves points, never adds or drops them")
         for (i in r.points.indices) {
             assertEquals(r.points[i].tNs, r.rawPoints[i].tNs)
@@ -353,14 +354,17 @@ class PdrProcessorTest {
     fun stopAndGoStairsKeepTheClimb() {
         // Four 1 m flights with a 6 s stop after each: the stops are "still" gaps, yet the climb of
         // the last steps (still settling in the barometer filter) and of the first step after each
-        // stop must not be thrown away with the middle of the gap.
+        // stop must not be thrown away with the middle of the gap. The hold works on the low-passed
+        // height, so the climb filter is off for it; the filter must keep the climb too.
         val w = walk().still(2.0)
             .walkTo(0.0, 4.0, 1.0).still(6.0).walkTo(0.0, 8.0, 2.0).still(6.0)
             .walkTo(0.0, 12.0, 3.0).still(6.0).walkTo(0.0, 16.0, 4.0).still(6.0)
-        val held = run(w)
+        val held = run(w, config(w) { it.copy(baroConfirmSteps = 0) })
         assertWithin(4.0, held.stats.maxZ, 0.20, "climb with stops and hold")
-        val free = run(w, config(w) { it.copy(baroHoldWhenStill = false) })
+        val free = run(w, config(w) { it.copy(baroConfirmSteps = 0, baroHoldWhenStill = false) })
         assertWithin(4.0, free.stats.maxZ, 0.20, "climb with stops without hold")
+        // The rise after the last step, before the recording ends, is not in the path.
+        assertWithin(4.0, run(w).stats.maxZ, 0.10, "climb with stops through the climb filter")
 
         // A slow walker (0.45 Hz cadence, 2.2 s between steps) is not standing still.
         val slow = SyntheticWalk(speedMps = 0.5, cadenceHz = 0.45).still(2.0).walkTo(0.0, 10.0, 2.0).still(2.0)
@@ -372,17 +376,204 @@ class PdrProcessorTest {
     @Test
     fun longStillHoldsAltitudeAgainstPressureDrift() {
         // Pressure drifting 0.005 hPa/s reads as a 4 cm/s descent. Over a 30 s stop the hold freezes
-        // the middle of the gap, so far less of the drift reaches the path than without it.
+        // the middle of the gap, so far less of the drift reaches the path than without it. The climb
+        // filter is off: it would hold most of the drift out too, and this is about the hold.
         val w = SyntheticWalk(baroDriftHpaPerS = 0.005)
             .still(2.0).walkTo(0.0, 8.0).still(30.0).walkTo(0.0, 16.0).still(1.0)
-        val held = run(w).points.last().p.z
-        val free = run(w, config(w) { it.copy(baroHoldWhenStill = false) }).points.last().p.z
+        val base = config(w) { it.copy(baroConfirmSteps = 0) }
+        val held = run(w, base).points.last().p.z
+        val free = run(w, base.copy(baroHoldWhenStill = false)).points.last().p.z
         assertTrue(free < -1.2, "without the hold the drift shows: $free")
         assertTrue(held > free + 0.7, "the hold should remove most of the drift: held $held vs free $free")
 
         // A shorter gap limit freezes more of it.
-        val tight = run(w, config(w) { it.copy(baroStillGapS = 1.0) }).points.last().p.z
+        val tight = run(w, base.copy(baroStillGapS = 1.0)).points.last().p.z
         assertTrue(tight >= held - 1e-9, "tight $tight vs held $held")
+    }
+
+    @Test
+    fun pressureZonesOnFlatGroundAreHeldOut() {
+        // One floor through rooms held at other pressures: 10 Pa lower (0.84 m "up") from 15 s to
+        // 30 s, 6 Pa higher (0.5 m "down") from 35 s to 45 s, and a 2 s door pulse on top.
+        val zones = { s: Double ->
+            val zone = when (s) {
+                in 15.0..30.0 -> -0.10
+                in 35.0..45.0 -> 0.06
+                else -> 0.0
+            }
+            zone + if (s in 20.0..22.0) -0.05 else 0.0
+        }
+        val w = SyntheticWalk(baroDisturbanceHpa = zones).still(2.0).walkTo(0.0, 60.0).still(2.0)
+        val r = run(w)
+        assertTrue(r.stats.maxZ < 0.1 && r.stats.minZ > -0.1, "flat floor: z from ${r.stats.minZ} to ${r.stats.maxZ}")
+        assertEquals("0", r.diagnostics["baroClimbs"])
+        assertNull(r.diagnostics["baroClimbTimesS"])
+        // Each edge of a zone and of the pulse is a held run of about its size: 6 edges, 3.5 m.
+        val held = r.diagnostics["baroClimbsHeld"]!!.toInt()
+        assertTrue(held in 6..8, "held runs: $held")
+        assertWithin(3.52, r.diagnostics["baroHeldM"]!!.toDouble(), 0.15, "height held out")
+
+        // Barometer noise alone holds out nothing.
+        val quiet = run(walk().still(2.0).walkTo(0.0, 60.0).still(2.0))
+        assertEquals("0", quiet.diagnostics["baroClimbsHeld"])
+
+        val every = run(w, config(w) { it.copy(baroConfirmSteps = 0) })
+        assertTrue(
+            every.stats.maxZ > 0.7 && every.stats.minZ < -0.4,
+            "without the filter the zones show: z from ${every.stats.minZ} to ${every.stats.maxZ}",
+        )
+        assertNull(every.diagnostics["baroClimbs"])
+    }
+
+    @Test
+    fun climbFilterKeepsStairsAndSteepRamps() {
+        // A flight of 18 steps rising 3 m, with level walking on both sides.
+        val stairs = walk().still(2.0).walkTo(0.0, 5.0).walkTo(0.0, 17.0, 3.0).walkTo(0.0, 22.0, 3.0).still(2.0)
+        val r = run(stairs)
+        assertWithin(3.0, r.points.last().p.z, 0.05, "flight of stairs")
+        assertEquals("1", r.diagnostics["baroClimbs"])
+        // The flight runs from 2 + 5/1.2 s to 2 + 17/1.2 s.
+        val (from, to) = r.diagnostics["baroClimbTimesS"]!!.split("-").map { it.toDouble() }
+        assertTrue(from in 5.0..6.5 && to in 15.5..17.0, "climb times $from-$to")
+
+        val ramp = walk().still(2.0).walkTo(0.0, 5.0).walkTo(0.0, 35.0, 3.6).walkTo(0.0, 40.0, 3.6).still(2.0)
+        assertWithin(3.6, run(ramp).points.last().p.z, 0.05, "12 % ramp")
+
+        // Four steps up: the phone rises through about six step intervals, so the default keeps them,
+        // while a longer confirmation holds them out.
+        val w = walk()
+        val four = w.still(2.0).walkTo(0.0, 5.0).walkTo(0.0, 5.0 + 4 * w.strideM, 0.68)
+            .walkTo(0.0, 10.0 + 4 * w.strideM, 0.68).still(2.0)
+        assertWithin(0.68, run(four).points.last().p.z, 0.10, "four steps up")
+        val strict = run(four, config(four) { it.copy(baroConfirmSteps = 10) }).points.last().p.z
+        assertTrue(abs(strict) < 0.05, "four steps are fewer than 10: $strict")
+    }
+
+    @Test
+    fun zoneRightAfterAFlightIsHeldOut() {
+        // A stairwell door: 1 s after the last step of an 18-step flight up 3 m, the corridor is
+        // 10 Pa higher (0.84 m "down"). The flight is kept, the zone is not.
+        val stairs = walk().still(2.0).walkTo(0.0, 5.0).walkTo(0.0, 17.0, 3.0).walkTo(0.0, 30.0, 3.0).still(2.0)
+        val flightEndS = 2.0 + 17.0 / 1.2
+        val w = SyntheticWalk(baroDisturbanceHpa = { s -> if (s > flightEndS + 1.0) 0.10 else 0.0 })
+            .still(2.0).walkTo(0.0, 5.0).walkTo(0.0, 17.0, 3.0).walkTo(0.0, 30.0, 3.0).still(2.0)
+        assertWithin(3.0, run(w).points.last().p.z, 0.05, "flight with a zone after it")
+        assertWithin(3.0, run(stairs).points.last().p.z, 0.05, "flight alone")
+        val every = run(w, config(w) { it.copy(baroConfirmSteps = 0) }).points.last().p.z
+        assertTrue(every < 2.4, "without the filter the zone shows: $every")
+    }
+
+    @Test
+    fun wobbleOnFlatGroundStaysBounded() {
+        // Wind on a building: 4 Pa (0.34 m) of wobble with a 5 s period, whose swings last about as
+        // many steps as a climb needs. Some swings pass as climbs; the way back must pass with them,
+        // or the path climbs further with every swing. Several noise seeds, because whether a swing
+        // counts is down to the noise.
+        for (seed in 1..8) {
+            val w = SyntheticWalk(noiseSeed = seed, baroDisturbanceHpa = { s -> 0.04 * sin(2 * PI * s / 5.0) })
+                .still(2.0).walkTo(0.0, 120.0).still(2.0)
+            val r = run(w)
+            val z = "seed $seed: z from ${r.stats.minZ} to ${r.stats.maxZ}"
+            assertTrue(r.stats.maxZ < 0.9 && r.stats.minZ > -0.9, z)
+        }
+    }
+
+    @Test
+    fun climbFollowedByAShortDescentKeepsBoth() {
+        // Six steps up 1 m, then three steps down 0.6 m: too few steps for a climb of its own, but it
+        // brings the height more than half way back right after the climb.
+        for (seed in 1..8) {
+            val w = SyntheticWalk(noiseSeed = seed)
+            val s = w.strideM
+            w.still(2.0).walkTo(0.0, 5.0).walkTo(0.0, 5.0 + 6 * s, 1.0).walkTo(0.0, 5.0 + 9 * s, 0.4)
+                .walkTo(0.0, 15.0 + 9 * s, 0.4).still(2.0)
+            assertWithin(0.4, run(w).points.last().p.z, 0.3, "seed $seed: up 1 m and down 0.6 m")
+        }
+    }
+
+    @Test
+    fun doorZoneAfterAShortFlightIsNotAWayBack() {
+        // Nine steps up 1.5 m, then a stairwell door about 2 s later into a corridor 10 Pa higher (0.84 m
+        // "down"): more than half the flight, right after it, but a jump, not a way back down.
+        for (seed in 1..8) {
+            val door = SyntheticWalk(noiseSeed = seed, baroDisturbanceHpa = { t -> if (t > 13.5) 0.10 else 0.0 })
+            val s = door.strideM
+            door.still(2.0).walkTo(0.0, 5.0).walkTo(0.0, 5.0 + 9 * s, 1.5).walkTo(0.0, 20.0 + 9 * s, 1.5).still(2.0)
+            assertWithin(1.5, run(door).points.last().p.z, 0.08, "seed $seed: short flight with a door zone after it")
+        }
+    }
+
+    @Test
+    fun slowWobbleAndGentleSlopesStayWithinTheLimit() {
+        // Half an hour on one floor under 4 Pa wobble with a 20 s period, slower than a climb: some
+        // swings pass as climbs and others not, and without the limit the height would wander off
+        // by metres. With it, the height stays within baroMaxHeldM (1.5 m) plus the swing (0.34 m).
+        val wobble = SyntheticWalk(rateHz = 50, baroDisturbanceHpa = { t -> 0.04 * sin(2 * PI * t / 20.0) })
+            .still(2.0).walkTo(0.0, 2160.0).still(2.0)
+        val r = run(wobble)
+        assertTrue(r.stats.maxZ < 1.9 && r.stats.minZ > -1.9, "z from ${r.stats.minZ} to ${r.stats.maxZ}")
+        assertTrue(r.diagnostics["baroLimitM"]!!.toDouble() > 0.0, "the limit acted: ${r.diagnostics["baroLimitM"]}")
+
+        // A 3 % slope rising 6 m over 200 m: many of its steps are too small to count, so much of it comes
+        // through only once 1.5 m has been held out.
+        val slope = walk().still(2.0).walkTo(0.0, 5.0).walkTo(0.0, 205.0, 6.0).walkTo(0.0, 210.0, 6.0).still(2.0)
+        val end = run(slope).points.last().p.z
+        assertTrue(end > 4.4 && end < 6.1, "3 % slope over 200 m: $end")
+        val limitM = run(slope).diagnostics["baroLimitM"]!!.toDouble()
+        assertTrue(limitM > 1.5, "much of the slope came through the limit: $limitM")
+    }
+
+    @Test
+    fun aVioGapDoesNotInheritTheHeldOutHeight() {
+        // A 3 % slope uses up the held-out band, so a later zone the same way (10 Pa lower, reading
+        // 0.84 m "up") passes in the whole-trip path. A gap solved from the flat part starts with a
+        // fresh band and holds the zone out, as a gap after tracked VIO must.
+        val slopeEndS = 2.0 + 105.0 / 1.2
+        val w = SyntheticWalk(baroDisturbanceHpa = { t -> if (t in slopeEndS + 10.0..slopeEndS + 30.0) -0.10 else 0.0 })
+        w.still(2.0).walkTo(0.0, 5.0).walkTo(0.0, 105.0, 3.0).walkTo(0.0, 165.0, 3.0).still(2.0)
+        val cfg = config(w)
+        val log = w.build(cfg)
+        val solver = PdrSolver()
+        val ctx = solver.prepare(log, cfg)
+        val fromNs = log.firstTimestampNs + ((slopeEndS + 3.0) * 1e9).toLong()
+        val gap = solver.solveSegment(ctx, fromNs, Long.MAX_VALUE, Vec3.ZERO, null)
+        val zoneMid = log.firstTimestampNs + ((slopeEndS + 20.0) * 1e9).toLong()
+        val inZone = gap.first { it.tNs >= zoneMid }.p.z
+        assertTrue(abs(inZone) < 0.1, "the gap takes no zone: $inZone")
+    }
+
+    @Test
+    fun climbFilterIgnoresTheLowPass() {
+        // The filter works on the unsmoothed height, so baroSmoothingS and the hold do not change it.
+        val w = walk().still(2.0).walkTo(0.0, 5.0).walkTo(0.0, 17.0, 3.0).walkTo(0.0, 22.0, 3.0).still(8.0)
+            .walkTo(0.0, 30.0, 3.0).still(1.0)
+        val base = run(w).points.map { it.p.z }
+        val raw = run(w, config(w) { it.copy(baroSmoothingS = 0.0, baroHoldWhenStill = false) }).points.map { it.p.z }
+        assertEquals(base, raw)
+    }
+
+    @Test
+    fun segmentApiMatchesFullSolutionOnStairs() {
+        // VioProcessor fills gaps from any step; the climbs must not depend on where the segment starts.
+        val w = walk().still(2.0).walkTo(0.0, 5.0).walkTo(0.0, 17.0, 3.0).walkTo(0.0, 22.0, 3.0).still(1.0)
+        val cfg = config(w)
+        val log = w.build(cfg)
+        val solver = PdrSolver()
+        val full = solver.solve(log, cfg)
+        val ctx = solver.prepare(log, cfg)
+        val mid = full.points.minBy { abs(it.p.z - 1.5) }
+        val tail = solver.solveSegment(ctx, mid.tNs + 1, Long.MAX_VALUE, mid.p, null)
+        val end = full.points.last().p
+        assertTrue(abs(end.z - tail.last().p.z) < 1e-6, "segment end ${tail.last().p} vs full $end")
+        assertWithin(3.0, tail.last().p.z, 0.05, "climb through the segment")
+
+        // A segment that starts halfway through a climbing step's interval takes half its change.
+        val i = full.points.indexOfFirst { it.p.z > 1.0 }
+        val before = full.points[i - 1]
+        val at = full.points[i]
+        val half = solver.solveSegment(ctx, (before.tNs + at.tNs) / 2, at.tNs + 1, Vec3.ZERO, null)
+        assertEquals(1, half.size)
+        assertEquals((at.p.z - before.p.z) / 2, half[0].p.z, 1e-3)
     }
 
     @Test

@@ -9,7 +9,9 @@ such as caves.
 
 - **Three capture modes.**
   - **Pocket** uses the IMU only and works in the dark: pedestrian dead reckoning with the
-    barometer for height.
+    barometer for height. A height change counts only once it has lasted several steps, as on
+    stairs or a slope, which hides pressure jumps indoors on flat ground; **Settings → Processing
+    → Steps to confirm a height change** sets how many (4 by default, Off takes every change).
   - **Flashlight** adds ARCore visual-inertial odometry with the torch on.
   - **Illuminated** is for lit spaces. It uses ARCore with the torch optional and saves a photo
     keyframe every 2 m or 30° of turn.

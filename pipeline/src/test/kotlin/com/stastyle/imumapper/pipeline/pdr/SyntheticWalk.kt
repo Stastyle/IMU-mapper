@@ -69,6 +69,11 @@ class SyntheticWalk(
     val lateralBounce: Double = 0.5,
     /** Slow linear pressure drift of the barometer, hPa/s (about -8.4 m per hPa of altitude). */
     val baroDriftHpaPerS: Double = 0.0,
+    /**
+     * Pressure added to the barometer at each time, hPa, from the seconds since the start: a
+     * disturbance that is not a change of height, such as the pressure zones of a building.
+     */
+    val baroDisturbanceHpa: ((Double) -> Double)? = null,
 ) {
     val strideM: Double get() = speedMps / cadenceHz
 
@@ -326,7 +331,8 @@ class SyntheticWalk(
             }
             if (includeBaro && k % baroEvery == 0) {
                 val z = positionAt(ph, s).z
-                val p = P0 * (1.0 - z / 44330.0).pow(1.0 / 0.1903) + baroDriftHpaPerS * s + gaussian(rng) * 0.01
+                val p = P0 * (1.0 - z / 44330.0).pow(1.0 / 0.1903) + baroDriftHpaPerS * s + gaussian(rng) * 0.01 +
+                    (baroDisturbanceHpa?.invoke(s) ?: 0.0)
                 out.add(BaroSample(t, p.toFloat()))
             }
             // A hardware step event at every vertical-acceleration peak (gait phase pi/2 + 2 pi k).
