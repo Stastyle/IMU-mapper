@@ -14,6 +14,8 @@ import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -35,6 +37,7 @@ object SurveyRenderer {
     private const val SELECTED_RADIUS_DP = 10f
     private const val RING_DP = 1.5f
     private const val SELECTED_RING_DP = 2.5f
+    private const val NAME_MAX_WIDTH_DP = 160f
 
     private val stretchColor = Color(SurveyColors.STRETCH)
     private val chordColor = Color(SurveyColors.CHORD)
@@ -136,6 +139,11 @@ object SurveyRenderer {
      * layout, which lays nothing out against the canvas edge; it is drawn only while the station's
      * centre is on the canvas, a positive test that a NaN fails as well. Text is drawn after every
      * circle so no station covers another one's name.
+     *
+     * A mark station is named after its note, which the recorder lets run to several lines, so a
+     * name is cut to one line of at most [NAME_MAX_WIDTH_DP] with an ellipsis; drawn whole it would be
+     * a block of text over the path and the other stations. The width is a maximum, not a fixed box:
+     * in a fixed box a right-to-left name would be pushed to its far end, away from the station.
      */
     @OptIn(ExperimentalTextApi::class)
     private fun DrawScope.drawStationText(projected: ProjectedSurvey, textMeasurer: TextMeasurer) {
@@ -151,7 +159,14 @@ object SurveyRenderer {
                 drawText(layout, topLeft = Offset(x - layout.size.width / 2f, y - layout.size.height / 2f))
             }
             val origin = PathRenderer.labelOrigin(x + radiusOf(station), y, size.width, size.height) ?: continue
-            drawText(textMeasurer = textMeasurer, text = station.name, topLeft = origin, style = nameStyle)
+            val name = textMeasurer.measure(
+                text = station.name,
+                style = nameStyle,
+                overflow = TextOverflow.Ellipsis,
+                maxLines = 1,
+                constraints = Constraints(maxWidth = NAME_MAX_WIDTH_DP.dp.roundToPx()),
+            )
+            drawText(name, topLeft = origin)
         }
     }
 
