@@ -126,6 +126,7 @@ fun ViewerScreen(
                 vm.selectMarker(if (markers != null && index in markers.indices) markers[index] else null)
             },
             onSurveyTap = vm::surveyTap,
+            onSurveyDoubleTap = vm::surveyDoubleTap,
             onSurveyLongPress = { hit ->
                 when (hit) {
                     is SurveyHit.OnStation -> stationSheetId = hit.stationId

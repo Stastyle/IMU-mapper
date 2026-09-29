@@ -191,6 +191,13 @@ class ViewerViewModel(
     private var tripStartNs: Long? = null
     /** "Not now" on the manual-rotation prompt, for this run and this screen only. */
     private var manualPromptDismissedRunId: Int? = null
+    /**
+     * The states either side of the last map tap. The canvas applies a tap at once, so when it turns out
+     * to be the first of a double-tap, [surveyDoubleTap] takes back its selection while the state is
+     * still [afterTap]; any change since has replaced that object, and then nothing is taken back.
+     */
+    private var beforeTap: SurveyState? = null
+    private var afterTap: SurveyState? = null
     /** The newest doc not yet written; saves run one at a time and skip docs a later edit overtook. */
     private var docToSave: SurveyDoc? = null
     private val saveLock = Mutex()
@@ -418,6 +425,9 @@ class ViewerViewModel(
         if (_ui.value.surveyMode) {
             // The snackbar's Undo works only in Survey mode, so a pending message leaves with it.
             _ui.update { it.copy(surveyMode = false, surveyMessage = null) }
+            // A tap from before leaving is never the first of a double-tap after re-entering.
+            beforeTap = null
+            afterTap = null
             publishSurvey()
             return
         }
@@ -451,13 +461,34 @@ class ViewerViewModel(
     }
 
     /** A tap in Survey mode: a station extends the chain, the path selects a stretch, a miss does nothing. */
-    fun surveyTap(hit: SurveyHit) = changeSurvey { state, geometry ->
-        when (hit) {
-            is SurveyHit.OnStation -> SurveyController.tapStation(state, hit.stationId)
-            is SurveyHit.OnStations -> SurveyController.tapStations(state, hit.stationIds)
-            is SurveyHit.OnPath -> SurveyController.tapPath(state, geometry, hit.distanceM)
-            SurveyHit.Miss -> state
+    fun surveyTap(hit: SurveyHit) {
+        beforeTap = surveyState
+        changeSurvey { state, geometry ->
+            when (hit) {
+                is SurveyHit.OnStation -> SurveyController.tapStation(state, hit.stationId)
+                is SurveyHit.OnStations -> SurveyController.tapStations(state, hit.stationIds)
+                is SurveyHit.OnPath -> SurveyController.tapPath(state, geometry, hit.distanceM)
+                SurveyHit.Miss -> state
+            }
         }
+        afterTap = surveyState
+    }
+
+    /**
+     * Double-tap in Survey mode fits the plan. Its first tap was already applied as a tap, so the
+     * selection and cursor that tap changed go back first: fitting never swaps a chain for a stretch or
+     * adds a station to it.
+     */
+    fun surveyDoubleTap() {
+        val before = beforeTap
+        val after = afterTap
+        beforeTap = null
+        afterTap = null
+        val state = surveyState
+        if (_ui.value.surveyMode && before != null && state != null && state === after && after !== before) {
+            applySurvey(state.copy(selection = before.selection, cursorNs = before.cursorNs))
+        }
+        fitToPath()
     }
 
     fun clearSurveySelection() = changeSurvey { state, _ -> SurveyController.clearSelection(state) }

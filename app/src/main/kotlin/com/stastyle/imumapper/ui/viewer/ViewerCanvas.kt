@@ -39,6 +39,8 @@ class CanvasGestures(
     val onTap: (markerIndex: Int) -> Unit,
     /** Survey mode: what a tap hit. */
     val onSurveyTap: (SurveyHit) -> Unit = {},
+    /** Survey mode's double-tap; its first tap already went to [onSurveyTap], which this may take back. */
+    val onSurveyDoubleTap: () -> Unit = onDoubleTap,
     /** Survey mode: the station or path a long press hit; a pause on empty map is not one, so never Miss. */
     val onSurveyLongPress: (SurveyHit) -> Unit = {},
 )
@@ -141,7 +143,11 @@ fun ViewerCanvas(
                                     abs(up.position.y - lastTapY) < slop * 4
                                 if (now - lastTapTime < doubleTapTimeout && nearLast) {
                                     lastTapTime = 0L
-                                    latestGestures.value.onDoubleTap()
+                                    if (latestSurvey.value != null) {
+                                        latestGestures.value.onSurveyDoubleTap()
+                                    } else {
+                                        latestGestures.value.onDoubleTap()
+                                    }
                                 } else {
                                     lastTapTime = now
                                     lastTapX = up.position.x

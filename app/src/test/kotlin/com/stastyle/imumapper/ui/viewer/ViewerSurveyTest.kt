@@ -295,6 +295,58 @@ class ViewerSurveyTest {
     }
 
     @Test
+    fun doubleTapFitsAndTakesBackWhatItsFirstTapSelected() = runBlocking<Unit> {
+        val vm = viewer(processedTrip(SurveyFixtures.lWalk()))
+        vm.toggleSurvey()
+        vm.fitToPath()
+        val fitted = vm.camera.value
+        vm.setSurveyCursor(2.5)
+        vm.surveyTap(SurveyHit.OnStation(2))
+        vm.surveyTap(SurveyHit.OnStation(4))
+        val chain = survey(vm).state
+        assertEquals(SurveySelection.Chain(listOf(2, 4)), chain.selection)
+
+        // The first tap of a double-tap on the path picks a stretch and moves the cursor; the second fits.
+        vm.pan(300f, -600f)
+        vm.surveyTap(SurveyHit.OnPath(12.5))
+        vm.surveyDoubleTap()
+        assertEquals(chain.selection, survey(vm).state.selection)
+        assertEquals(chain.cursorNs, survey(vm).state.cursorNs)
+        assertEquals(fitted, vm.camera.value)
+
+        // A double-tap on a station does not add it to the chain.
+        vm.surveyTap(SurveyHit.OnStation(3))
+        vm.surveyDoubleTap()
+        assertEquals(chain.selection, survey(vm).state.selection)
+
+        // A double-tap on empty map after a real tap takes back nothing: its first tap changed nothing.
+        vm.surveyTap(SurveyHit.OnPath(12.5))
+        val stretch = survey(vm).state
+        vm.surveyTap(SurveyHit.Miss)
+        vm.surveyDoubleTap()
+        assertEquals(stretch.selection, survey(vm).state.selection)
+        assertEquals(stretch.cursorNs, survey(vm).state.cursorNs)
+
+        // Anything done after the tap (here the scrubber) keeps the tap's selection.
+        vm.surveyTap(SurveyHit.OnStation(1))
+        vm.setSurveyCursor(2.5)
+        vm.surveyDoubleTap()
+        assertEquals(SurveySelection.Chain(listOf(1)), survey(vm).state.selection)
+    }
+
+    @Test
+    fun aTapBeforeLeavingSurveyModeIsNotTakenBackAfterReentering() = runBlocking<Unit> {
+        val vm = viewer(processedTrip(SurveyFixtures.lWalk()))
+        vm.toggleSurvey()
+        vm.surveyTap(SurveyHit.OnStation(4))
+        vm.toggleSurvey()
+        vm.toggleSurvey()
+        // A double-tap whose first tap landed before the layer was drawn again, so it was no survey tap.
+        vm.surveyDoubleTap()
+        assertEquals(SurveySelection.Chain(listOf(4)), survey(vm).state.selection)
+    }
+
+    @Test
     fun cursorAndLegCallsReachTheController() = runBlocking<Unit> {
         val vm = viewer(processedTrip(SurveyFixtures.lWalk()))
         vm.toggleSurvey()
