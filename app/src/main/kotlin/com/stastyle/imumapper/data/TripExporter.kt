@@ -18,9 +18,9 @@ import java.util.Locale
 data class TripExport(val zip: File, val uri: Uri, val shareIntent: Intent)
 
 /**
- * Packs one trip (raw log, every result, photos, `trip.json`) into a ZIP under `cache/export/` and
- * hands it to other apps through the `${applicationId}.fileprovider` authority declared in the
- * manifest (the `cache` path covers the export directory).
+ * Packs one trip (raw log, every result, photos, `survey.json` when present, `trip.json`) into a ZIP
+ * under `cache/export/` and hands it to other apps through the `${applicationId}.fileprovider`
+ * authority declared in the manifest (the `cache` path covers the export directory).
  */
 class TripExporter(
     context: Context,

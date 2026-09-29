@@ -76,6 +76,25 @@ class SurveyDocTest {
     }
 
     @Test
+    fun namesWrittenByEarlierBuildsStillDecode() {
+        // survey.json stores these enums by name, and coerceInputValues turns an unknown name into the
+        // field default, so a renamed constant would silently turn stored CORNERs into USER stations.
+        // The names are compared as strings, so an IDE rename cannot update this test with the enum.
+        val text = """
+            {"detail": "FINE",
+             "stations": [{"id": 1, "kind": "START"}, {"id": 2, "kind": "END"}, {"id": 3, "kind": "MARK"},
+                          {"id": 4, "kind": "CORNER"}, {"id": 5, "kind": "USER"}],
+             "references": [{"id": 1, "line": "CHORD"}, {"id": 2, "line": "FITTED"}]}
+        """.trimIndent()
+        val doc = SurveyDoc.fromJson(text)
+        assertEquals(listOf("START", "END", "MARK", "CORNER", "USER"), doc.stations.map { it.kind.name })
+        assertEquals(listOf("CHORD", "FITTED"), doc.references.map { it.line.name })
+        for (name in listOf("COARSE", "NORMAL", "FINE")) {
+            assertEquals(name, SurveyDoc.fromJson("""{"detail": "$name"}""").detail.name)
+        }
+    }
+
+    @Test
     fun aNanBearingCannotBeWritten() {
         val doc = SurveyDoc(references = listOf(CompassReference(id = 1, bearingDeg = Double.NaN)))
         assertFailsWith<SerializationException> { doc.toJson() }

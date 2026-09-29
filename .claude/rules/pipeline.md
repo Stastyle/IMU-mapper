@@ -31,9 +31,13 @@ paths:
   - `LogMeta` JSON (`TripMode`, `CarryPosition`, `HeadingAxisMode`).
   - `PathResult` JSON (`PositionSource`, `AnnotationKind`).
   - Room columns (`TripMode`, `CarryPosition`).
+  - `survey.json` (`SurveyDoc`: `StationKind`, `ReferenceLine`, `Detail`). It decodes with
+    `coerceInputValues`, so an unknown or renamed name falls back silently to the field default: a
+    renamed `CORNER` comes back as `USER`. `SurveyDocTest` pins the stored names.
 
   A new value makes older builds lose `LogMeta`. **Never rename a constant**, or the current build
-  loses the `LogMeta` of existing logs and fails to decode stored runs and rows.
+  loses the `LogMeta` of existing logs, fails to decode stored runs and rows, and silently resets
+  stored survey values to their defaults.
 
 ## Memory
 

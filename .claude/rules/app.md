@@ -42,8 +42,9 @@ paths:
   container themselves.
 - **A new screen** needs a route in `ui/nav/Routes.kt` and an entry in `ui/nav/AppNavGraph.kt`.
 - **Pure render and calibration code** (`render/PathScene.kt`, `render/OrbitCamera.kt`,
-  `ui/calibration/CalibrationMath.kt`) uses no Compose or Android types, so it stays unit-testable.
-  Colours there are ARGB `Int`s. `render/PathRenderer.kt` is the Compose drawing layer.
+  `render/SurveyLayer.kt`, `render/ProjectedSurvey.kt`, `ui/calibration/CalibrationMath.kt`) uses no
+  Compose or Android types, so it stays unit-testable. Colours there are ARGB `Int`s.
+  `render/PathRenderer.kt` and `render/SurveyRenderer.kt` are the Compose drawing layer.
 
 ## Updater and release
 

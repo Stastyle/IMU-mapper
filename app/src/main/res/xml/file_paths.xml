@@ -2,7 +2,7 @@
 <paths>
     <!-- Trip logs, results and photos: filesDir/trips/... -->
     <files-path name="trips" path="trips/" />
-    <!-- ZIP exports and downloaded update APKs. -->
+    <!-- ZIP exports, survey CSVs and downloaded update APKs. -->
     <cache-path name="cache" path="/" />
     <external-files-path name="downloads" path="Download/" />
 </paths>

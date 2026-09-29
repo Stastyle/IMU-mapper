@@ -32,8 +32,8 @@ optionally ARCore, and shows the route as a 3D line, for mapping places without 
     `files/trips/<id>/survey.json`: the per-trip Survey mode facts (stations, compass readings, the
     manual rotation). It is user state, not a run, and travels in the ZIP export.
   - `process/TripProcessor`.
-  - `render/`: pure scene and camera code (`PathScene`, `OrbitCamera`) and the Compose drawing in
-    `PathRenderer`.
+  - `render/`: pure scene, camera and survey-layer code (`PathScene`, `OrbitCamera`, `SurveyLayer`,
+    `ProjectedSurvey`) and the Compose drawing in `PathRenderer` and `SurveyRenderer`.
   - `ui/<screen>/`, `update/` (the GitHub Releases updater) and `debug/CrashLog`.
 - `tools/replay.py`: a Python port of the PDR pipeline for offline experiments.
 - `.github/workflows/`: `ci.yml` (tests) and `release.yml` (signed APK to GitHub Releases).
