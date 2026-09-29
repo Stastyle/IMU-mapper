@@ -118,24 +118,26 @@ object ConfigSchema {
         ),
         ConfigFieldSpec(
             "baroSmoothingS", FieldKind.NUMBER, "s", 0.0, 60.0,
-            "Low-pass time constant of the barometric altitude. Raise it when the height wobbles on flat ground; " +
-                "lower it when stairs come out smeared or too low.",
+            "Low-pass time constant of the barometric altitude, used only while baroConfirmSteps is 0. Raise it " +
+                "when the height wobbles on flat ground; lower it when stairs come out smeared or too low.",
         ),
         ConfigFieldSpec(
             "baroHoldWhenStill", FieldKind.BOOLEAN, "", 0.0, 1.0,
-            "Freeze the altitude while no steps happen, which removes pressure noise when standing.",
+            "Freeze the altitude while no steps happen, which removes pressure noise when standing. Used only " +
+                "while baroConfirmSteps is 0.",
         ),
         ConfigFieldSpec(
             "baroStillGapS", FieldKind.NUMBER, "s", 0.5, 60.0,
             "A gap between steps longer than this counts as standing still for baroHoldWhenStill. Must stay " +
-                "above the slowest step period (2 s at stepBandLowHz = 0.5).",
+                "above the slowest step period (2 s at stepBandLowHz = 0.5). Used only while baroConfirmSteps is 0.",
         ),
         ConfigFieldSpec(
             "baroConfirmSteps", FieldKind.INTEGER, "steps", 0.0, 50.0,
             "A height change counts only when the height keeps moving the same way step after step, with at " +
                 "least this many steps of baroConfirmStepM or more, as on stairs or a slope; shorter changes " +
-                "(pressure zones indoors, doors, wind) are held out. 0 takes every change. Raise it when the " +
-                "height jumps on flat ground; lower it when short flights of stairs or gentle slopes are missing.",
+                "(pressure zones indoors, doors) are held out, while wobble slower than about 4 s passes. " +
+                "0 turns the filter off. Raise it when the height jumps on flat ground; lower it when short " +
+                "flights of stairs or gentle slopes are missing.",
         ),
         ConfigFieldSpec(
             "baroConfirmStepM", FieldKind.NUMBER, "m", 0.0, 0.5,

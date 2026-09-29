@@ -73,9 +73,15 @@ data class PipelineConfig(
     val preferHardwareSteps: Boolean = false,
 
     // --- altitude ---
-    /** Low-pass time constant for barometric altitude, seconds. */
+    /**
+     * Low-pass time constant for barometric altitude, seconds. Used only while [baroConfirmSteps]
+     * is 0; the climb filter takes its height from per-step means of the unsmoothed pressure.
+     */
     val baroSmoothingS: Double = 1.0,
-    /** Hold altitude constant while no steps occur (removes pressure noise when standing). */
+    /**
+     * Hold altitude constant while no steps occur (removes pressure noise when standing). Used only
+     * while [baroConfirmSteps] is 0; the climb filter judges a stand like any other step interval.
+     */
     val baroHoldWhenStill: Boolean = true,
     /**
      * A gap between two steps longer than this, seconds, counts as standing still for
@@ -86,11 +92,13 @@ data class PipelineConfig(
      */
     val baroStillGapS: Double = 4.0,
     /**
-     * A barometric height change reaches the path only when the height keeps moving the same way
-     * step after step, as on stairs or a slope, with at least this many of those steps moving it by
-     * [baroConfirmStepM] or more. Shorter changes, such as the pressure differences between rooms,
-     * door pulses and wind on a building, are held out, and so is most of a slope under about 5 %.
-     * 0 takes every change.
+     * The climb filter: a barometric height change reaches the path only when the height keeps
+     * moving the same way step after step, as on stairs or a slope, with at least this many of those
+     * steps moving it by [baroConfirmStepM] or more (see pdr/Climbs). Shorter changes, such as the
+     * pressure differences between rooms and door pulses, are held out. So is much of a gentle
+     * slope: at a 0.67 m stride about a third of a 5 % slope and most of a 3 % one, and more at
+     * shorter strides. Pressure wobble slower than about 4 s passes. 0 turns the filter off and
+     * takes every change through [baroSmoothingS] and [baroHoldWhenStill].
      */
     val baroConfirmSteps: Int = 5,
     /**
