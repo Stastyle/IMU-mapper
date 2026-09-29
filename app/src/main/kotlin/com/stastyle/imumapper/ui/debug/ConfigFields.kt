@@ -30,8 +30,11 @@ enum class ConfigField(val label: String, val type: FieldType, val hint: String)
     STEP_BAND_LOW_HZ("Step band low (Hz)", FieldType.DOUBLE, "0.05 to 10"),
     STEP_BAND_HIGH_HZ("Step band high (Hz)", FieldType.DOUBLE, "above low, up to 20"),
     PREFER_HARDWARE_STEPS("Prefer hardware steps", FieldType.BOOL, ""),
-    BARO_SMOOTHING_S("Baro smoothing (s)", FieldType.DOUBLE, "0 to 60"),
-    BARO_HOLD_WHEN_STILL("Hold altitude when still", FieldType.BOOL, ""),
+    BARO_CONFIRM_STEPS("Steps to confirm a height change (0 = off)", FieldType.INT, "0 to 50"),
+    BARO_CONFIRM_STEP_M("Min height change per step (m)", FieldType.DOUBLE, "0 to 0.5"),
+    BARO_MAX_HELD_M("Max held-out height (m)", FieldType.DOUBLE, "0 to 50, only when steps to confirm is above 0"),
+    BARO_SMOOTHING_S("Baro smoothing (s)", FieldType.DOUBLE, "0 to 60, only when steps to confirm is 0"),
+    BARO_HOLD_WHEN_STILL("Hold altitude when still (only when steps to confirm is 0)", FieldType.BOOL, ""),
     LOOP_CLOSURE("Loop closure", FieldType.BOOL, ""),
     SMOOTHING_WINDOW("Smoothing window (points)", FieldType.INT, "1 to 99"),
     PDR_FALLBACK("PDR fallback when tracking lost", FieldType.BOOL, ""),
@@ -74,6 +77,9 @@ data class ConfigDraft(
                 ConfigField.STEP_BAND_LOW_HZ to num(c.stepBandLowHz),
                 ConfigField.STEP_BAND_HIGH_HZ to num(c.stepBandHighHz),
                 ConfigField.PREFER_HARDWARE_STEPS to c.preferHardwareSteps.toString(),
+                ConfigField.BARO_CONFIRM_STEPS to c.baroConfirmSteps.toString(),
+                ConfigField.BARO_CONFIRM_STEP_M to num(c.baroConfirmStepM),
+                ConfigField.BARO_MAX_HELD_M to num(c.baroMaxHeldM),
                 ConfigField.BARO_SMOOTHING_S to num(c.baroSmoothingS),
                 ConfigField.BARO_HOLD_WHEN_STILL to c.baroHoldWhenStill.toString(),
                 ConfigField.LOOP_CLOSURE to c.loopClosure.toString(),
@@ -142,6 +148,9 @@ object ConfigFields {
             errors[ConfigField.STEP_BAND_HIGH_HZ] = "Must be above the low limit"
         }
         val baroSmoothing = double(ConfigField.BARO_SMOOTHING_S, 0.0, 60.0)
+        val confirmSteps = int(ConfigField.BARO_CONFIRM_STEPS, 0, 50)
+        val confirmStepM = double(ConfigField.BARO_CONFIRM_STEP_M, 0.0, 0.5)
+        val maxHeldM = double(ConfigField.BARO_MAX_HELD_M, 0.0, 50.0)
         val window = int(ConfigField.SMOOTHING_WINDOW, 1, 99)
         val resample = double(ConfigField.VIO_RESAMPLE_PERIOD_S, 0.01, 5.0)
 
@@ -165,6 +174,9 @@ object ConfigFields {
             preferHardwareSteps = draft.bool(ConfigField.PREFER_HARDWARE_STEPS),
             baroSmoothingS = baroSmoothing!!,
             baroHoldWhenStill = draft.bool(ConfigField.BARO_HOLD_WHEN_STILL),
+            baroConfirmSteps = confirmSteps!!,
+            baroConfirmStepM = confirmStepM!!,
+            baroMaxHeldM = maxHeldM!!,
             loopClosure = draft.bool(ConfigField.LOOP_CLOSURE),
             smoothingWindow = window!!,
             pdrFallbackWhenTrackingLost = draft.bool(ConfigField.PDR_FALLBACK),
@@ -186,7 +198,9 @@ object ConfigFields {
             d(a.stepMinIntervalS, b.stepMinIntervalS) || d(a.stepMinSwing, b.stepMinSwing) ||
             d(a.stepBandLowHz, b.stepBandLowHz) || d(a.stepBandHighHz, b.stepBandHighHz) ||
             a.preferHardwareSteps != b.preferHardwareSteps || d(a.baroSmoothingS, b.baroSmoothingS) ||
-            a.baroHoldWhenStill != b.baroHoldWhenStill || a.loopClosure != b.loopClosure ||
+            a.baroHoldWhenStill != b.baroHoldWhenStill || a.baroConfirmSteps != b.baroConfirmSteps ||
+            d(a.baroConfirmStepM, b.baroConfirmStepM) || d(a.baroMaxHeldM, b.baroMaxHeldM) ||
+            a.loopClosure != b.loopClosure ||
             a.smoothingWindow != b.smoothingWindow ||
             a.pdrFallbackWhenTrackingLost != b.pdrFallbackWhenTrackingLost ||
             d(a.vioResamplePeriodS, b.vioResamplePeriodS)

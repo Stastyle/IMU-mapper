@@ -18,11 +18,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
@@ -41,24 +44,37 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.stastyle.imumapper.BuildConfig
 import com.stastyle.imumapper.pipeline.core.CarryPosition
+import com.stastyle.imumapper.pipeline.core.PipelineConfig
 import com.stastyle.imumapper.pipeline.core.TripMode
 import com.stastyle.imumapper.ui.common.appContainer
+import com.stastyle.imumapper.ui.debug.ConfigDraft
 import com.stastyle.imumapper.update.ReleaseInfo
 import com.stastyle.imumapper.update.ReleaseNotes
 import com.stastyle.imumapper.update.UpdateManager
 import com.stastyle.imumapper.update.UpdateState
 import kotlin.math.roundToInt
 
-/** Carry position, default trip mode, north from compass, check for updates, about. */
+/**
+ * Carry position, default trip mode, north from compass, steps to confirm a height change, check for
+ * updates, about.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(onBack: () -> Unit) {
@@ -70,6 +86,8 @@ fun SettingsScreen(onBack: () -> Unit) {
     val carryPosition by vm.carryPosition.collectAsStateWithLifecycle()
     val tripMode by vm.defaultTripMode.collectAsStateWithLifecycle()
     val northFromCompass by vm.northFromCompass.collectAsStateWithLifecycle()
+    val confirmSteps by vm.baroConfirmSteps.collectAsStateWithLifecycle()
+    val maxHeldM by vm.baroMaxHeldM.collectAsStateWithLifecycle()
     val updateState by vm.updateState.collectAsStateWithLifecycle()
 
     Scaffold(
@@ -99,6 +117,11 @@ fun SettingsScreen(onBack: () -> Unit) {
                 onTripMode = vm::setDefaultTripMode,
                 northFromCompass = northFromCompass,
                 onNorthFromCompass = vm::setNorthFromCompass,
+            )
+            ProcessingSection(
+                confirmSteps = confirmSteps,
+                maxHeldM = maxHeldM,
+                onConfirmSteps = vm::setBaroConfirmSteps,
             )
             UpdatesSection(
                 state = updateState,
@@ -198,6 +221,101 @@ private fun RecordingSection(
                 )
             }
             Switch(checked = northFromCompass, onCheckedChange = null)
+        }
+    }
+}
+
+@Composable
+private fun ProcessingSection(confirmSteps: Int?, maxHeldM: Double?, onConfirmSteps: (Int) -> Unit) {
+    SectionCard(title = "Processing") {
+        Text("Steps to confirm a height change", style = MaterialTheme.typography.labelLarge)
+        Text(
+            confirmStepsHelp(maxHeldM),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        StepCountStepper(steps = confirmSteps, onSteps = onConfirmSteps)
+    }
+}
+
+/**
+ * The help text under the step count. [maxHeldM] is the saved [PipelineConfig.baroMaxHeldM], which the
+ * Debug editor ("Max held-out height") or an applied tuning proposal sets; while it is null, before the
+ * calibration has loaded, the text names no number. At 0 or below the path follows the barometer, so the
+ * filter holds nothing out.
+ */
+internal fun confirmStepsHelp(maxHeldM: Double?): String {
+    val slopes = when {
+        maxHeldM == null ->
+            "A gentle slope can lose part of its height for good, up to a limit set in the Debug editor; " +
+                "only height beyond that comes through."
+        maxHeldM <= 0.0 ->
+            "The height limit in the Debug editor is 0 m, though, so every change comes through."
+        else ->
+            "A gentle slope can lose up to ${ConfigDraft.num(maxHeldM)} m of its height for good, the limit " +
+                "set in the Debug editor; only height beyond that comes through."
+    }
+    return "Applies to barometer height (all of a Pocket trip, elsewhere only where camera tracking was " +
+        "lost), also when trips are re-processed. A height change counts only if it keeps going one way for " +
+        "about this many steps (default $DEFAULT_CONFIRM_STEPS), as on stairs; pressure jumps on flat ground " +
+        "do not. Fewer steps keep short stairs and more of a shallow slope; more steps hold out more of the " +
+        "slower pressure changes wind can cause. Off takes every change. " + slopes
+}
+
+/**
+ * Minus, the value (0 shown as "Off") and plus. [steps] is null until the saved calibration has loaded;
+ * until then the value is a placeholder and both buttons are disabled. Plus stops at [MAX_CONFIRM_STEPS];
+ * a larger value set in the Debug editor is still shown and counts down with minus.
+ */
+@Composable
+private fun StepCountStepper(steps: Int?, onSteps: (Int) -> Unit) {
+    val shown = when {
+        steps == null -> "…"
+        steps <= 0 -> "Off"
+        else -> steps.toString()
+    }
+    val spoken = when {
+        steps == null -> "Loading"
+        steps <= 0 -> "Off"
+        steps == 1 -> "1 step"
+        else -> "$steps steps"
+    }
+    // Set by the first button press, so TalkBack reads each new value then but not the saved value
+    // arriving while the screen opens.
+    var pressed by remember { mutableStateOf(false) }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        IconButton(
+            onClick = {
+                if (steps != null) {
+                    pressed = true
+                    onSteps(steps - 1)
+                }
+            },
+            enabled = steps != null && steps > 0,
+        ) {
+            Icon(Icons.Filled.Remove, contentDescription = "Fewer steps")
+        }
+        Text(
+            shown,
+            style = MaterialTheme.typography.titleMedium,
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .widthIn(min = 56.dp)
+                .semantics {
+                    contentDescription = spoken
+                    if (pressed) liveRegion = LiveRegionMode.Polite
+                },
+        )
+        IconButton(
+            onClick = {
+                if (steps != null) {
+                    pressed = true
+                    onSteps(steps + 1)
+                }
+            },
+            enabled = steps != null && steps < MAX_CONFIRM_STEPS,
+        ) {
+            Icon(Icons.Filled.Add, contentDescription = "More steps")
         }
     }
 }
@@ -356,6 +474,11 @@ private fun releaseOf(state: UpdateState): ReleaseInfo? = when (state) {
     is UpdateState.Error -> state.release
     else -> null
 }
+
+/** Highest count the Settings stepper offers; the Debug editor takes up to ConfigSchema's 50. */
+private const val MAX_CONFIRM_STEPS = 20
+
+private val DEFAULT_CONFIRM_STEPS = PipelineConfig().baroConfirmSteps
 
 private fun carryPositionLabel(position: CarryPosition): String = when (position) {
     CarryPosition.HAND -> "Hand"

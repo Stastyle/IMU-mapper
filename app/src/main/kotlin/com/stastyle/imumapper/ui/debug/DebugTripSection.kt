@@ -229,7 +229,12 @@ private fun BoolField(field: ConfigField, checked: Boolean, onChange: (Boolean) 
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-        Text(field.label, style = MaterialTheme.typography.bodyMedium)
+        // Weighted so a long label wraps instead of pushing the switch off the row.
+        Text(
+            field.label,
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.weight(1f).padding(end = 12.dp),
+        )
         Switch(checked = checked, onCheckedChange = onChange)
     }
 }

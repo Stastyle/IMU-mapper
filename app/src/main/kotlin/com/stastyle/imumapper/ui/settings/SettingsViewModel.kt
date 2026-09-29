@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.stastyle.imumapper.data.CalibrationRepository
 import com.stastyle.imumapper.pipeline.core.CarryPosition
+import com.stastyle.imumapper.pipeline.core.PipelineConfig
 import com.stastyle.imumapper.pipeline.core.TripMode
 import com.stastyle.imumapper.update.UpdateManager
 import com.stastyle.imumapper.update.UpdateState
@@ -27,9 +28,24 @@ class SettingsViewModel(
     val defaultTripMode: StateFlow<TripMode> = updates.preferences.defaultTripMode
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), TripMode.POCKET)
 
-    /** [com.stastyle.imumapper.pipeline.core.PipelineConfig.northFromCompass] of the saved calibration. */
+    /** [PipelineConfig.northFromCompass] of the saved calibration. */
     val northFromCompass: StateFlow<Boolean> = calibration.observeConfig().map { it.northFromCompass }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), true)
+
+    /**
+     * [PipelineConfig.baroConfirmSteps] of the saved calibration, 0 when off; null until it has loaded, so
+     * the stepper never shows or steps from a value that is not the saved one.
+     */
+    val baroConfirmSteps: StateFlow<Int?> = calibration.observeConfig().map { it.baroConfirmSteps }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), null)
+
+    /**
+     * [PipelineConfig.baroMaxHeldM] of the saved calibration, which Settings names but does not set (the
+     * Debug editor or an applied tuning proposal does); null until it has loaded, so the help text never
+     * shows a number that is not the saved one.
+     */
+    val baroMaxHeldM: StateFlow<Double?> = calibration.observeConfig().map { it.baroMaxHeldM }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), null)
 
     val updateState: StateFlow<UpdateState> = updates.state
 
@@ -61,6 +77,19 @@ class SettingsViewModel(
         }
     }
 
+    /** Saves the step count into the calibration, keeping every other value and the calibration note. */
+    fun setBaroConfirmSteps(steps: Int) {
+        viewModelScope.launch {
+            try {
+                withConfirmSteps(calibration.getConfig(), steps)?.let { calibration.saveConfig(it) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "steps to confirm a height change not saved", e)
+            }
+        }
+    }
+
     fun setDefaultTripMode(mode: TripMode) {
         viewModelScope.launch {
             runCatching { updates.preferences.setDefaultTripMode(mode) }
@@ -84,4 +113,14 @@ class SettingsViewModel(
         const val TAG = "SettingsViewModel"
         const val STOP_TIMEOUT_MS = 5_000L
     }
+}
+
+/**
+ * The calibration Settings saves when the user sets [PipelineConfig.baroConfirmSteps] to [steps]: [current]
+ * with only that field changed, or null when [current] already holds it, so nothing is written. A count
+ * below 0 is 0 (off). There is no upper clamp here; the stepper stops adding at its own maximum.
+ */
+internal fun withConfirmSteps(current: PipelineConfig, steps: Int): PipelineConfig? {
+    val n = steps.coerceAtLeast(0)
+    return if (current.baroConfirmSteps == n) null else current.copy(baroConfirmSteps = n)
 }
