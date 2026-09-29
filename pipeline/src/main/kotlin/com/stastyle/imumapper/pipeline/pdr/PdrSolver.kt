@@ -63,6 +63,11 @@ class PdrContext(
     val stepHeadingRad: DoubleArray,
     val stepStrideM: DoubleArray,
     val altitude: AltitudeTrack?,
+    /**
+     * Where the height change of [altitude] reaches the path ([PipelineConfig.baroConfirmSteps]);
+     * null when every change does.
+     */
+    val climbs: ClimbSpans?,
     val diagnostics: Map<String, String>,
 ) {
     fun segmentAt(tNs: Long): HeadingSegment {
@@ -136,10 +141,29 @@ class PdrSolver(
         val altitude = AltitudeTrack.fromBaro(log.baro, config.baroSmoothingS)
         diag["baro"] = if (altitude == null) "absent" else "present"
         if (altitude != null) diag["baroP0hPa"] = Diag.num(altitude.p0hPa, 2)
+        val climbs = if (altitude != null && config.baroConfirmSteps > 0) {
+            // The decision needs the unsmoothed height; the path keeps the low-passed one.
+            val raw = AltitudeTrack.fromBaro(log.baro, 0.0)!!
+            val settleNs = (SETTLING_TIME_CONSTANTS * config.baroSmoothingS * 1e9).toLong()
+            ClimbSpans.detect(
+                raw, steps, pauses, log.firstTimestampNs, config.baroConfirmSteps, config.baroConfirmStepM, settleNs,
+            ).also {
+                diag["baroClimbs"] = it.acceptedRuns.toString()
+                diag["baroClimbsHeld"] = it.rejectedRuns.toString()
+                if (it.size > 0) {
+                    val startNs = log.firstTimestampNs
+                    diag["baroClimbTimesS"] = (0 until it.size).joinToString(";") { k ->
+                        Diag.num((it.startNs(k) - startNs) / 1e9, 1) + "-" + Diag.num((it.endNs(k) - startNs) / 1e9, 1)
+                    }
+                }
+            }
+        } else {
+            null
+        }
 
         return PdrContext(
             log, config, orientation.track, orientation.source, world, steps, software.size, hardware.size,
-            pauses, segments, headings, strides, altitude, diag,
+            pauses, segments, headings, strides, altitude, climbs, diag,
         )
     }
 
@@ -168,7 +192,6 @@ class PdrSolver(
         var z = start.z
         var prevNs = fromNs
         val altitude = ctx.altitude
-        val pauses = ctx.pauses
         val hold = ctx.config.baroHoldWhenStill
         val stillGapNs = (ctx.config.baroStillGapS * 1e9).toLong()
         val settleNs = (SETTLING_TIME_CONSTANTS * ctx.config.baroSmoothingS * 1e9).toLong()
@@ -180,15 +203,15 @@ class PdrSolver(
             y += d * cos(h)
             if (altitude != null) {
                 if (!hold || t - prevNs <= stillGapNs) {
-                    z += altitudeDelta(altitude, pauses, prevNs, t)
+                    z += altitudeDelta(ctx, altitude, prevNs, t)
                 } else {
                     // Standing still: freeze only the middle of the gap. The low-passed barometer is
                     // still catching up with the last steps right after them, and the climb of this
                     // step has begun before its peak, so both ends of the gap are kept.
                     val tailEnd = minOf(t, prevNs + settleNs)
                     val headStart = maxOf(t - settleNs, tailEnd)
-                    z += altitudeDelta(altitude, pauses, prevNs, tailEnd)
-                    z += altitudeDelta(altitude, pauses, headStart, t)
+                    z += altitudeDelta(ctx, altitude, prevNs, tailEnd)
+                    z += altitudeDelta(ctx, altitude, headStart, t)
                 }
             }
             out.add(PathPoint(t, Vec3(x, y, z), PositionSource.PDR, h, i))
@@ -345,8 +368,20 @@ class PdrSolver(
         return if (k == steps.size) steps else DetectedSteps(times.copyOf(k), swings.copyOf(k))
     }
 
+    /**
+     * Barometric altitude change over [fromNs, toNs] with the paused parts left out, and with only
+     * the parts inside [PdrContext.climbs] when there are climb spans.
+     */
+    private fun altitudeDelta(ctx: PdrContext, altitude: AltitudeTrack, fromNs: Long, toNs: Long): Double {
+        if (toNs <= fromNs) return 0.0
+        val climbs = ctx.climbs ?: return unpausedDelta(altitude, ctx.pauses, fromNs, toNs)
+        var delta = 0.0
+        climbs.forEachInside(fromNs, toNs) { a, b -> delta += unpausedDelta(altitude, ctx.pauses, a, b) }
+        return delta
+    }
+
     /** Barometric altitude change over [fromNs, toNs] with the paused parts left out. */
-    private fun altitudeDelta(altitude: AltitudeTrack, pauses: PauseIntervals, fromNs: Long, toNs: Long): Double {
+    private fun unpausedDelta(altitude: AltitudeTrack, pauses: PauseIntervals, fromNs: Long, toNs: Long): Double {
         if (toNs <= fromNs) return 0.0
         if (pauses.isEmpty) return altitude.at(toNs) - altitude.at(fromNs)
         var delta = 0.0

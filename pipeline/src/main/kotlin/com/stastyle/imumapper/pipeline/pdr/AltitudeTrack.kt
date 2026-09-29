@@ -16,8 +16,49 @@ class AltitudeTrack private constructor(
     val size: Int get() = times.size
     val isEmpty: Boolean get() = times.isEmpty()
 
+    /**
+     * Integral of the height from the first sample up to each sample, metre-seconds, for [meanOver].
+     * Built on first use: most tracks are only ever read with [at].
+     */
+    private val integral: DoubleArray by lazy {
+        val out = DoubleArray(times.size)
+        for (k in 1 until times.size) {
+            out[k] = out[k - 1] + (heights[k - 1] + heights[k]) * 0.5 * ((times[k] - times[k - 1]) / 1e9)
+        }
+        out
+    }
+
     fun at(tNs: Long): Double {
         if (times.isEmpty()) return 0.0
+        val i = lastAtOrBefore(tNs)
+        if (i < 0) return heights[0]
+        if (i >= times.size - 1) return heights[times.size - 1]
+        val t0 = times[i]
+        val t1 = times[i + 1]
+        if (t1 <= t0) return heights[i]
+        val f = (tNs - t0).toDouble() / (t1 - t0).toDouble()
+        return heights[i] + (heights[i + 1] - heights[i]) * f
+    }
+
+    /**
+     * Mean of [at] over [fromNs, toNs], with the same interpolation and clamping; the value at
+     * [toNs] for an empty or backwards range.
+     */
+    fun meanOver(fromNs: Long, toNs: Long): Double {
+        if (times.isEmpty()) return 0.0
+        if (toNs <= fromNs) return at(toNs)
+        return (integralTo(toNs) - integralTo(fromNs)) / ((toNs - fromNs) / 1e9)
+    }
+
+    /** Integral of [at] from the first sample to [tNs], negative before it. */
+    private fun integralTo(tNs: Long): Double {
+        val i = lastAtOrBefore(tNs)
+        if (i < 0) return heights[0] * ((tNs - times[0]) / 1e9)
+        return integral[i] + (heights[i] + at(tNs)) * 0.5 * ((tNs - times[i]) / 1e9)
+    }
+
+    /** Index of the last sample at or before [tNs], -1 when there is none. */
+    private fun lastAtOrBefore(tNs: Long): Int {
         var lo = 0
         var hi = times.size - 1
         var i = -1
@@ -30,13 +71,7 @@ class AltitudeTrack private constructor(
                 hi = mid - 1
             }
         }
-        if (i < 0) return heights[0]
-        if (i >= times.size - 1) return heights[times.size - 1]
-        val t0 = times[i]
-        val t1 = times[i + 1]
-        if (t1 <= t0) return heights[i]
-        val f = (tNs - t0).toDouble() / (t1 - t0).toDouble()
-        return heights[i] + (heights[i + 1] - heights[i]) * f
+        return i
     }
 
     companion object {

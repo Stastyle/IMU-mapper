@@ -85,6 +85,19 @@ data class PipelineConfig(
      * the gap is frozen.
      */
     val baroStillGapS: Double = 4.0,
+    /**
+     * A barometric height change reaches the path only when the height keeps moving the same way
+     * step after step, as on stairs or a slope, with at least this many of those steps moving it by
+     * [baroConfirmStepM] or more. Shorter changes, such as the pressure differences between rooms,
+     * door pulses and wind on a building, are held out, and so is most of a slope under about 5 %.
+     * 0 takes every change.
+     */
+    val baroConfirmSteps: Int = 5,
+    /**
+     * Height change of a single step, metres, from which it counts toward [baroConfirmSteps]. A
+     * smaller step in the same direction neither counts nor breaks the run.
+     */
+    val baroConfirmStepM: Double = 0.02,
 
     // --- post ---
     /** Apply loop closure when a LOOP_CLOSED annotation exists. */

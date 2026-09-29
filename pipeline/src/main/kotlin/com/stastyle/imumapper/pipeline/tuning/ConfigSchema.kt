@@ -131,6 +131,19 @@ object ConfigSchema {
                 "above the slowest step period (2 s at stepBandLowHz = 0.5).",
         ),
         ConfigFieldSpec(
+            "baroConfirmSteps", FieldKind.INTEGER, "steps", 0.0, 50.0,
+            "A height change counts only when the height keeps moving the same way step after step, with at " +
+                "least this many steps of baroConfirmStepM or more, as on stairs or a slope; shorter changes " +
+                "(pressure zones indoors, doors, wind) are held out. 0 takes every change. Raise it when the " +
+                "height jumps on flat ground; lower it when short flights of stairs or gentle slopes are missing.",
+        ),
+        ConfigFieldSpec(
+            "baroConfirmStepM", FieldKind.NUMBER, "m", 0.0, 0.5,
+            "Height change of one step from which it counts toward baroConfirmSteps; a smaller step the same " +
+                "way neither counts nor breaks the run. Lower it when gentle slopes come out flat; raise it when " +
+                "noise on flat ground passes as a climb.",
+        ),
+        ConfigFieldSpec(
             "loopClosure", FieldKind.BOOLEAN, "", 0.0, 1.0,
             "Spread the end-to-start error over the path when the walker declared a closed loop.",
         ),
@@ -168,6 +181,8 @@ object ConfigSchema {
         "baroSmoothingS" -> num(c.baroSmoothingS)
         "baroHoldWhenStill" -> c.baroHoldWhenStill.toString()
         "baroStillGapS" -> num(c.baroStillGapS)
+        "baroConfirmSteps" -> c.baroConfirmSteps.toString()
+        "baroConfirmStepM" -> num(c.baroConfirmStepM)
         "loopClosure" -> c.loopClosure.toString()
         "smoothingWindow" -> c.smoothingWindow.toString()
         "pdrFallbackWhenTrackingLost" -> c.pdrFallbackWhenTrackingLost.toString()

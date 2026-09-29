@@ -11,8 +11,11 @@ import com.stastyle.imumapper.pipeline.log.RawLog
  *    instead of being re-estimated from the gait, so moving the phone no longer turns the path.
  * 5: +Y is magnetic north, set from the fused rotation vector at the start of the trip
  *    (northFromCompass); before, every trip kept the game rotation vector's arbitrary yaw.
+ * 6: a barometric height change reaches the path only when the height keeps moving the same way
+ *    step after step with at least baroConfirmSteps steps of baroConfirmStepM or more, so pressure
+ *    changes on flat ground indoors no longer show as climbs.
  */
-const val PIPELINE_VERSION: Int = 5
+const val PIPELINE_VERSION: Int = 6
 
 /**
  * Turns a raw log into a path. Implementations must be deterministic: the same log and config

@@ -77,7 +77,7 @@ class PdrProcessorTest {
         val cfg = PipelineConfig(strideLengthM = w.strideM * 1.04, useMagnetometer = false)
         val log = w.build(cfg)
         val r = PdrProcessor().process(log, cfg)
-        assertEquals(5, r.pipelineVersion)
+        assertEquals(6, r.pipelineVersion)
         assertEquals(r.points.size, r.rawPoints.size, "post-processing moves points, never adds or drops them")
         for (i in r.points.indices) {
             assertEquals(r.points[i].tNs, r.rawPoints[i].tNs)
@@ -372,17 +372,81 @@ class PdrProcessorTest {
     @Test
     fun longStillHoldsAltitudeAgainstPressureDrift() {
         // Pressure drifting 0.005 hPa/s reads as a 4 cm/s descent. Over a 30 s stop the hold freezes
-        // the middle of the gap, so far less of the drift reaches the path than without it.
+        // the middle of the gap, so far less of the drift reaches the path than without it. The climb
+        // filter is off: it would hold most of the drift out too, and this is about the hold.
         val w = SyntheticWalk(baroDriftHpaPerS = 0.005)
             .still(2.0).walkTo(0.0, 8.0).still(30.0).walkTo(0.0, 16.0).still(1.0)
-        val held = run(w).points.last().p.z
-        val free = run(w, config(w) { it.copy(baroHoldWhenStill = false) }).points.last().p.z
+        val base = config(w) { it.copy(baroConfirmSteps = 0) }
+        val held = run(w, base).points.last().p.z
+        val free = run(w, base.copy(baroHoldWhenStill = false)).points.last().p.z
         assertTrue(free < -1.2, "without the hold the drift shows: $free")
         assertTrue(held > free + 0.7, "the hold should remove most of the drift: held $held vs free $free")
 
         // A shorter gap limit freezes more of it.
-        val tight = run(w, config(w) { it.copy(baroStillGapS = 1.0) }).points.last().p.z
+        val tight = run(w, base.copy(baroStillGapS = 1.0)).points.last().p.z
         assertTrue(tight >= held - 1e-9, "tight $tight vs held $held")
+    }
+
+    @Test
+    fun pressureZonesOnFlatGroundAreHeldOut() {
+        // One floor through rooms held at other pressures: 10 Pa lower (0.84 m "up") from 15 s to
+        // 30 s, 6 Pa higher (0.5 m "down") from 35 s to 45 s, and a 2 s door pulse on top.
+        val zones = { s: Double ->
+            val zone = when (s) {
+                in 15.0..30.0 -> -0.10
+                in 35.0..45.0 -> 0.06
+                else -> 0.0
+            }
+            zone + if (s in 20.0..22.0) -0.05 else 0.0
+        }
+        val w = SyntheticWalk(baroDisturbanceHpa = zones).still(2.0).walkTo(0.0, 60.0).still(2.0)
+        val r = run(w)
+        assertTrue(r.stats.maxZ < 0.1 && r.stats.minZ > -0.1, "flat floor: z from ${r.stats.minZ} to ${r.stats.maxZ}")
+        assertEquals("0", r.diagnostics["baroClimbs"])
+
+        val every = run(w, config(w) { it.copy(baroConfirmSteps = 0) })
+        assertTrue(
+            every.stats.maxZ > 0.7 && every.stats.minZ < -0.4,
+            "without the filter the zones show: z from ${every.stats.minZ} to ${every.stats.maxZ}",
+        )
+        assertNull(every.diagnostics["baroClimbs"])
+    }
+
+    @Test
+    fun climbFilterKeepsStairsAndSteepRamps() {
+        // A flight of 18 steps rising 3 m, with level walking on both sides.
+        val stairs = walk().still(2.0).walkTo(0.0, 5.0).walkTo(0.0, 17.0, 3.0).walkTo(0.0, 22.0, 3.0).still(2.0)
+        val r = run(stairs)
+        assertWithin(3.0, r.points.last().p.z, 0.05, "flight of stairs")
+        assertEquals("1", r.diagnostics["baroClimbs"])
+
+        val ramp = walk().still(2.0).walkTo(0.0, 5.0).walkTo(0.0, 35.0, 3.6).walkTo(0.0, 40.0, 3.6).still(2.0)
+        assertWithin(3.6, run(ramp).points.last().p.z, 0.05, "12 % ramp")
+
+        // Four steps up: the phone rises through about six step intervals, so the default keeps them,
+        // while a longer confirmation holds them out.
+        val w = walk()
+        val four = w.still(2.0).walkTo(0.0, 5.0).walkTo(0.0, 5.0 + 4 * w.strideM, 0.68)
+            .walkTo(0.0, 10.0 + 4 * w.strideM, 0.68).still(2.0)
+        assertWithin(0.68, run(four).points.last().p.z, 0.10, "four steps up")
+        val strict = run(four, config(four) { it.copy(baroConfirmSteps = 10) }).points.last().p.z
+        assertTrue(abs(strict) < 0.05, "four steps are fewer than 10: $strict")
+    }
+
+    @Test
+    fun segmentApiMatchesFullSolutionOnStairs() {
+        // The VIO fuser solves gaps from any step; the climb spans must not depend on where it starts.
+        val w = walk().still(2.0).walkTo(0.0, 5.0).walkTo(0.0, 17.0, 3.0).walkTo(0.0, 22.0, 3.0).still(1.0)
+        val cfg = config(w)
+        val log = w.build(cfg)
+        val solver = PdrSolver()
+        val full = solver.solve(log, cfg)
+        val ctx = solver.prepare(log, cfg)
+        val mid = full.points.minBy { abs(it.p.z - 1.5) }
+        val tail = solver.solveSegment(ctx, mid.tNs + 1, Long.MAX_VALUE, mid.p, null)
+        val end = full.points.last().p
+        assertTrue(abs(end.z - tail.last().p.z) < 1e-6, "segment end ${tail.last().p} vs full $end")
+        assertWithin(3.0, tail.last().p.z, 0.05, "climb through the segment")
     }
 
     @Test

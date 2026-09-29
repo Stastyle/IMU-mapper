@@ -68,6 +68,16 @@ class ProposalParserTest {
     }
 
     @Test
+    fun climbConfirmationIsUnderstood() {
+        val p = accepted("""{"baroConfirmSteps": 6, "baroConfirmStepM": 0.03}""")
+        assertEquals(6, p.config.baroConfirmSteps)
+        assertEquals(0.03, p.config.baroConfirmStepM)
+        assertEquals(listOf("baroConfirmSteps", "baroConfirmStepM"), p.changes.map { it.key })
+        assertTrue(rejected("""{"baroConfirmSteps": 3.5}""").any { it.contains("whole number") })
+        assertTrue(rejected("""{"baroConfirmSteps": -1}""").any { it.contains("baroConfirmSteps") })
+    }
+
+    @Test
     fun fullConfigEchoedBackChangesOnlyWhatDiffers() {
         val text = PipelineConfigJson.encode(base.copy(weinbergK = 0.45))
         val p = accepted(text)
