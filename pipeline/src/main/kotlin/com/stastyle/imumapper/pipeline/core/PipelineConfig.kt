@@ -88,7 +88,7 @@ data class PipelineConfig(
      * [baroHoldWhenStill]. Must exceed the slowest supported step period ([stepBandLowHz] = 0.5 Hz
      * is a 2 s period), or slow walkers lose their climb. The barometer filter's settling tail
      * after the last step and the run-up to the next step are still counted; only the middle of
-     * the gap is frozen.
+     * the gap is frozen. Used only while [baroConfirmSteps] is 0.
      */
     val baroStillGapS: Double = 4.0,
     /**
@@ -96,9 +96,10 @@ data class PipelineConfig(
      * moving the same way step after step, as on stairs or a slope, with at least this many of those
      * steps moving it by [baroConfirmStepM] or more (see pdr/Climbs). Shorter changes, such as the
      * pressure differences between rooms and door pulses, are held out. So is much of a gentle
-     * slope: at a 0.67 m stride about a third of a 5 % slope and most of a 3 % one, and more at
-     * shorter strides. Pressure wobble slower than about 4 s passes. 0 turns the filter off and
-     * takes every change through [baroSmoothingS] and [baroHoldWhenStill].
+     * slope, until [baroMaxHeldM] brings it in: at a 0.67 m stride about a third of a 5 % slope and
+     * most of a 3 % one, and more at shorter strides. Pressure wobble slower than about 4 s passes.
+     * Below 4 many sudden pressure jumps pass, below 3 nearly all. 0 turns the filter off and takes
+     * every change through [baroSmoothingS] and [baroHoldWhenStill].
      */
     val baroConfirmSteps: Int = 5,
     /**
@@ -106,6 +107,13 @@ data class PipelineConfig(
      * smaller step in the same direction neither counts nor breaks the run.
      */
     val baroConfirmStepM: Double = 0.02,
+    /**
+     * With [baroConfirmSteps] on, the path's height stays within this many metres of the
+     * barometer's: held-out change beyond it comes through. It bounds the drift that slow pressure
+     * wobble would otherwise build up and the height a long gentle slope can lose, while pressure
+     * zones smaller than it (1.5 m is 18 Pa) stay out.
+     */
+    val baroMaxHeldM: Double = 1.5,
 
     // --- post ---
     /** Apply loop closure when a LOOP_CLOSED annotation exists. */

@@ -144,7 +144,10 @@ class PdrSolver(
         val climbs = if (altitude != null && config.baroConfirmSteps > 0) {
             // Climbs are judged and measured on the unsmoothed height; see Climbs.
             val raw = AltitudeTrack.fromBaro(log.baro, 0.0)!!
-            Climbs.detect(raw, steps, pauses, log.firstTimestampNs, config.baroConfirmSteps, config.baroConfirmStepM)
+            Climbs.detect(
+                raw, steps, pauses, log.firstTimestampNs, config.baroConfirmSteps, config.baroConfirmStepM,
+                maxOf(0.0, config.baroMaxHeldM),
+            )
                 .also { addClimbDiagnostics(it, steps, log.firstTimestampNs, diag) }
         } else {
             null
@@ -371,9 +374,10 @@ class PdrSolver(
     }
 
     /**
-     * baroClimbs and baroClimbsHeld count the climbs and the held-out runs, baroHeldM is the height
-     * held out in those runs, and baroClimbTimesS gives each climb as start-end seconds, from the step
-     * before it to its last step.
+     * baroClimbs and baroClimbsHeld count the climbs (ways back included) and the held-out runs,
+     * baroHeldM adds up the sizes of those runs, baroLimitM is what the baroMaxHeldM limit let
+     * through, and baroClimbTimesS gives each climb as start-end seconds, from the step before it to
+     * its last step.
      */
     private fun addClimbDiagnostics(
         climbs: Climbs,
@@ -384,6 +388,7 @@ class PdrSolver(
         diag["baroClimbs"] = climbs.size.toString()
         diag["baroClimbsHeld"] = climbs.heldRuns.toString()
         diag["baroHeldM"] = Diag.num(climbs.heldM, 2)
+        diag["baroLimitM"] = Diag.num(climbs.limitM, 2)
         if (climbs.size > 0) {
             diag["baroClimbTimesS"] = (0 until climbs.size).joinToString(";") { k ->
                 Diag.num((steps.tNs[climbs.firstStep(k) - 1] - startNs) / 1e9, 1) + "-" +

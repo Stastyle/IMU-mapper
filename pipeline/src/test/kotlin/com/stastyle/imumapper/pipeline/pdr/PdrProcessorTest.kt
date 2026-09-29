@@ -432,6 +432,9 @@ class PdrProcessorTest {
         val r = run(stairs)
         assertWithin(3.0, r.points.last().p.z, 0.05, "flight of stairs")
         assertEquals("1", r.diagnostics["baroClimbs"])
+        // The flight runs from 2 + 5/1.2 s to 2 + 17/1.2 s.
+        val (from, to) = r.diagnostics["baroClimbTimesS"]!!.split("-").map { it.toDouble() }
+        assertTrue(from in 5.0..6.5 && to in 15.5..17.0, "climb times $from-$to")
 
         val ramp = walk().still(2.0).walkTo(0.0, 5.0).walkTo(0.0, 35.0, 3.6).walkTo(0.0, 40.0, 3.6).still(2.0)
         assertWithin(3.6, run(ramp).points.last().p.z, 0.05, "12 % ramp")
@@ -484,6 +487,37 @@ class PdrProcessorTest {
     }
 
     @Test
+    fun doorZoneAfterAShortFlightIsNotAWayBack() {
+        // Nine steps up 1.5 m, then a stairwell door 1 s later into a corridor 10 Pa higher (0.84 m
+        // "down"): more than half the flight, right after it, but a jump, not a way back down.
+        val w = walk()
+        val s = w.strideM
+        val flightEndS = 2.0 + (5.0 + 9 * s) / 1.2
+        val door = SyntheticWalk(baroDisturbanceHpa = { t -> if (t > flightEndS + 1.0) 0.10 else 0.0 })
+        door.still(2.0).walkTo(0.0, 5.0).walkTo(0.0, 5.0 + 9 * s, 1.5).walkTo(0.0, 20.0 + 9 * s, 1.5).still(2.0)
+        assertWithin(1.5, run(door).points.last().p.z, 0.08, "short flight with a door zone after it")
+    }
+
+    @Test
+    fun slowWobbleAndGentleSlopesStayWithinTheLimit() {
+        // Ten minutes on one floor under 4 Pa wobble with a 20 s period, slower than a climb: some
+        // swings pass as climbs and others not, but the height stays within baroMaxHeldM (1.5 m) plus
+        // the swing (0.34 m) of the barometer.
+        val wobble = SyntheticWalk(baroDisturbanceHpa = { t -> 0.04 * sin(2 * PI * t / 20.0) })
+            .still(2.0).walkTo(0.0, 720.0).still(2.0)
+        val r = run(wobble)
+        assertTrue(r.stats.maxZ < 1.9 && r.stats.minZ > -1.9, "z from ${r.stats.minZ} to ${r.stats.maxZ}")
+
+        // A 3 % slope rising 6 m over 200 m: most of its steps are too small to count, so it comes
+        // through only once 1.5 m has been held out.
+        val slope = walk().still(2.0).walkTo(0.0, 5.0).walkTo(0.0, 205.0, 6.0).walkTo(0.0, 210.0, 6.0).still(2.0)
+        val end = run(slope).points.last().p.z
+        assertTrue(end > 4.4 && end < 6.1, "3 % slope over 200 m: $end")
+        val limitM = run(slope).diagnostics["baroLimitM"]!!.toDouble()
+        assertTrue(limitM > 2.5, "much of the slope came through the limit: $limitM")
+    }
+
+    @Test
     fun climbFilterIgnoresTheLowPass() {
         // The filter works on the unsmoothed height, so baroSmoothingS and the hold do not change it.
         val w = walk().still(2.0).walkTo(0.0, 5.0).walkTo(0.0, 17.0, 3.0).walkTo(0.0, 22.0, 3.0).still(8.0)
@@ -495,7 +529,7 @@ class PdrProcessorTest {
 
     @Test
     fun segmentApiMatchesFullSolutionOnStairs() {
-        // The VIO fuser solves gaps from any step; the climb spans must not depend on where it starts.
+        // VioProcessor fills gaps from any step; the climbs must not depend on where the segment starts.
         val w = walk().still(2.0).walkTo(0.0, 5.0).walkTo(0.0, 17.0, 3.0).walkTo(0.0, 22.0, 3.0).still(1.0)
         val cfg = config(w)
         val log = w.build(cfg)
@@ -507,6 +541,14 @@ class PdrProcessorTest {
         val end = full.points.last().p
         assertTrue(abs(end.z - tail.last().p.z) < 1e-6, "segment end ${tail.last().p} vs full $end")
         assertWithin(3.0, tail.last().p.z, 0.05, "climb through the segment")
+
+        // A segment that starts halfway through a climbing step's interval takes half its change.
+        val i = full.points.indexOfFirst { it.p.z > 1.0 }
+        val before = full.points[i - 1]
+        val at = full.points[i]
+        val half = solver.solveSegment(ctx, (before.tNs + at.tNs) / 2, at.tNs + 1, Vec3.ZERO, null)
+        assertEquals(1, half.size)
+        assertEquals((at.p.z - before.p.z) / 2, half[0].p.z, 1e-3)
     }
 
     @Test

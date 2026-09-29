@@ -137,13 +137,20 @@ object ConfigSchema {
                 "least this many steps of baroConfirmStepM or more, as on stairs or a slope; shorter changes " +
                 "(pressure zones indoors, doors) are held out, while wobble slower than about 4 s passes. " +
                 "0 turns the filter off. Raise it when the height jumps on flat ground; lower it when short " +
-                "flights of stairs or gentle slopes are missing.",
+                "flights of stairs are missing, but not below 4: at 3 about half of sudden pressure jumps pass, " +
+                "at 2 or 1 nearly all.",
         ),
         ConfigFieldSpec(
             "baroConfirmStepM", FieldKind.NUMBER, "m", 0.0, 0.5,
             "Height change of one step from which it counts toward baroConfirmSteps; a smaller step the same " +
                 "way neither counts nor breaks the run. Lower it when gentle slopes come out flat; raise it when " +
                 "noise on flat ground passes as a climb.",
+        ),
+        ConfigFieldSpec(
+            "baroMaxHeldM", FieldKind.NUMBER, "m", 0.0, 50.0,
+            "With baroConfirmSteps on, the height stays within this of the barometer's: held-out change beyond " +
+                "it comes through. Lower it when a long gentle slope comes out too flat or the height drifts on " +
+                "flat ground; raise it when pressure zones larger than it show as steps on one floor.",
         ),
         ConfigFieldSpec(
             "loopClosure", FieldKind.BOOLEAN, "", 0.0, 1.0,
@@ -185,6 +192,7 @@ object ConfigSchema {
         "baroStillGapS" -> num(c.baroStillGapS)
         "baroConfirmSteps" -> c.baroConfirmSteps.toString()
         "baroConfirmStepM" -> num(c.baroConfirmStepM)
+        "baroMaxHeldM" -> num(c.baroMaxHeldM)
         "loopClosure" -> c.loopClosure.toString()
         "smoothingWindow" -> c.smoothingWindow.toString()
         "pdrFallbackWhenTrackingLost" -> c.pdrFallbackWhenTrackingLost.toString()

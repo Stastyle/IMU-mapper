@@ -23,16 +23,23 @@ import kotlin.math.abs
  * before; a climb's steps take their changes, every other step takes none, so a climb adds the
  * height between the interval before it and its last interval. A step interval that touches a
  * pause gives no change and ends every run, so nothing climbed during a pause reaches the path.
+ * A jump inside one step interval shows as two large changes, and a flight of stairs as about two
+ * more changes than it has stairs.
  *
- * Held-out changes are gone for good, so the path does not return to the barometer by itself.
- * When pressure wobble passes some of its swings as climbs and holds out others, the path would
- * drift further with every swing. A run right after a climb that brings the height at least half
- * way back is therefore taken as well: a wobble then passes whole, as it would without the filter,
- * and a real climb followed by a short way back down keeps both.
+ * Held-out changes do not come back by themselves, which lets the path drift from the barometer in
+ * two ways, and each has a remedy:
+ * - Pressure wobble passes some swings as climbs and holds out others. A run right after a climb
+ *   that brings the height at least half way back is therefore taken as well, unless it looks like
+ *   a jump (most of it in two consecutive changes), so that a door zone right after a flight stays
+ *   out. A wobble then mostly passes whole, as it would without the filter, and a real climb
+ *   followed by a short way back down keeps both.
+ * - Wobble slower than a climb, and a slope too gentle for its steps to count, still pile up held
+ *   changes. The path is therefore kept within `maxHeldM` of the barometer's own height (the step
+ *   means with the paused changes left out): what is held beyond that comes through.
  *
  * Limits: a pressure jump in the direction of a climb, right before or after it, joins the climb;
- * wobble slower than about 4 s passes; a slope gentle enough that noise hides its steps is mostly
- * lost, and a climb of fewer steps than `minSteps` is lost entirely.
+ * wobble slower than about 4 s passes; a gentle slope comes through only once it has held out
+ * `maxHeldM`, and a change spread over fewer than `minSteps` large changes not at all.
  */
 class Climbs private constructor(
     private val intervalStartNs: LongArray,
@@ -45,13 +52,15 @@ class Climbs private constructor(
      * on flat ground, or climbs with too few steps. Smaller runs are barometer noise.
      */
     val heldRuns: Int,
-    /** Total height change of the [heldRuns], metres, all taken as positive. */
+    /** Sizes of the [heldRuns] added up, metres, up and down alike: not a net height. */
     val heldM: Double,
+    /** Height the `maxHeldM` limit let through, metres, up and down alike. */
+    val limitM: Double,
 ) {
-    /** Number of climbs. */
+    /** Number of climbs, ways back included. */
     val size: Int get() = firsts.size
 
-    /** First step of climb [k]; the path starts to change height after the step before it. */
+    /** First step of climb [k], at least 1; the path starts to change height after the step before it. */
     fun firstStep(k: Int): Int = firsts[k]
 
     /** Last step of climb [k]. */
@@ -91,6 +100,14 @@ class Climbs private constructor(
             return sum
         }
 
+        /** True when two consecutive changes carry [JUMP_SHARE] or more of the run, as a pressure jump does. */
+        fun isJump(change: DoubleArray): Boolean {
+            if (last - first < 2) return true
+            var most = 0.0
+            for (k in first until last) most = maxOf(most, abs(change[k] + change[k + 1]))
+            return most >= JUMP_SHARE * abs(total)
+        }
+
         companion object {
             fun of(first: Int, last: Int, dir: Int, change: DoubleArray, minStepM: Double): Run {
                 var large = 0
@@ -118,6 +135,9 @@ class Climbs private constructor(
         /** Smallest height change of a held-out run that [heldRuns] counts, metres. */
         const val HELD_REPORT_M: Double = 0.25
 
+        /** Share of a run in two consecutive changes from which a way back counts as a jump. */
+        const val JUMP_SHARE: Double = 0.75
+
         /**
          * Finds the climbs of [steps] in the unsmoothed height [raw]. [tripStartNs] opens the
          * interval of the first step. [minSteps] must be at least 1.
@@ -129,6 +149,7 @@ class Climbs private constructor(
             tripStartNs: Long,
             minSteps: Int,
             minStepM: Double,
+            maxHeldM: Double,
         ): Climbs {
             require(minSteps >= 1) { "minSteps must be at least 1: $minSteps" }
             val n = steps.size
@@ -170,31 +191,47 @@ class Climbs private constructor(
             var held = 0
             var heldM = 0.0
             val minClimbM = minSteps * minStepM
-            // The last run of minClimbM or more before the current one, and whether it was a climb.
+            // The last taken run, or run of minClimbM or more, and whether it was taken.
             var previous: Run? = null
-            var previousClimbed = false
+            var previousTaken = false
             for (r in runs) {
                 val climb = r.large >= minSteps
-                // A run right after a climb that brings the height at least half way back is taken
-                // too, so the two cancel. Otherwise pressure wobble, whose swings pass as climbs or not
-                // by chance, would leave every climb it passed and drift the path away.
-                val back = !climb && previousClimbed && previous != null && r.dir == -previous.dir &&
+                val back = !climb && previousTaken && previous != null && r.dir == -previous.dir &&
                     abs(r.total) >= 0.5 * abs(previous.taken(change)) &&
-                    r.first - previous.lastTaken <= minSteps && !pausedBetween(paused, previous.lastTaken, r.first)
+                    r.first - previous.lastTaken <= minSteps &&
+                    !pausedBetween(paused, previous.lastTaken, r.first) && !r.isJump(change)
                 if (climb || back) {
                     for (k in r.firstTaken..r.lastTaken) taken[k] = change[k]
                     firsts.add(r.firstTaken)
                     lasts.add(r.lastTaken)
-                } else if (abs(r.total) >= HELD_REPORT_M) {
-                    held++
-                    heldM += abs(r.total)
-                }
-                if (abs(r.total) >= minClimbM) {
                     previous = r
-                    previousClimbed = climb || back
+                    previousTaken = true
+                } else {
+                    if (abs(r.total) >= HELD_REPORT_M) {
+                        held++
+                        heldM += abs(r.total)
+                    }
+                    if (abs(r.total) >= minClimbM) {
+                        previous = r
+                        previousTaken = false
+                    }
                 }
             }
-            return Climbs(from, t, taken, firsts.toIntArray(), lasts.toIntArray(), held, heldM)
+
+            // The path takes the climbs and stays within maxHeldM of the barometer's own height.
+            val path = DoubleArray(n)
+            var z = 0.0
+            var level = 0.0
+            var limitM = 0.0
+            for (i in 0 until n) {
+                level += change[i]
+                val free = z + taken[i]
+                val next = free.coerceIn(level - maxHeldM, level + maxHeldM)
+                limitM += abs(next - free)
+                path[i] = next - z
+                z = next
+            }
+            return Climbs(from, t, path, firsts.toIntArray(), lasts.toIntArray(), held, heldM, limitM)
         }
 
         /** True when a step interval after [a] up to [b] touches a pause. */
