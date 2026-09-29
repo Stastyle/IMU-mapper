@@ -52,6 +52,30 @@ class SurveyCsvTest {
         assertTrue(row.startsWith("Start,\"Fork, left\",0.0,5.0,"), row)
     }
 
+    /** Names Excel showed as #NAME?, ran as a formula or turned into a number when opened raw (tested). */
+    @Test
+    fun namesExcelWouldReadAsAFormulaGetAnApostrophe() {
+        assertEquals("'- squeeze", SurveyCsv.field("- squeeze"))
+        assertEquals("'+side passage", SurveyCsv.field("+side passage"))
+        assertEquals("'=1+1", SurveyCsv.field("=1+1"))
+        assertEquals("'@x", SurveyCsv.field("@x"))
+        assertEquals("'\tx", SurveyCsv.field("\tx"))
+        // The apostrophe goes inside the RFC 4180 quotes.
+        assertEquals("\"'-a,b\"", SurveyCsv.field("-a,b"))
+        assertEquals("\"'\rx\"", SurveyCsv.field("\rx"))
+        assertEquals(
+            "\"'=HYPERLINK(\"\"http://example.invalid\"\",\"\"x\"\")\"",
+            SurveyCsv.field("=HYPERLINK(\"http://example.invalid\",\"x\")"),
+        )
+        // Only the first character counts.
+        assertEquals("Start", SurveyCsv.field("Start"))
+        assertEquals("C-1", SurveyCsv.field("C-1"))
+        assertEquals("מעבר", SurveyCsv.field("מעבר"))
+        val stations = listOf(station(1, StationKind.START, "Start", 0), station(2, StationKind.MARK, "- squeeze", 10))
+        val row = rows(SurveyCsv.text(Traverse.legs(stations, lWalk), T0, Vec3.ZERO, true))[1]
+        assertTrue(row.startsWith("Start,'- squeeze,0.0,5.0,"), row)
+    }
+
     @Test
     fun zeroLengthLegHasEmptyAzimuthAndGrade() {
         val stations = listOf(station(1, StationKind.USER, "S1", 10), station(2, StationKind.USER, "S2", 10))

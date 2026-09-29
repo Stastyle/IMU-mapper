@@ -241,6 +241,8 @@ The survey stores facts; the rotation is solved from them for whichever run is s
   to_north_m, to_up_m`. Times are seconds since the Start station, the path's first point, and
   coordinates are relative to it, in the corrected frame. On a VIO run that point is the first
   tracking pose, which can come seconds after Start was pressed. Empty cell where a value is "—".
+- A station name that starts with `=`, `+`, `-` or `@` is written with a leading apostrophe, so Excel
+  shows the name (with the apostrophe) instead of `#NAME?` or a formula.
 - The share text names the trip, the run and the correction, for example "Run 3, north +4.0°
   from 2 compass readings".
 

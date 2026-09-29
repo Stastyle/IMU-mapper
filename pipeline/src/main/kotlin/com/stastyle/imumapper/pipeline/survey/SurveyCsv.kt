@@ -42,13 +42,23 @@ object SurveyCsv {
         return out.toString()
     }
 
-    /** RFC 4180 quoting: wrapped in quotes, quotes doubled, when the value holds , " CR or LF. */
-    fun field(value: String): String =
-        if (value.any { it == ',' || it == '"' || it == '\r' || it == '\n' }) {
-            "\"" + value.replace("\"", "\"\"") + "\""
+    /**
+     * A value that starts with = + - @ tab or CR gets a leading ' so Excel does not read it as a formula
+     * ("- squeeze" showed #NAME?, "=HYPERLINK(...)" became a live link, "+5" lost its sign). Excel shows
+     * the apostrophe when it opens a CSV (tested); that is the price of keeping the name. Then RFC 4180
+     * quoting: wrapped in quotes, quotes doubled, when the value holds , " CR or LF.
+     */
+    fun field(value: String): String {
+        val safe = if (value.isNotEmpty() && value[0] in FORMULA_START) "'$value" else value
+        return if (safe.any { it == ',' || it == '"' || it == '\r' || it == '\n' }) {
+            "\"" + safe.replace("\"", "\"\"") + "\""
         } else {
-            value
+            safe
         }
+    }
+
+    /** First characters that make a spreadsheet read a cell as a formula (the OWASP CSV injection list). */
+    private const val FORMULA_START = "=+-@\t\r"
 
     /** Locale.US fixed-point with [decimals] places; "-0.00" becomes "0.00". */
     fun fixed(value: Double, decimals: Int): String {

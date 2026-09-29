@@ -530,7 +530,10 @@ object SurveyCsv {
 
     /** The whole file: BOM + HEADER + EOL, then one row + EOL per leg. See section 4.1 for the cells. */
     fun text(legs: List<TraverseLeg>, startNs: Long, origin: Vec3, magnetic: Boolean): String
-    /** RFC 4180 quoting: wrapped in quotes, quotes doubled, when the value holds , " CR or LF. */
+    /**
+     * A value that starts with = + - @ tab or CR gets a leading ' so Excel does not read it as a formula;
+     * then RFC 4180 quoting: wrapped in quotes, quotes doubled, when the value holds , " CR or LF.
+     */
     fun field(value: String): String
     /** Locale.US fixed-point with [decimals] places; "-0.00" becomes "0.00". */
     fun fixed(value: Double, decimals: Int): String
@@ -1267,6 +1270,12 @@ fun ManualRotationDialog(rotationDeg: Double, fromRunId: Int?, toRunId: Int, onA
   `fixed(heightChangeM, 2)`, azimuth `fixed(azimuthDeg, 1)` or empty (a formatted `"360.0"` becomes
   `"0.0"`), `M` or `R`, `fixed(slopeDeg, 1)`, grade `fixed(gradePct, 1)` or empty, `fixed(pathM, 2)`,
   `yes` / `no`, then `fixed(b.x - origin.x, 2)`, `fixed(b.y - origin.y, 2)`, `fixed(b.z - origin.z, 2)`.
+- Name cells: a name that starts with `=`, `+`, `-`, `@`, a tab or a CR gets a leading `'` first (OWASP
+  CSV injection), then the RFC 4180 quoting: `- squeeze` → `'- squeeze`, `-a,b` → `"'-a,b"`. Unguarded,
+  Excel showed `- squeeze` as `#NAME?`, ran `=HYPERLINK(...)` from an imported ZIP's survey as a live
+  link and turned `+5` into 5 (tested). Excel shows the apostrophe when it opens a CSV (tested); that is
+  the accepted price. A leading space also stops the formula in Excel and shows less, but more tools
+  honour the apostrophe.
 - Example row for 5 m due east, flat, 2.5 s to 5.0 s, from the origin 5 m north:
   `C1,End,2.5,5.0,5.00,5.00,0.00,90.0,M,0.0,0.0,5.00,no,5.00,5.00,0.00`.
 
