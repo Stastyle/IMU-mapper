@@ -3,12 +3,16 @@ package com.stastyle.imumapper.ui.viewer
 import com.stastyle.imumapper.data.SurveyLoad
 import com.stastyle.imumapper.pipeline.core.PathResult
 import com.stastyle.imumapper.pipeline.survey.ChainMeasure
+import com.stastyle.imumapper.pipeline.survey.CompassReference
 import com.stastyle.imumapper.pipeline.survey.Detail
 import com.stastyle.imumapper.pipeline.survey.Measure
 import com.stastyle.imumapper.pipeline.survey.NorthFrame
+import com.stastyle.imumapper.pipeline.survey.NorthSolver
 import com.stastyle.imumapper.pipeline.survey.PathTimeline
+import com.stastyle.imumapper.pipeline.survey.ReferenceLine
 import com.stastyle.imumapper.pipeline.survey.StationKind
 import com.stastyle.imumapper.pipeline.survey.StretchMeasure
+import com.stastyle.imumapper.pipeline.survey.SurveyAngles
 import com.stastyle.imumapper.pipeline.survey.SurveyDoc
 import com.stastyle.imumapper.pipeline.survey.SurveyStations
 import com.stastyle.imumapper.pipeline.survey.Traverse
@@ -116,6 +120,11 @@ object SurveyController {
     const val PATH_START_NAME: String = "Path start"
     const val PATH_END_NAME: String = "Path end"
     const val MAX_UNDO: Int = 50
+    const val MIN_REFERENCE_HORIZONTAL_M: Double = 10.0
+    const val MIN_STRAIGHTNESS: Double = 0.9
+    const val MAX_FIT_GAP_DEG: Double = 3.0
+    const val LARGE_CHANGE_DEG: Double = 15.0
+    const val BACK_BEARING_CHANGE_DEG: Double = 45.0
 
     // --- selection, cursor and readout: none of these is an edit, so all work read-only ---
 
@@ -295,6 +304,73 @@ object SurveyController {
         return state.copy(doc = previous, undo = state.undo.dropLast(1), selection = prune(state.selection, previous))
     }
 
+    // --- north edits: the facts the rotation is solved from; each is one undo entry, refused read-only ---
+
+    /**
+     * A hand-compass bearing for the selected pair or stretch. It needs a chord azimuth on the
+     * uncorrected path, since a reference without one could never enter the solve.
+     */
+    fun addReference(
+        state: SurveyState,
+        geo: SurveyGeometry,
+        bearingDeg: Double,
+        backBearing: Boolean,
+        line: ReferenceLine,
+    ): SurveyState {
+        val reference = newReference(state, geo, bearingDeg, backBearing, line) ?: return state
+        if (Measure.leg(geo.plain, reference.fromNs, reference.toNs).azimuthDeg == null) return state
+        return edit(state, state.doc.copy(references = state.doc.references + reference))
+    }
+
+    fun deleteReference(state: SurveyState, referenceId: Int): SurveyState =
+        edit(state, state.doc.copy(references = state.doc.references.filter { it.id != referenceId }))
+
+    /** Refused while references exist, because they set north; tagged with the run it was set on. */
+    fun setManualRotation(state: SurveyState, rotationDeg: Double, runId: Int): SurveyState {
+        if (state.doc.references.isNotEmpty() || !rotationDeg.isFinite()) return state
+        val doc = state.doc.copy(manualRotationDeg = SurveyAngles.wrapDeg(rotationDeg), manualRotationRunId = runId)
+        return edit(state, doc)
+    }
+
+    /** The user checked that the manual rotation fits [runId] too (a re-process can change the heading). */
+    fun confirmManualRotation(state: SurveyState, runId: Int): SurveyState =
+        edit(state, state.doc.copy(manualRotationRunId = runId))
+
+    fun resetNorth(state: SurveyState): SurveyState =
+        edit(state, state.doc.copy(references = emptyList(), manualRotationDeg = 0.0, manualRotationRunId = null))
+
+    /**
+     * What adding the reference would do, shown before it is added: the selection's readings now, the
+     * rotation after, and a warning for each way a reading usually goes wrong. Null without a pair or
+     * stretch, or for a bearing that is not a number.
+     */
+    fun azimuthPreview(
+        state: SurveyState,
+        geo: SurveyGeometry,
+        bearingDeg: Double,
+        backBearing: Boolean,
+        line: ReferenceLine,
+    ): AzimuthPreview? {
+        val reference = newReference(state, geo, bearingDeg, backBearing, line) ?: return null
+        val measure = Measure.stretch(geo.timeline, reference.fromNs, reference.toNs)
+        val now = NorthSolver.solve(state.doc, geo.plain, geo.runId).rotationDeg
+        val withReference = state.doc.copy(references = state.doc.references + reference)
+        val after = NorthSolver.solve(withReference, geo.plain, geo.runId).rotationDeg
+        val change = SurveyAngles.wrapDeg(after - now)
+        val leg = measure.leg
+        val chord = leg.azimuthDeg
+        val fitted = measure.fittedAzimuthDeg
+        val bent = leg.straightness?.let { it < MIN_STRAIGHTNESS } == true
+        val fitGap = chord != null && fitted != null && abs(SurveyAngles.wrapDeg(chord - fitted)) > MAX_FIT_GAP_DEG
+        val warnings = buildSet {
+            if (leg.horizontalM < MIN_REFERENCE_HORIZONTAL_M) add(AzimuthWarning.SHORT)
+            if (bent || fitGap) add(AzimuthWarning.CROOKED)
+            if (abs(change) > LARGE_CHANGE_DEG) add(AzimuthWarning.LARGE_CHANGE)
+            if (abs(change) > BACK_BEARING_CHANGE_DEG) add(AzimuthWarning.BACK_BEARING)
+        }
+        return AzimuthPreview(chord, fitted, after, change, warnings)
+    }
+
     // --- helpers ---
 
     private fun seededDoc(geo: SurveyGeometry): SurveyDoc =
@@ -335,5 +411,25 @@ object SurveyController {
                 if (ends.all { it in ids }) selection else SurveySelection.None
             }
         }
+    }
+
+    /** The reference a bearing on the current selection would add; null without a pair or a finite bearing. */
+    private fun newReference(
+        state: SurveyState,
+        geo: SurveyGeometry,
+        bearingDeg: Double,
+        backBearing: Boolean,
+        line: ReferenceLine,
+    ): CompassReference? {
+        if (!bearingDeg.isFinite()) return null
+        val (fromNs, toNs) = selectionEnds(state, geo) ?: return null
+        return CompassReference(
+            id = (state.doc.references.maxOfOrNull { it.id } ?: 0) + 1,
+            fromNs = fromNs,
+            toNs = toNs,
+            bearingDeg = SurveyAngles.to360(bearingDeg),
+            backBearing = backBearing,
+            line = line,
+        )
     }
 }
