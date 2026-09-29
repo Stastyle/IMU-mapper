@@ -183,7 +183,6 @@ fun ViewerScreen(
                 },
             )
         },
-        snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
             ViewerCanvas(
@@ -201,6 +200,9 @@ fun ViewerScreen(
                 SurveyBanners(survey, modifier = Modifier.align(Alignment.TopCenter))
             }
             Column(modifier = Modifier.align(Alignment.BottomCenter)) {
+                // The snackbar stacks above the panels instead of covering them (a Scaffold host would):
+                // an undoable message stays up for 10 s, over the survey panel's buttons.
+                SnackbarHost(snackbar, modifier = Modifier.align(Alignment.CenterHorizontally))
                 val marker = ui.selectedMarker
                 if (!ui.surveyMode && marker != null && selectedIndex >= 0) {
                     MarkerCard(
