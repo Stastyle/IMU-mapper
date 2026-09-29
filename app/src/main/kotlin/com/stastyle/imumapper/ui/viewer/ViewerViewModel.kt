@@ -596,8 +596,12 @@ class ViewerViewModel(
         "${SurveyFormat.detailLabel(detail)}: ${SurveyFormat.corners(corners)}"
     }) { state, geometry -> SurveyController.setDetail(state, geometry, detail) }
 
-    /** For the Detail dialog; empty outside Survey mode. */
+    /**
+     * For the Detail dialog; empty outside Survey mode, even though leaving keeps the survey in memory
+     * for a re-entry.
+     */
     fun cornerCounts(): Map<Detail, Int> {
+        if (!_ui.value.surveyMode) return emptyMap()
         val state = surveyState ?: return emptyMap()
         val geometry = surveyGeometry ?: return emptyMap()
         return SurveyController.cornerCounts(state, geometry)

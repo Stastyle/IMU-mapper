@@ -556,6 +556,12 @@ class ViewerSurveyTest {
         vm.surveyUndo()
         assertEquals(Detail.NORMAL, savedDoc(id).detail)
         assertTrue(savedDoc(id).stations.none { it.kind == StationKind.CORNER })
+
+        // Leaving keeps the survey in memory for a re-entry, but the counts are for Survey mode only.
+        vm.toggleSurvey()
+        assertTrue(vm.cornerCounts().isEmpty())
+        vm.toggleSurvey()
+        assertEquals(mapOf(Detail.COARSE to 1, Detail.NORMAL to 1, Detail.FINE to 1), vm.cornerCounts())
     }
 
     @Test

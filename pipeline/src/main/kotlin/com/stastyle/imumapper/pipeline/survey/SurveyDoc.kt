@@ -53,7 +53,10 @@ data class SurveyDoc(
     val formatVersion: Int = FORMAT_VERSION,
     val stations: List<Station> = emptyList(),
     val references: List<CompassReference> = emptyList(),
-    /** Degrees, positive turns the map clockwise; used only while no reference enters the solve. */
+    /**
+     * Degrees, positive turns the map clockwise; used only while the doc has no compass reference (a
+     * reference too short to measure still disables it).
+     */
     val manualRotationDeg: Double = 0.0,
     /** The run the manual rotation was set on; null when it was never set. */
     val manualRotationRunId: Int? = null,
