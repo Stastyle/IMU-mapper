@@ -2,6 +2,7 @@ package com.stastyle.imumapper.ui.viewer
 
 import com.stastyle.imumapper.SurveyFixtures
 import com.stastyle.imumapper.data.FakeTripRepository
+import com.stastyle.imumapper.data.SurveyCsvFile
 import com.stastyle.imumapper.data.SurveyStore
 import com.stastyle.imumapper.data.TripFiles
 import com.stastyle.imumapper.data.db.PathResultEntity
@@ -13,8 +14,11 @@ import com.stastyle.imumapper.pipeline.core.PipelineConfig
 import com.stastyle.imumapper.pipeline.core.TripMode
 import com.stastyle.imumapper.pipeline.core.Vec3
 import com.stastyle.imumapper.pipeline.survey.Detail
+import com.stastyle.imumapper.pipeline.survey.NorthSource
+import com.stastyle.imumapper.pipeline.survey.ReferenceLine
 import com.stastyle.imumapper.pipeline.survey.Station
 import com.stastyle.imumapper.pipeline.survey.StationKind
+import com.stastyle.imumapper.pipeline.survey.SurveyCsv
 import com.stastyle.imumapper.pipeline.survey.SurveyDoc
 import com.stastyle.imumapper.process.TripProcessor
 import com.stastyle.imumapper.render.LayerSelection
@@ -28,6 +32,8 @@ import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.setMain
 import java.io.File
 import java.nio.file.Files
+import kotlin.math.cos
+import kotlin.math.sin
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
@@ -393,5 +399,110 @@ class ViewerSurveyTest {
         vm.renameStation(1, "Entrance")
         assertEquals(SurveyMessage(ViewerViewModel.READ_ONLY_MESSAGE, undoable = false), vm.ui.value.surveyMessage)
         assertEquals("{ not json", files.surveyFile(id).readText())
+    }
+
+    // --- north, the manual-rotation prompt and the CSV ---
+
+    @Test
+    fun compassReadingTurnsTheMapAndMakesAnArbitraryNorthMagnetic() = runBlocking<Unit> {
+        val id = processedTrip(SurveyFixtures.lWalk(magnetic = false))
+        val vm = viewer(id)
+        vm.toggleSurvey()
+        val before = survey(vm)
+        assertFalse(before.magnetic)
+        assertNotNull(before.northWarning)
+
+        vm.surveyTap(SurveyHit.OnStation(1))
+        vm.surveyTap(SurveyHit.OnStation(4))
+        vm.addReference(10.0, backBearing = false, line = ReferenceLine.CHORD)
+
+        val after = survey(vm)
+        assertEquals(NorthSource.REFERENCES, after.north.source)
+        assertEquals(10.0, after.north.rotationDeg, 1e-9)
+        assertTrue(after.magnetic)
+        assertNull(after.northWarning)
+        assertEquals(SurveyMessage("Compass reading added", undoable = true), vm.ui.value.surveyMessage)
+        // Turned about the start: the corner (0, 10) is now 10 degrees east of north.
+        val theta = Math.toRadians(10.0)
+        assertNear(Vec3(10.0 * sin(theta), 10.0 * cos(theta), 0.0), after.geometry.framed.points[20].p)
+        assertSame(after.geometry.framed, vm.ui.value.sceneResult)
+        val chain = assertIs<SurveyReadout.Chain>(after.readout)
+        assertEquals(10.0, assertNotNull(chain.measure.straight.azimuthDeg), 1e-9)
+        assertEquals(1, savedDoc(id).references.size)
+
+        // References set north, so a manual rotation is refused; reset clears them and can be undone.
+        vm.setRotation(3.0)
+        assertEquals(10.0, survey(vm).north.rotationDeg, 1e-9)
+        vm.resetNorth()
+        assertEquals(0.0, survey(vm).north.rotationDeg)
+        assertEquals(SurveyMessage("North reset", undoable = true), vm.ui.value.surveyMessage)
+        vm.surveyUndo()
+        assertEquals(10.0, survey(vm).north.rotationDeg, 1e-9)
+        vm.deleteReference(1)
+        assertTrue(savedDoc(id).references.isEmpty())
+    }
+
+    @Test
+    fun manualRotationFromAnotherRunIsOfferedAndApplyUsesIt() = runBlocking<Unit> {
+        // Two runs with equal results: the state flow then keeps run 1's instance on screen, so the
+        // survey must follow the selected run id, not only the result instance.
+        val id = processedTrip(SurveyFixtures.lWalk(), SurveyFixtures.lWalk())
+        val vm = viewer(id)
+        vm.selectRun(1)
+        vm.toggleSurvey()
+        vm.setRotation(5.0)
+        vm.nudgeRotation(-0.5)
+        assertEquals(4.5, survey(vm).north.rotationDeg, 1e-9)
+        assertEquals(1, savedDoc(id).manualRotationRunId)
+
+        vm.selectRun(2)
+        val asked = survey(vm)
+        assertTrue(asked.askManualRotation)
+        assertEquals(0.0, asked.north.rotationDeg)
+
+        vm.answerManualRotation(apply = true)
+        val applied = survey(vm)
+        assertFalse(applied.askManualRotation)
+        assertEquals(4.5, applied.north.rotationDeg, 1e-9)
+        assertEquals(2, savedDoc(id).manualRotationRunId)
+    }
+
+    @Test
+    fun notNowHidesTheManualRotationPromptForThatRun() = runBlocking<Unit> {
+        val id = processedTrip(SurveyFixtures.lWalk(), SurveyFixtures.lWalk())
+        val vm = viewer(id)
+        vm.selectRun(1)
+        vm.toggleSurvey()
+        vm.setRotation(5.0)
+        vm.selectRun(2)
+        assertTrue(survey(vm).askManualRotation)
+
+        vm.answerManualRotation(apply = false)
+        val dismissed = survey(vm)
+        assertFalse(dismissed.askManualRotation)
+        assertEquals(0.0, dismissed.north.rotationDeg)
+        assertEquals(1, savedDoc(id).manualRotationRunId)
+    }
+
+    @Test
+    fun csvIsWrittenForTheShareSheetOnce() = runBlocking<Unit> {
+        val id = processedTrip(SurveyFixtures.lWalk())
+        val vm = viewer(id)
+        vm.toggleSurvey()
+
+        vm.exportSurveyCsv()
+        val share = assertNotNull(vm.ui.value.pendingCsv)
+        assertEquals(File(files.exportDir(), SurveyCsvFile.fileName("Cave loop", id, 1, raw = false)), share.file)
+        val bytes = share.file.readBytes()
+        assertEquals(listOf(0xEF, 0xBB, 0xBF), bytes.take(3).map { it.toInt() and 0xFF })
+        val text = bytes.toString(Charsets.UTF_8)
+        assertTrue(text.startsWith(SurveyCsv.BOM + SurveyCsv.HEADER + SurveyCsv.EOL))
+        // The header, three legs, and nothing after the last line end.
+        assertEquals(5, text.split(SurveyCsv.EOL).size)
+        assertEquals("IMU Mapper survey: Cave loop", share.subject)
+        assertEquals(SurveyFormat.shareText("Cave loop", 1, raw = false, north = survey(vm).north), share.text)
+
+        vm.consumeCsvShare()
+        assertNull(vm.ui.value.pendingCsv)
     }
 }

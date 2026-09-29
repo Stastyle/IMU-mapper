@@ -6,6 +6,7 @@ import android.graphics.Matrix
 import android.media.ExifInterface
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.stastyle.imumapper.data.SurveyCsvFile
 import com.stastyle.imumapper.data.SurveyStore
 import com.stastyle.imumapper.data.TripFiles
 import com.stastyle.imumapper.data.TripRepository
@@ -18,7 +19,9 @@ import com.stastyle.imumapper.pipeline.survey.Detail
 import com.stastyle.imumapper.pipeline.survey.LegTotals
 import com.stastyle.imumapper.pipeline.survey.NorthSolution
 import com.stastyle.imumapper.pipeline.survey.NorthSolver
+import com.stastyle.imumapper.pipeline.survey.ReferenceLine
 import com.stastyle.imumapper.pipeline.survey.StationKind
+import com.stastyle.imumapper.pipeline.survey.SurveyCsv
 import com.stastyle.imumapper.pipeline.survey.SurveyDoc
 import com.stastyle.imumapper.pipeline.survey.SurveyStations
 import com.stastyle.imumapper.pipeline.survey.Traverse
@@ -485,6 +488,69 @@ class ViewerViewModel(
     }
 
     fun dismissSurveyMessage() = _ui.update { it.copy(surveyMessage = null) }
+
+    /** What the Set azimuth dialog shows for a bearing on the current pair or stretch. */
+    fun azimuthPreview(bearingDeg: Double, backBearing: Boolean, line: ReferenceLine): AzimuthPreview? {
+        val state = surveyState ?: return null
+        val geometry = surveyGeometry ?: return null
+        return SurveyController.azimuthPreview(state, geometry, bearingDeg, backBearing, line)
+    }
+
+    fun addReference(bearingDeg: Double, backBearing: Boolean, line: ReferenceLine) =
+        editSurvey({ "Compass reading added" }) { state, geometry ->
+            SurveyController.addReference(state, geometry, bearingDeg, backBearing, line)
+        }
+
+    fun deleteReference(referenceId: Int) =
+        editSurvey({ "Compass reading deleted" }) { state, _ -> SurveyController.deleteReference(state, referenceId) }
+
+    /** The North sheet's steppers start from the rotation in use, which is what the user sees. */
+    fun nudgeRotation(deltaDeg: Double) {
+        val current = _ui.value.survey?.north?.rotationDeg ?: return
+        setRotation(current + deltaDeg)
+    }
+
+    /** A manual rotation, tagged with the shown run. */
+    fun setRotation(rotationDeg: Double) =
+        editSurvey { state, geometry -> SurveyController.setManualRotation(state, rotationDeg, geometry.runId) }
+
+    fun resetNorth() = editSurvey({ "North reset" }) { state, _ -> SurveyController.resetNorth(state) }
+
+    /** The manual-rotation prompt: Apply tags the rotation with this run, Not now hides it for this run. */
+    fun answerManualRotation(apply: Boolean) {
+        if (apply) {
+            editSurvey { state, geometry -> SurveyController.confirmManualRotation(state, geometry.runId) }
+        } else {
+            manualPromptDismissedRunId = surveyGeometry?.runId
+            publishSurvey()
+        }
+    }
+
+    /**
+     * Writes the traverse as CSV into the export cache and hands it to the screen for the share sheet.
+     * The numbers are the ones on screen: the shown run, raw or not, north-corrected.
+     */
+    fun exportSurveyCsv() {
+        val survey = _ui.value.survey ?: return
+        val geometry = survey.geometry
+        val tripName = _ui.value.trip?.name ?: "Trip $tripId"
+        val origin = geometry.framed.points.first().p
+        val text = SurveyCsv.text(survey.legs, geometry.timeline.startNs, origin, survey.magnetic)
+        val fileName = SurveyCsvFile.fileName(tripName, tripId, geometry.runId, geometry.raw)
+        val shareText = SurveyFormat.shareText(tripName, geometry.runId, geometry.raw, survey.north)
+        viewModelScope.launch {
+            runCatching { withContext(ioDispatcher) { SurveyCsvFile.write(files.exportDir(), fileName, text) } }
+                .onSuccess { file ->
+                    _ui.update { it.copy(pendingCsv = SurveyCsvShare(file, "IMU Mapper survey: $tripName", shareText)) }
+                }
+                .onFailure { e ->
+                    val message = SurveyMessage("Could not export the CSV: ${describe(e)}", undoable = false)
+                    _ui.update { it.copy(surveyMessage = message) }
+                }
+        }
+    }
+
+    fun consumeCsvShare() = _ui.update { it.copy(pendingCsv = null) }
 
     private fun addStationAtTime(tNs: Long) {
         val name = SurveyStations.nextUserName(surveyState?.doc?.stations ?: return)
