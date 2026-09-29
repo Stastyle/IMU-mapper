@@ -8,6 +8,7 @@ import com.stastyle.imumapper.pipeline.survey.Detail
 import com.stastyle.imumapper.pipeline.survey.Measure
 import com.stastyle.imumapper.pipeline.survey.NorthFrame
 import com.stastyle.imumapper.pipeline.survey.NorthSolver
+import com.stastyle.imumapper.pipeline.survey.NorthSource
 import com.stastyle.imumapper.pipeline.survey.PathTimeline
 import com.stastyle.imumapper.pipeline.survey.ReferenceLine
 import com.stastyle.imumapper.pipeline.survey.Station
@@ -390,6 +391,10 @@ object SurveyController {
      * What adding the reference would do, shown before it is added: the selection's readings now, the
      * rotation after, and a warning for each way a reading usually goes wrong. Null without a pair or
      * stretch, or for a bearing that is not a number.
+     *
+     * The size of the change is judged only when north means something already: on a relative-north run
+     * with no compass reading and no hand turn in use, north is arbitrary, so the first reading may turn
+     * the map by any angle, and a warning there would push the user to tick Back-bearing wrongly.
      */
     fun azimuthPreview(
         state: SurveyState,
@@ -400,10 +405,12 @@ object SurveyController {
     ): AzimuthPreview? {
         val reference = newReference(state, geo, bearingDeg, backBearing, line) ?: return null
         val measure = Measure.stretch(geo.timeline, reference.fromNs, reference.toNs)
-        val now = NorthSolver.solve(state.doc, geo.plain, geo.runId).rotationDeg
+        val nowSolution = NorthSolver.solve(state.doc, geo.plain, geo.runId)
+        val arbitrary = nowSolution.source == NorthSource.NONE &&
+            !NorthSolver.isMagnetic(geo.shown.diagnostics, nowSolution)
         val withReference = state.doc.copy(references = state.doc.references + reference)
         val after = NorthSolver.solve(withReference, geo.plain, geo.runId).rotationDeg
-        val change = SurveyAngles.wrapDeg(after - now)
+        val change = SurveyAngles.wrapDeg(after - nowSolution.rotationDeg)
         val leg = measure.leg
         val chord = leg.azimuthDeg
         val fitted = measure.fittedAzimuthDeg
@@ -412,8 +419,8 @@ object SurveyController {
         val warnings = buildSet {
             if (leg.horizontalM < MIN_REFERENCE_HORIZONTAL_M) add(AzimuthWarning.SHORT)
             if (bent || fitGap) add(AzimuthWarning.CROOKED)
-            if (abs(change) > LARGE_CHANGE_DEG) add(AzimuthWarning.LARGE_CHANGE)
-            if (abs(change) > BACK_BEARING_CHANGE_DEG) add(AzimuthWarning.BACK_BEARING)
+            if (!arbitrary && abs(change) > LARGE_CHANGE_DEG) add(AzimuthWarning.LARGE_CHANGE)
+            if (!arbitrary && abs(change) > BACK_BEARING_CHANGE_DEG) add(AzimuthWarning.BACK_BEARING)
         }
         return AzimuthPreview(chord, fitted, after, change, warnings)
     }

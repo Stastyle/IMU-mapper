@@ -17,11 +17,13 @@ import kotlin.test.assertTrue
 /**
  * Compass references, the manual rotation and the Set azimuth preview on the L walk. Start (id 1) to
  * C1 (id 4) is 10 m due north, Start to Junction 1 (id 2) 5 m north, and Start to End (id 3) cuts the
- * corner to (5, 10) over 15 m of path.
+ * corner to (5, 10) over 15 m of path. [geo] is a magnetic run and [relative] the same walk with
+ * north from the compass off, so its north is arbitrary.
  */
 class SurveyNorthEditsTest {
 
     private val geo = SurveyGeometry.of(SurveyFixtures.lWalk(), runId = 1, raw = false)
+    private val relative = SurveyGeometry.of(SurveyFixtures.lWalk(magnetic = false), runId = 1, raw = false)
     private val seeded = SurveyController.open(SurveyLoad.Missing, geo).state
 
     private fun t(index: Int): Long = SurveyFixtures.tNs(index)
@@ -118,6 +120,59 @@ class SurveyNorthEditsTest {
     fun previewOfFiftyDegreesAsksAboutABackBearing() {
         val preview = assertNotNull(SurveyController.azimuthPreview(chain(1, 4), geo, 50.0, false, ReferenceLine.CHORD))
         assertEquals(setOf(AzimuthWarning.LARGE_CHANGE, AzimuthWarning.BACK_BEARING), preview.warnings)
+    }
+
+    @Test
+    fun firstReadingOnARelativeRunTurnsTheMapWithoutAskingAboutABackBearing() {
+        // Until the first reading north is arbitrary, so any turn is expected and none hints at a back-bearing.
+        val preview = assertNotNull(
+            SurveyController.azimuthPreview(chain(1, 4), relative, 150.0, false, ReferenceLine.CHORD),
+        )
+        assertEquals(150.0, preview.changeDeg, 1e-9)
+        assertEquals(emptySet(), preview.warnings)
+        // The checks on the stretch itself still apply.
+        val short = assertNotNull(
+            SurveyController.azimuthPreview(chain(1, 2), relative, 150.0, false, ReferenceLine.CHORD),
+        )
+        assertEquals(setOf(AzimuthWarning.SHORT), short.warnings)
+        // A hand turn set on another run is not in use here, so north is still arbitrary.
+        val elsewhere = SurveyController.setManualRotation(chain(1, 4), 5.0, runId = 2)
+        val stillArbitrary = assertNotNull(
+            SurveyController.azimuthPreview(elsewhere, relative, 150.0, false, ReferenceLine.CHORD),
+        )
+        assertEquals(emptySet(), stillArbitrary.warnings)
+    }
+
+    @Test
+    fun onceARelativeRunHasAReadingOrAHandTurnALargeChangeWarnsAgain() {
+        val first = SurveyController.addReference(chain(1, 4), relative, 150.0, false, ReferenceLine.CHORD)
+        // 150 and 270 over equal lengths average to 210: 60 degrees on from the first reading.
+        val second = assertNotNull(
+            SurveyController.azimuthPreview(first, relative.rotated(150.0), 270.0, false, ReferenceLine.CHORD),
+        )
+        assertEquals(60.0, second.changeDeg, 1e-9)
+        assertEquals(setOf(AzimuthWarning.LARGE_CHANGE, AzimuthWarning.BACK_BEARING), second.warnings)
+
+        // A map turned by hand on this run is no longer random either.
+        val turned = SurveyController.setManualRotation(chain(1, 4), 5.0, runId = 1)
+        val afterHand = assertNotNull(
+            SurveyController.azimuthPreview(turned, relative.rotated(5.0), 150.0, false, ReferenceLine.CHORD),
+        )
+        assertEquals(145.0, afterHand.changeDeg, 1e-9)
+        assertEquals(setOf(AzimuthWarning.LARGE_CHANGE, AzimuthWarning.BACK_BEARING), afterHand.warnings)
+    }
+
+    @Test
+    fun theBackBearingLineAsksAboutTheBoxOnlyWhileItIsClear() {
+        assertEquals("Over 45°: was it a back-bearing?", warningText(AzimuthWarning.BACK_BEARING, backBearing = false))
+        assertEquals(
+            "Over 45° as a back-bearing: check the reading and the Back-bearing box.",
+            warningText(AzimuthWarning.BACK_BEARING, backBearing = true),
+        )
+        assertEquals(
+            warningText(AzimuthWarning.LARGE_CHANGE, backBearing = false),
+            warningText(AzimuthWarning.LARGE_CHANGE, backBearing = true),
+        )
     }
 
     @Test

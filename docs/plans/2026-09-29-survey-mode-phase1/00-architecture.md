@@ -994,7 +994,10 @@ Behaviour, all binding:
   geo.plain, geo.runId)`; `changeDeg = wrapDeg(rotationDeg - NorthSolver.solve(doc, geo.plain,
   geo.runId).rotationDeg)`. Warnings: `SHORT` when horizontal < 10 m; `CROOKED` when straightness < 0.9
   or `abs(wrapDeg(chord - fitted)) > 3`; `LARGE_CHANGE` when `abs(change) > 15`; `BACK_BEARING` when
-  `abs(change) > 45`.
+  `abs(change) > 45`. Neither change warning is raised while north is arbitrary: the current solve's
+  source is `NONE` and `!NorthSolver.isMagnetic(geo.shown.diagnostics, it)` (a relative-north run with no
+  measured reference and no manual rotation in use), because the first reading may then turn the map by
+  any angle. The dialog words `BACK_BEARING` for a ticked box as "check the reading and the box".
 
 #### `ViewerViewModel.kt` changes [Tasks 23, 24, 25]
 

@@ -198,7 +198,10 @@ The survey stores facts; the rotation is solved from them for whichever run is s
   (chord and fitted), a field for the compass bearing, the back-bearing box, and "The map turns
   +4.0° about the start". It warns when the stretch is shorter than 10 m horizontally, when it is
   crooked (straightness under 0.9, or chord and fit differ by more than 3°), when the change is over
-  15°, and when it is over 45° ("back-bearing?").
+  15°, and when it is over 45° ("back-bearing?", or "check the reading and the box" when the box is
+  ticked). The two change warnings are left out while north is arbitrary (a relative-north run with no
+  reference and no manual rotation in use), since the first reading there may turn the map by any
+  angle, and a warning would push the user to tick the back-bearing box wrongly.
 - **The north chip** in the top bar shows the rotation in use ("N +4.0° M", or "N +4.0° M · 2
   refs"). It opens the North sheet: the manual steppers, each reference with its residual and a
   delete button, and Reset north.

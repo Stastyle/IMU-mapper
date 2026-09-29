@@ -110,7 +110,7 @@ fun SetAzimuthDialog(
                     for (warning in AzimuthWarning.entries) {
                         if (warning in shown.warnings) {
                             Text(
-                                warningText(warning),
+                                warningText(warning, backBearing),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.error,
                             )
@@ -279,7 +279,11 @@ private fun turnText(preview: AzimuthPreview): String {
     return if (earlier) "$turn (north ${SurveyFormat.rotation(preview.rotationDeg)} in all)" else turn
 }
 
-private fun warningText(warning: AzimuthWarning): String = when (warning) {
+/**
+ * A warning's line in the Set azimuth dialog. With [backBearing] ticked a turn over 45° cannot be an
+ * unticked back-bearing, so that line asks the user to check the reading and the box instead.
+ */
+internal fun warningText(warning: AzimuthWarning, backBearing: Boolean): String = when (warning) {
     AzimuthWarning.SHORT -> String.format(
         Locale.US,
         "Under %.0f m across: a small error in the path is a large angle here.",
@@ -288,8 +292,15 @@ private fun warningText(warning: AzimuthWarning): String = when (warning) {
     AzimuthWarning.CROOKED -> "The path bends here: point to point and the passage direction differ."
     AzimuthWarning.LARGE_CHANGE ->
         String.format(Locale.US, "This turns the map by more than %.0f°.", SurveyController.LARGE_CHANGE_DEG)
-    AzimuthWarning.BACK_BEARING ->
+    AzimuthWarning.BACK_BEARING -> if (backBearing) {
+        String.format(
+            Locale.US,
+            "Over %.0f° as a back-bearing: check the reading and the Back-bearing box.",
+            SurveyController.BACK_BEARING_CHANGE_DEG,
+        )
+    } else {
         String.format(Locale.US, "Over %.0f°: was it a back-bearing?", SurveyController.BACK_BEARING_CHANGE_DEG)
+    }
 }
 
 /** Below a twentieth of a degree the total and the change print the same. */
