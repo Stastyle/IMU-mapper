@@ -4,6 +4,7 @@ import com.stastyle.imumapper.pipeline.core.Vec3
 import com.stastyle.imumapper.pipeline.survey.SurveyPaths.T0
 import com.stastyle.imumapper.pipeline.survey.SurveyPaths.tNs
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.atan
 import kotlin.math.sqrt
 import kotlin.test.Test
@@ -140,5 +141,56 @@ class MeasureTest {
         val a = Vec3(1.0, 1.0, 0.0)
         assertEquals(5.0, Measure.maxDeviationM(listOf(a, Vec3(4.0, 5.0, 0.0)), a, a))
         assertEquals(0.0, Measure.maxDeviationM(emptyList(), a, Vec3(2.0, 2.0, 0.0)))
+    }
+
+    /**
+     * 30 m at 30 degrees with 0.5 m of sway to either side. sin(1.3 k) peaks at step 6 (point 7, 0.9985) and
+     * troughs at step 52 (point 53, -0.9984): about 1 m across over 23 m along, so that chord reads about 27.5.
+     */
+    private val swaying = PathTimeline(SurveyPaths.steps(60 to Math.toRadians(30.0), swayM = 0.5))
+
+    @Test
+    fun fitFollowsThePassageWhereTheChordFollowsTheSway() {
+        val peakToTrough = Measure.stretch(swaying, tNs(7), tNs(53))
+        val chord = assertNotNull(peakToTrough.leg.azimuthDeg)
+        val fitted = assertNotNull(peakToTrough.fittedAzimuthDeg)
+        assertTrue(abs(chord - 30.0) > 1.0, "chord $chord")
+        assertTrue(abs(fitted - 30.0) < 0.5, "fitted $fitted")
+        val whole = assertNotNull(Measure.fittedAzimuthDeg(swaying, T0, tNs(60)))
+        assertTrue(abs(whole - 30.0) < 0.5, "whole walk fitted $whole")
+    }
+
+    @Test
+    fun straightWalkFitsItsChord() {
+        val tl = PathTimeline(SurveyPaths.steps(20 to Math.toRadians(30.0)))
+        assertEquals(30.0, assertNotNull(Measure.fittedAzimuthDeg(tl, T0, tNs(20))), 1e-9)
+        assertEquals(30.0, assertNotNull(Measure.leg(tl, T0, tNs(20)).azimuthDeg), 1e-9)
+    }
+
+    @Test
+    fun fitIsOrientedFromAToB() {
+        val forward = assertNotNull(Measure.fittedAzimuthDeg(swaying, tNs(7), tNs(53)))
+        val backward = assertNotNull(Measure.fittedAzimuthDeg(swaying, tNs(53), tNs(7)))
+        assertEquals(0.0, SurveyAngles.wrapDeg(backward - forward - 180.0), 1e-9)
+        // A walk to the south-west fits to the south-west, not to its opposite.
+        val southWest = PathTimeline(SurveyPaths.steps(20 to Math.toRadians(-135.0), swayM = 0.2))
+        assertTrue(abs(assertNotNull(Measure.fittedAzimuthDeg(southWest, T0, tNs(20))) - 225.0) < 1.0)
+    }
+
+    @Test
+    fun shortOrClosedStretchHasNoFit() {
+        val outAndBack = PathTimeline(SurveyPaths.steps(10 to 0.0, 10 to PI))
+        val closed = Measure.stretch(outAndBack, T0, tNs(20))
+        assertNull(closed.leg.azimuthDeg)
+        assertNull(closed.fittedAzimuthDeg)
+        // Half a stride: 0.25 m of chord.
+        assertNull(Measure.fittedAzimuthDeg(outAndBack, T0, T0 + 250_000_000L))
+    }
+
+    @Test
+    fun stretchIsTheLegPlusTheFit() {
+        val s = Measure.stretch(swaying, tNs(3), tNs(30))
+        assertEquals(Measure.leg(swaying, tNs(3), tNs(30)), s.leg)
+        assertEquals(Measure.fittedAzimuthDeg(swaying, tNs(3), tNs(30)), s.fittedAzimuthDeg)
     }
 }

@@ -3,8 +3,12 @@ package com.stastyle.imumapper.pipeline.survey
 import com.stastyle.imumapper.pipeline.core.Vec3
 import kotlin.math.abs
 import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.floor
 import kotlin.math.hypot
 import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.sin
 
 /** Numbers for the straight line (chord) from A, the path at [fromNs], to B, the path at [toNs]. */
 data class LegMeasure(
@@ -44,6 +48,7 @@ object Measure {
     const val MIN_SLOPE_HORIZONTAL_M: Double = 5.0
     const val CURVE_MIN_M: Double = 0.3
     const val CURVE_FRACTION: Double = 0.02
+    const val FIT_SPACING_M: Double = 0.25
 
     /** The chord numbers for two moments of [timeline], in the order given (A may be later than B). */
     fun leg(timeline: PathTimeline, fromNs: Long, toNs: Long): LegMeasure {
@@ -83,4 +88,64 @@ object Measure {
         }
         return worst
     }
+
+    /**
+     * Total-least-squares direction of the stretch's plan points, resampled every FIT_SPACING_M of path.
+     * Resampling by distance keeps a pause or a slow stretch from weighing more; height is left out so
+     * barometer noise cannot tilt the line. Oriented from A to B.
+     */
+    fun fittedAzimuthDeg(timeline: PathTimeline, fromNs: Long, toNs: Long): Double? {
+        val a = timeline.positionAt(fromNs)
+        val b = timeline.positionAt(toNs)
+        val dE = b.x - a.x
+        val dN = b.y - a.y
+        if (hypot(dE, dN) < MIN_HORIZONTAL_M) return null
+        val d1 = timeline.distanceAt(fromNs)
+        val d2 = timeline.distanceAt(toNs)
+        val lo = min(d1, d2)
+        val hi = max(d1, d2)
+        val samples = ArrayList<Vec3>()
+        val count = floor((hi - lo) / FIT_SPACING_M).toInt()
+        for (k in 0..count) {
+            val s = lo + k * FIT_SPACING_M
+            if (s < hi) samples.add(timeline.positionAtDistance(s))
+        }
+        samples.add(timeline.positionAtDistance(hi))
+        val meanE = samples.sumOf { it.x } / samples.size
+        val meanN = samples.sumOf { it.y } / samples.size
+        var cEE = 0.0
+        var cNN = 0.0
+        var cEN = 0.0
+        for (p in samples) {
+            val e = p.x - meanE
+            val n = p.y - meanN
+            cEE += e * e
+            cNN += n * n
+            cEN += e * n
+        }
+        cEE /= samples.size
+        cNN /= samples.size
+        cEN /= samples.size
+        if (cEE + cNN < 1e-12) return null
+        // The major axis, counter-clockwise from east; the fit has no direction of its own, so take A to B's.
+        val phi = 0.5 * atan2(2.0 * cEN, cEE - cNN)
+        var uE = cos(phi)
+        var uN = sin(phi)
+        if (uE * dE + uN * dN < 0.0) {
+            uE = -uE
+            uN = -uN
+        }
+        return SurveyAngles.azimuthDeg(uE, uN)
+    }
+
+    /** leg() plus fittedAzimuthDeg(). */
+    fun stretch(timeline: PathTimeline, fromNs: Long, toNs: Long): StretchMeasure =
+        StretchMeasure(leg(timeline, fromNs, toNs), fittedAzimuthDeg(timeline, fromNs, toNs))
 }
+
+/** A stretch selection: the chord plus the direction of the passage fitted through it. */
+data class StretchMeasure(
+    val leg: LegMeasure,
+    /** Degrees in [0, 360), oriented from A to B; null when the chord has no azimuth or the fit is degenerate. */
+    val fittedAzimuthDeg: Double?,
+)
