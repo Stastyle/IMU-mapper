@@ -189,14 +189,15 @@ class PdrSolver(
         val hold = ctx.config.baroHoldWhenStill
         val stillGapNs = (ctx.config.baroStillGapS * 1e9).toLong()
         val settleNs = (SETTLING_TIME_CONSTANTS * ctx.config.baroSmoothingS * 1e9).toLong()
+        val climbChanges = climbs?.changes(first, last, fromNs)
         for (i in first until last) {
             val t = steps.tNs[i]
             val h = Angles.wrap(ctx.stepHeadingRad[i] + correction)
             val d = ctx.stepStrideM[i]
             x += d * sin(h)
             y += d * cos(h)
-            if (climbs != null) {
-                z += climbs.changeAfter(i, fromNs)
+            if (climbChanges != null) {
+                z += climbChanges[i - first]
             } else if (altitude != null) {
                 if (!hold || t - prevNs <= stillGapNs) {
                     z += altitudeDelta(altitude, pauses, prevNs, t)

@@ -149,8 +149,9 @@ object ConfigSchema {
         ConfigFieldSpec(
             "baroMaxHeldM", FieldKind.NUMBER, "m", 0.0, 50.0,
             "With baroConfirmSteps on, the height stays within this of the barometer's: held-out change beyond " +
-                "it comes through. Lower it when a long gentle slope comes out too flat or the height drifts on " +
-                "flat ground; raise it when pressure zones larger than it show as steps on one floor.",
+                "it comes through. It acts only once that much is held out, so lower it only when a long gentle " +
+                "slope has lost about this much (baroLimitM above 0); raise it when pressure zones larger than " +
+                "it show as steps on one floor with no gentle slope before them.",
         ),
         ConfigFieldSpec(
             "loopClosure", FieldKind.BOOLEAN, "", 0.0, 1.0,

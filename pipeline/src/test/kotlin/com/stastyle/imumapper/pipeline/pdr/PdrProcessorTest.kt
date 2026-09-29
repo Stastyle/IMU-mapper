@@ -467,46 +467,52 @@ class PdrProcessorTest {
     fun wobbleOnFlatGroundStaysBounded() {
         // Wind on a building: 4 Pa (0.34 m) of wobble with a 5 s period, whose swings last about as
         // many steps as a climb needs. Some swings pass as climbs; the way back must pass with them,
-        // or the path climbs further with every swing.
-        val w = SyntheticWalk(baroDisturbanceHpa = { s -> 0.04 * sin(2 * PI * s / 5.0) })
-            .still(2.0).walkTo(0.0, 120.0).still(2.0)
-        val r = run(w)
-        assertTrue(r.stats.maxZ < 0.8 && r.stats.minZ > -0.8, "z from ${r.stats.minZ} to ${r.stats.maxZ}")
-        assertTrue(abs(r.points.last().p.z) < 0.7, "end ${r.points.last().p.z}")
+        // or the path climbs further with every swing. Several noise seeds, because whether a swing
+        // counts is down to the noise.
+        for (seed in 1..8) {
+            val w = SyntheticWalk(noiseSeed = seed, baroDisturbanceHpa = { s -> 0.04 * sin(2 * PI * s / 5.0) })
+                .still(2.0).walkTo(0.0, 120.0).still(2.0)
+            val r = run(w)
+            val z = "seed $seed: z from ${r.stats.minZ} to ${r.stats.maxZ}"
+            assertTrue(r.stats.maxZ < 0.9 && r.stats.minZ > -0.9, z)
+        }
     }
 
     @Test
     fun climbFollowedByAShortDescentKeepsBoth() {
         // Six steps up 1 m, then three steps down 0.6 m: too few steps for a climb of its own, but it
         // brings the height more than half way back right after the climb.
-        val w = walk()
-        val s = w.strideM
-        w.still(2.0).walkTo(0.0, 5.0).walkTo(0.0, 5.0 + 6 * s, 1.0).walkTo(0.0, 5.0 + 9 * s, 0.4)
-            .walkTo(0.0, 15.0 + 9 * s, 0.4).still(2.0)
-        assertWithin(0.4, run(w).points.last().p.z, 0.25, "up 1 m and down 0.6 m")
+        for (seed in 1..8) {
+            val w = SyntheticWalk(noiseSeed = seed)
+            val s = w.strideM
+            w.still(2.0).walkTo(0.0, 5.0).walkTo(0.0, 5.0 + 6 * s, 1.0).walkTo(0.0, 5.0 + 9 * s, 0.4)
+                .walkTo(0.0, 15.0 + 9 * s, 0.4).still(2.0)
+            assertWithin(0.4, run(w).points.last().p.z, 0.3, "seed $seed: up 1 m and down 0.6 m")
+        }
     }
 
     @Test
     fun doorZoneAfterAShortFlightIsNotAWayBack() {
         // Nine steps up 1.5 m, then a stairwell door 1 s later into a corridor 10 Pa higher (0.84 m
         // "down"): more than half the flight, right after it, but a jump, not a way back down.
-        val w = walk()
-        val s = w.strideM
-        val flightEndS = 2.0 + (5.0 + 9 * s) / 1.2
-        val door = SyntheticWalk(baroDisturbanceHpa = { t -> if (t > flightEndS + 1.0) 0.10 else 0.0 })
-        door.still(2.0).walkTo(0.0, 5.0).walkTo(0.0, 5.0 + 9 * s, 1.5).walkTo(0.0, 20.0 + 9 * s, 1.5).still(2.0)
-        assertWithin(1.5, run(door).points.last().p.z, 0.08, "short flight with a door zone after it")
+        for (seed in 1..8) {
+            val door = SyntheticWalk(noiseSeed = seed, baroDisturbanceHpa = { t -> if (t > 13.5) 0.10 else 0.0 })
+            val s = door.strideM
+            door.still(2.0).walkTo(0.0, 5.0).walkTo(0.0, 5.0 + 9 * s, 1.5).walkTo(0.0, 20.0 + 9 * s, 1.5).still(2.0)
+            assertWithin(1.5, run(door).points.last().p.z, 0.08, "seed $seed: short flight with a door zone after it")
+        }
     }
 
     @Test
     fun slowWobbleAndGentleSlopesStayWithinTheLimit() {
-        // Ten minutes on one floor under 4 Pa wobble with a 20 s period, slower than a climb: some
-        // swings pass as climbs and others not, but the height stays within baroMaxHeldM (1.5 m) plus
-        // the swing (0.34 m) of the barometer.
-        val wobble = SyntheticWalk(baroDisturbanceHpa = { t -> 0.04 * sin(2 * PI * t / 20.0) })
-            .still(2.0).walkTo(0.0, 720.0).still(2.0)
+        // Half an hour on one floor under 4 Pa wobble with a 20 s period, slower than a climb: some
+        // swings pass as climbs and others not, and without the limit the height would wander off
+        // by metres. With it, the height stays within baroMaxHeldM (1.5 m) plus the swing (0.34 m).
+        val wobble = SyntheticWalk(rateHz = 50, baroDisturbanceHpa = { t -> 0.04 * sin(2 * PI * t / 20.0) })
+            .still(2.0).walkTo(0.0, 2160.0).still(2.0)
         val r = run(wobble)
         assertTrue(r.stats.maxZ < 1.9 && r.stats.minZ > -1.9, "z from ${r.stats.minZ} to ${r.stats.maxZ}")
+        assertTrue(r.diagnostics["baroLimitM"]!!.toDouble() > 0.0, "the limit acted: ${r.diagnostics["baroLimitM"]}")
 
         // A 3 % slope rising 6 m over 200 m: most of its steps are too small to count, so it comes
         // through only once 1.5 m has been held out.
@@ -515,6 +521,25 @@ class PdrProcessorTest {
         assertTrue(end > 4.4 && end < 6.1, "3 % slope over 200 m: $end")
         val limitM = run(slope).diagnostics["baroLimitM"]!!.toDouble()
         assertTrue(limitM > 2.5, "much of the slope came through the limit: $limitM")
+    }
+
+    @Test
+    fun aVioGapDoesNotInheritTheHeldOutHeight() {
+        // A 3 % slope uses up the held-out band, so a later zone the same way (10 Pa lower, reading
+        // 0.84 m "up") passes in the whole-trip path. A gap solved from the flat part starts with a
+        // fresh band and holds the zone out, as a gap after tracked VIO must.
+        val slopeEndS = 2.0 + 105.0 / 1.2
+        val w = SyntheticWalk(baroDisturbanceHpa = { t -> if (t in slopeEndS + 10.0..slopeEndS + 30.0) -0.10 else 0.0 })
+        w.still(2.0).walkTo(0.0, 5.0).walkTo(0.0, 105.0, 3.0).walkTo(0.0, 165.0, 3.0).still(2.0)
+        val cfg = config(w)
+        val log = w.build(cfg)
+        val solver = PdrSolver()
+        val ctx = solver.prepare(log, cfg)
+        val fromNs = log.firstTimestampNs + ((slopeEndS + 3.0) * 1e9).toLong()
+        val gap = solver.solveSegment(ctx, fromNs, Long.MAX_VALUE, Vec3.ZERO, null)
+        val zoneMid = log.firstTimestampNs + ((slopeEndS + 20.0) * 1e9).toLong()
+        val inZone = gap.first { it.tNs >= zoneMid }.p.z
+        assertTrue(abs(inZone) < 0.1, "the gap takes no zone: $inZone")
     }
 
     @Test

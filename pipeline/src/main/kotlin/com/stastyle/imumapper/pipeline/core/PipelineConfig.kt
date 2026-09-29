@@ -95,11 +95,12 @@ data class PipelineConfig(
      * The climb filter: a barometric height change reaches the path only when the height keeps
      * moving the same way step after step, as on stairs or a slope, with at least this many of those
      * steps moving it by [baroConfirmStepM] or more (see pdr/Climbs). Shorter changes, such as the
-     * pressure differences between rooms and door pulses, are held out. So is much of a gentle
-     * slope, until [baroMaxHeldM] brings it in: at a 0.67 m stride about a third of a 5 % slope and
-     * most of a 3 % one, and more at shorter strides. Pressure wobble slower than about 4 s passes.
-     * Below 4 many sudden pressure jumps pass, below 3 nearly all. 0 turns the filter off and takes
-     * every change through [baroSmoothingS] and [baroHoldWhenStill].
+     * pressure differences between rooms and door pulses, are held out. So is part of a gentle slope,
+     * up to [baroMaxHeldM]: over 30 m at a 0.67 m stride about a third of a 5 % slope and most of a
+     * 3 % one, and more at shorter strides. Flights of four stairs or more are kept, three about
+     * half the time. Pressure wobble slower than about 4 s passes in part. At 3 about half of sudden
+     * pressure jumps pass, at 2 or 1 nearly all. 0 turns the filter off and takes every change
+     * through [baroSmoothingS] and [baroHoldWhenStill].
      */
     val baroConfirmSteps: Int = 5,
     /**
@@ -111,7 +112,9 @@ data class PipelineConfig(
      * With [baroConfirmSteps] on, the path's height stays within this many metres of the
      * barometer's: held-out change beyond it comes through. It bounds the drift that slow pressure
      * wobble would otherwise build up and the height a long gentle slope can lose, while pressure
-     * zones smaller than it (1.5 m is 18 Pa) stay out.
+     * zones smaller than it (1.5 m is 18 Pa) stay out. Once held-out height has used it up, as after
+     * a long gentle slope, pressure changes the same way pass until the path is back near the
+     * barometer.
      */
     val baroMaxHeldM: Double = 1.5,
 

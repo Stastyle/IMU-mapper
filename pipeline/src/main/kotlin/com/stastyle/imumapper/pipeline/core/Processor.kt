@@ -13,8 +13,9 @@ import com.stastyle.imumapper.pipeline.log.RawLog
  *    (northFromCompass); before, every trip kept the game rotation vector's arbitrary yaw.
  * 6: a barometric height change reaches the path only in a climb, a run of steps that all move the
  *    height the same way with at least baroConfirmSteps steps of baroConfirmStepM or more, measured
- *    on per-step means of the unsmoothed pressure, so pressure changes on flat ground indoors no
- *    longer show as climbs.
+ *    on per-step means of the unsmoothed pressure, or in a way back right after one; the path stays
+ *    within baroMaxHeldM of the barometer. Pressure changes on flat ground indoors no longer show as
+ *    climbs.
  */
 const val PIPELINE_VERSION: Int = 6
 
