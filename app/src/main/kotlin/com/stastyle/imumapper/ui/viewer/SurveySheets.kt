@@ -209,8 +209,11 @@ fun DetailDialog(current: Detail, counts: Map<Detail, Int>, onSelect: (Detail) -
 }
 
 /**
- * One row of the legs table; the two name columns get more room than the numbers. A [header] row wraps
- * instead of cutting a label short, so the M or R after "Azimuth" shows on a narrow phone or a large font.
+ * One row of the legs table. A name cell may take two lines: at 384 dp a name column holds about 55 dp
+ * of text, so on one line a default name such as "Waypoint 12" or "Chamber 3" would lose its number and
+ * every leg between unnamed marks would read "Waypoi…". A longer name still ends in an ellipsis, and the
+ * numbers stay on one line. A [header] row wraps instead of cutting a label short, so the M or R after
+ * "Azimuth" shows on a narrow phone or a large font.
  */
 @Composable
 private fun TableRow(
@@ -228,7 +231,11 @@ private fun TableRow(
                 cell,
                 style = MaterialTheme.typography.bodySmall,
                 fontWeight = if (bold || header) FontWeight.SemiBold else null,
-                maxLines = if (header) Int.MAX_VALUE else 1,
+                maxLines = when {
+                    header -> Int.MAX_VALUE
+                    i < NAME_COLUMNS -> NAME_LINES
+                    else -> 1
+                },
                 overflow = TextOverflow.Ellipsis,
                 textAlign = if (i < NAME_COLUMNS) TextAlign.Start else TextAlign.End,
                 modifier = Modifier.weight(COLUMN_WEIGHTS.getOrElse(i) { 1f }).padding(horizontal = 2.dp),
@@ -246,6 +253,9 @@ private fun kindLabel(kind: StationKind): String = when (kind) {
 }
 
 private const val NAME_COLUMNS = 2
+
+/** Enough for a default mark name to keep its number: "Waypoint" on one line and "12" on the next. */
+private const val NAME_LINES = 2
 
 /**
  * From, To, Length, Azimuth, Slope, Δh, Path. Azimuth cells are short ("047°"), but at 384 dp the column
