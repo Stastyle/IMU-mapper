@@ -1,5 +1,7 @@
 package com.stastyle.imumapper.ui.viewer
 
+import com.stastyle.imumapper.pipeline.core.PathPoint
+import com.stastyle.imumapper.pipeline.core.PositionSource
 import com.stastyle.imumapper.pipeline.core.Vec3
 import com.stastyle.imumapper.pipeline.survey.CompassReference
 import com.stastyle.imumapper.pipeline.survey.Detail
@@ -7,6 +9,7 @@ import com.stastyle.imumapper.pipeline.survey.LegMeasure
 import com.stastyle.imumapper.pipeline.survey.LegTotals
 import com.stastyle.imumapper.pipeline.survey.NorthSolution
 import com.stastyle.imumapper.pipeline.survey.NorthSource
+import com.stastyle.imumapper.pipeline.survey.PathTimeline
 import com.stastyle.imumapper.pipeline.survey.ReferenceFit
 import com.stastyle.imumapper.pipeline.survey.ReferenceLine
 import com.stastyle.imumapper.pipeline.survey.Station
@@ -157,6 +160,29 @@ class SurveyFormatTest {
             SurveyFormat.cursorLabel(1_700_000_000_000L, 125_000_000_000L, 41.23, ZoneOffset.UTC),
         )
         assertEquals("3:05 · 41.2 m", SurveyFormat.cursorLabel(null, 185_000_000_000L, 41.23, ZoneOffset.UTC))
+    }
+
+    @Test
+    fun scrubberClockCountsFromTheTripStartNotFromAVioPathsFirstTrackingPose() {
+        // START at 1 s; ARCore first tracked at 9 s, where the VIO path begins, and 10 m north at 19 s.
+        val tripStartNs = 1_000_000_000L
+        val timeline = PathTimeline(
+            listOf(
+                PathPoint(9_000_000_000L, Vec3.ZERO, PositionSource.VIO, 0.0),
+                PathPoint(19_000_000_000L, Vec3(0.0, 10.0, 0.0), PositionSource.VIO, 0.0),
+            ),
+        )
+        // 22:13:20 at START, so the cursor 18 s later reads 22:13:38, not 22:13:30.
+        assertEquals(
+            "22:13:38 · 10.0 m",
+            SurveyFormat.scrubberLabel(1_700_000_000_000L, tripStartNs, timeline, 19_000_000_000L, ZoneOffset.UTC),
+        )
+        // Without the log's START no clock is shown, only the time since the path's start.
+        assertEquals(
+            "0:10 · 10.0 m",
+            SurveyFormat.scrubberLabel(1_700_000_000_000L, null, timeline, 19_000_000_000L, ZoneOffset.UTC),
+        )
+        assertEquals("0:10 · 10.0 m", SurveyFormat.scrubberLabel(null, tripStartNs, timeline, 19_000_000_000L, ZoneOffset.UTC))
     }
 
     @Test

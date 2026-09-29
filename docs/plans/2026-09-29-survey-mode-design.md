@@ -117,7 +117,9 @@ Stations lie on the path, so station hits must win over path hits.
   the cursor drawn on the map. ◀ ▶ step one path point. It is also how to pick a point where the
   path passes the same place twice (out and back). **+ Station** adds a USER station at the cursor.
   With one CORNER or USER station selected, **Move here** moves it to the cursor (a moved CORNER
-  becomes USER).
+  becomes USER). The label's clock counts from the raw log's START event, when Start was pressed,
+  not from the path's first point, so it matches a note or photo taken underground on a VIO run too.
+  Without a readable raw log it shows the time since the path's start instead.
 - **Legs:** a table of the traverse with From, To, Length, Azimuth, Slope, Δh and Path, a ⌒ mark on
   curved legs and a totals row. Tapping a row selects that leg.
 - **Copy:** a long-press on the readout copies one line, for example
@@ -230,8 +232,9 @@ The survey stores facts; the rotation is solved from them for whichever run is s
   formatted with `Locale.US`.
 - One row per leg of the traverse: `from, to, from_s, to_s, length_m, horizontal_m,
   height_change_m, azimuth_deg, north, slope_deg, grade_pct, path_m, curved, to_east_m,
-  to_north_m, to_up_m`. Times are seconds since the start of the trip. Coordinates are relative to
-  the start, in the corrected frame. Empty cell where a value is "—".
+  to_north_m, to_up_m`. Times are seconds since the Start station, the path's first point, and
+  coordinates are relative to it, in the corrected frame. On a VIO run that point is the first
+  tracking pose, which can come seconds after Start was pressed. Empty cell where a value is "—".
 - The share text names the trip, the run and the correction, for example "Run 3, north +4.0°
   from 2 compass readings".
 

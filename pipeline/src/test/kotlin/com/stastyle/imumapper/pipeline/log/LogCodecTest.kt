@@ -24,6 +24,8 @@ import com.stastyle.imumapper.pipeline.core.TrackingState
 import com.stastyle.imumapper.pipeline.core.TripMode
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.io.InputStream
+import java.io.SequenceInputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.test.Test
@@ -31,6 +33,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class LogCodecTest {
@@ -188,6 +191,36 @@ class LogCodecTest {
         assertFailsWith<LogFormatException> {
             LogReader.read(ByteArrayInputStream("NOPE\u0001\u0000\u0000\u0000".toByteArray(Charsets.US_ASCII)))
         }
+    }
+
+    @Test
+    fun startNsIsTheStartEventRightAfterTheMetaAndReadsNoFurther() {
+        val head = ByteArrayOutputStream()
+        LogWriter(head).use { w ->
+            w.writeMeta(meta)
+            w.write(EventRecord(5_000L, EventKind.START))
+        }
+        // Whatever follows START is never read, however long the log is.
+        val rest = object : InputStream() {
+            override fun read(): Int = throw AssertionError("read past START")
+            override fun read(b: ByteArray, off: Int, len: Int): Int = throw AssertionError("read past START")
+        }
+        assertEquals(5_000L, LogReader.startNs(SequenceInputStream(ByteArrayInputStream(head.toByteArray()), rest)))
+    }
+
+    @Test
+    fun startNsIsNullWhenTheLogDoesNotOpenWithStart() {
+        val samplesFirst = ByteArrayOutputStream()
+        LogWriter(samplesFirst).use { w ->
+            w.writeMeta(meta)
+            w.write(AccelSample(1_000L, 0f, 9.8f, 0f))
+            w.write(EventRecord(5_000L, EventKind.START))
+        }
+        assertNull(LogReader.startNs(ByteArrayInputStream(samplesFirst.toByteArray())))
+
+        val metaOnly = ByteArrayOutputStream()
+        LogWriter(metaOnly).use { it.writeMeta(meta) }
+        assertNull(LogReader.startNs(ByteArrayInputStream(metaOnly.toByteArray())))
     }
 
     @Test

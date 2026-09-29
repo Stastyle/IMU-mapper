@@ -9,10 +9,14 @@ import com.stastyle.imumapper.data.db.PathResultEntity
 import com.stastyle.imumapper.data.db.TripEntity
 import com.stastyle.imumapper.data.db.TripStatus
 import com.stastyle.imumapper.pipeline.core.CarryPosition
+import com.stastyle.imumapper.pipeline.core.EventKind
+import com.stastyle.imumapper.pipeline.core.EventRecord
+import com.stastyle.imumapper.pipeline.core.LogMeta
 import com.stastyle.imumapper.pipeline.core.PathResult
 import com.stastyle.imumapper.pipeline.core.PipelineConfig
 import com.stastyle.imumapper.pipeline.core.TripMode
 import com.stastyle.imumapper.pipeline.core.Vec3
+import com.stastyle.imumapper.pipeline.log.LogWriter
 import com.stastyle.imumapper.pipeline.survey.Detail
 import com.stastyle.imumapper.pipeline.survey.NorthSource
 import com.stastyle.imumapper.pipeline.survey.ReferenceLine
@@ -302,6 +306,32 @@ class ViewerSurveyTest {
         assertEquals(SurveySelection.Stretch(1, 2), survey(vm).state.selection)
         vm.clearSurveySelection()
         assertEquals(SurveySelection.None, survey(vm).state.selection)
+    }
+
+    @Test
+    fun theScrubberClockIsAnchoredOnTheLogsStartNotOnThePathsFirstPoint() = runBlocking<Unit> {
+        // Start pressed 0.8 s before the path's first point, as when ARCore takes that long to track.
+        val startNs = t(0) - 800_000_000L
+        val id = processedTrip(SurveyFixtures.lWalk())
+        LogWriter(files.rawLog(id).outputStream()).use { w ->
+            w.writeMeta(
+                LogMeta(
+                    appVersion = "test", deviceModel = "test", androidSdk = 36, mode = TripMode.FLASHLIGHT,
+                    carryPosition = CarryPosition.HAND, startedAtEpochMs = 1_700_000_000_000L,
+                ),
+            )
+            w.write(EventRecord(startNs, EventKind.START))
+        }
+        val vm = viewer(id)
+        vm.toggleSurvey()
+        assertEquals(startNs, survey(vm).tripStartNs)
+    }
+
+    @Test
+    fun withoutARawLogTheScrubberHasNoTripStart() = runBlocking<Unit> {
+        val vm = viewer(processedTrip(SurveyFixtures.lWalk()))
+        vm.toggleSurvey()
+        assertNull(survey(vm).tripStartNs)
     }
 
     @Test

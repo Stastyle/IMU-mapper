@@ -5,6 +5,7 @@ import com.stastyle.imumapper.pipeline.survey.Detail
 import com.stastyle.imumapper.pipeline.survey.LegMeasure
 import com.stastyle.imumapper.pipeline.survey.LegTotals
 import com.stastyle.imumapper.pipeline.survey.NorthSolution
+import com.stastyle.imumapper.pipeline.survey.PathTimeline
 import com.stastyle.imumapper.pipeline.survey.ReferenceFit
 import com.stastyle.imumapper.pipeline.survey.ReferenceLine
 import com.stastyle.imumapper.pipeline.survey.StretchMeasure
@@ -92,8 +93,8 @@ object SurveyFormat {
     }
 
     /**
-     * The scrubber's label: the clock time at the cursor when the trip's start is known (it matches
-     * a note taken underground), else the time since the path's start.
+     * A time and a distance: with [startedAtEpochMs], the clock time [elapsedNs] after it, else
+     * [elapsedNs] as a duration. [scrubberLabel] picks what the elapsed time counts from.
      */
     fun cursorLabel(startedAtEpochMs: Long?, elapsedNs: Long, distanceM: Double, zone: ZoneId): String {
         val time = if (startedAtEpochMs == null) {
@@ -102,6 +103,27 @@ object SurveyFormat {
             CLOCK.withZone(zone).format(Instant.ofEpochMilli(startedAtEpochMs + elapsedNs / 1_000_000L))
         }
         return "$time$SEPARATOR${metres(distanceM)}"
+    }
+
+    /**
+     * The scrubber's label at [cursorNs]: the clock time (it matches a note taken underground) when
+     * both the trip's start time and [tripStartNs], the log's START it was taken with, are known. The
+     * clock never counts from the path's first point, which on a VIO run is the first tracking pose,
+     * seconds after Start in a dark entrance. Without them, the time since the path's start.
+     */
+    fun scrubberLabel(
+        startedAtEpochMs: Long?,
+        tripStartNs: Long?,
+        timeline: PathTimeline,
+        cursorNs: Long,
+        zone: ZoneId,
+    ): String {
+        val distanceM = timeline.distanceAt(cursorNs)
+        return if (startedAtEpochMs != null && tripStartNs != null) {
+            cursorLabel(startedAtEpochMs, cursorNs - tripStartNs, distanceM, zone)
+        } else {
+            cursorLabel(null, cursorNs - timeline.startNs, distanceM, zone)
+        }
     }
 
     /** The share sheet's text: which trip, run and north a CSV was measured on. */

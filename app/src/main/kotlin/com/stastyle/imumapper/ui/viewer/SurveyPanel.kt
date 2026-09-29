@@ -74,12 +74,12 @@ fun SurveyPanel(
             }
             Scrubber(survey, onCursor, onStep)
             Row(verticalAlignment = Alignment.CenterVertically) {
-                val timeline = survey.geometry.timeline
                 Text(
-                    SurveyFormat.cursorLabel(
+                    SurveyFormat.scrubberLabel(
                         startedAtEpochMs,
-                        state.cursorNs - timeline.startNs,
-                        timeline.distanceAt(state.cursorNs),
+                        survey.tripStartNs,
+                        survey.geometry.timeline,
+                        state.cursorNs,
                         ZoneId.systemDefault(),
                     ),
                     style = MaterialTheme.typography.bodySmall,

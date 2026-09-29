@@ -14,6 +14,7 @@ import com.stastyle.imumapper.data.db.PathResultEntity
 import com.stastyle.imumapper.data.db.TripEntity
 import com.stastyle.imumapper.data.db.TripStatus
 import com.stastyle.imumapper.pipeline.core.PathResult
+import com.stastyle.imumapper.pipeline.log.LogReader
 import com.stastyle.imumapper.pipeline.post.RawPath
 import com.stastyle.imumapper.pipeline.survey.Detail
 import com.stastyle.imumapper.pipeline.survey.LegTotals
@@ -72,6 +73,11 @@ data class SurveyUi(
     val askManualRotation: Boolean,
     /** SurveyOpen.error while read-only. */
     val error: String?,
+    /**
+     * The raw log's START (LogReader.startNs), which trip.startedAtEpochMs was taken with: the scrubber's
+     * clock counts from it (SurveyFormat.scrubberLabel). Null when raw.imul is missing or unreadable.
+     */
+    val tripStartNs: Long?,
 )
 
 data class ViewerUiState(
@@ -181,6 +187,8 @@ class ViewerViewModel(
     private var boundsSource: PathResult? = null
     /** Why survey.json could not be read; shown while the survey is read-only. */
     private var surveyError: String? = null
+    /** The raw log's START, read with survey.json; see SurveyUi.tripStartNs. */
+    private var tripStartNs: Long? = null
     /** "Not now" on the manual-rotation prompt, for this run and this screen only. */
     private var manualPromptDismissedRunId: Int? = null
     /** The newest doc not yet written; saves run one at a time and skip docs a later edit overtook. */
@@ -424,9 +432,10 @@ class ViewerViewModel(
             return
         }
         viewModelScope.launch {
-            val load = withContext(ioDispatcher) { surveys.load(tripId) }
+            val (load, startNs) = withContext(ioDispatcher) { surveys.load(tripId) to readTripStartNs() }
             // Leaving while the file was read, or a second entry that got there first, makes this load stale.
             if (!_ui.value.surveyMode || surveyState != null) return@launch
+            tripStartNs = startNs
             val ui = _ui.value
             val current = ui.shownResult?.takeIf { it.points.isNotEmpty() } ?: return@launch
             val runId = ui.selectedRunId ?: return@launch
@@ -601,6 +610,12 @@ class ViewerViewModel(
         applyPreset(CameraPreset.TOP)
     }
 
+    /** The raw log's START, reading only the log's first records; null when the log is missing or unreadable. */
+    private fun readTripStartNs(): Long? = runCatching {
+        val log = files.rawLog(tripId)
+        if (log.isFile) log.inputStream().use { LogReader.startNs(it) } else null
+    }.getOrNull()
+
     /** Runs a selection or cursor change; these need no file and work read-only too. */
     private fun changeSurvey(change: (SurveyState, SurveyGeometry) -> SurveyState) {
         if (!_ui.value.surveyMode) return
@@ -706,6 +721,7 @@ class ViewerViewModel(
             askManualRotation = NorthSolver.manualNeedsConfirmation(state.doc, runId) &&
                 manualPromptDismissedRunId != runId,
             error = if (state.readOnly) surveyError else null,
+            tripStartNs = tripStartNs,
         )
     }
 
