@@ -15,8 +15,8 @@ import kotlin.math.abs
  * `minStepM` or more. The smaller steps of a run neither count nor break it, because on a gentle
  * slope the barometer noise pushes some steps under `minStepM`; a climb spans the run from its
  * first large step to its last. A run shaped like a jump, with [JUMP_SHARE] of it in two
- * consecutive changes, is no climb however many large steps noise gives it: stairs spread their
- * height over every step.
+ * consecutive changes (and any run of two steps or fewer), is no climb however many large steps
+ * noise gives it: stairs spread their height over every step.
  *
  * Everything is measured on the unsmoothed height averaged over each step's interval (from the
  * step before, or the trip start, to the step). A low-passed height would spread a pressure jump
@@ -45,9 +45,10 @@ import kotlin.math.abs
  *
  * Limits: a pressure jump in the direction of a climb, right before or after it, joins the climb;
  * a pressure change spread over a second or more can pass as a climb or a way back; wobble slower
- * than about 4 s passes in part; a gentle slope loses up to `maxHeldM`, and once it has used the
- * band up, pressure changes the same way pass; a change spread over fewer than `minSteps` large
- * changes comes through only beyond `maxHeldM` or as a way back.
+ * than about 4 s passes in part; the path stays within `maxHeldM` of the barometer, so a gentle
+ * slope loses up to that much, or up to twice it on the way back up a ramp walked down, and once
+ * held-out height has used the band up, pressure changes the same way pass; a change spread over
+ * fewer than `minSteps` large changes comes through only beyond `maxHeldM` or as a way back.
  */
 class Climbs private constructor(
     private val intervalStartNs: LongArray,
@@ -123,7 +124,10 @@ class Climbs private constructor(
             return sum
         }
 
-        /** True when two consecutive changes carry [JUMP_SHARE] or more of the run, as a pressure jump does. */
+        /**
+         * True when two consecutive changes carry [JUMP_SHARE] or more of the run, as a pressure jump
+         * does, and for any run of two steps or fewer.
+         */
         fun jumpShaped(change: DoubleArray): Boolean {
             if (last - first < 2) return true
             var most = 0.0

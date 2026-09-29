@@ -94,15 +94,17 @@ data class PipelineConfig(
     /**
      * The climb filter: a barometric height change reaches the path only when the height keeps
      * moving the same way step after step, as on stairs or a slope, with at least this many of those
-     * steps moving it by [baroConfirmStepM] or more (see pdr/Climbs). Shorter changes, such as the
-     * pressure differences between rooms and door pulses, are held out. So is part of a gentle slope,
-     * up to [baroMaxHeldM]: over 30 m at a 0.67 m stride about a third of a 5 % slope and most of a
-     * 3 % one, and more at shorter strides. Flights of four stairs or more are kept, three about
-     * half the time. Pressure wobble slower than about 4 s passes in part. At 3 about half of sudden
-     * pressure jumps pass, at 2 or 1 nearly all. 0 turns the filter off and takes every change
-     * through [baroSmoothingS] and [baroHoldWhenStill].
+     * steps moving it by [baroConfirmStepM] or more and not shaped like a jump (see pdr/Climbs).
+     * Sudden changes, such as the pressure differences between rooms and door pulses, are held out
+     * at any count. At 4, over 30 m at a 0.67 m stride, about 80 % of a 5 % slope and 30 % of a 3 %
+     * one come through (less at shorter strides; the path never strays more than [baroMaxHeldM]
+     * from the barometer), and flights of three stairs or more are kept. A higher count holds out
+     * more of pressure changes spread over a second or more and of wobble slower than about 4 s,
+     * which pass in part, but loses short flights (three stairs about half the time at 5) and more
+     * of a slope. 0 turns the filter off and takes every change through [baroSmoothingS] and
+     * [baroHoldWhenStill].
      */
-    val baroConfirmSteps: Int = 5,
+    val baroConfirmSteps: Int = 4,
     /**
      * Height change of a single step, metres, from which it counts toward [baroConfirmSteps]. A
      * smaller step in the same direction neither counts nor breaks the run.
@@ -112,9 +114,11 @@ data class PipelineConfig(
      * With [baroConfirmSteps] on, the path's height stays within this many metres of the
      * barometer's: held-out change beyond it comes through. It bounds the drift that slow pressure
      * wobble would otherwise build up and the height a long gentle slope can lose, while pressure
-     * zones smaller than it (1.5 m is 18 Pa) stay out. Once held-out height has used it up, as after
-     * a long gentle slope, pressure changes the same way pass until the path is back near the
-     * barometer.
+     * zones smaller than it (1.5 m is 18 Pa) stay out. The bound is on the path against the
+     * barometer, not per slope: on the way back up a gentle ramp walked down, the path first moves
+     * from one side of the band to the other, so that leg can lose up to twice this. Once held-out
+     * height has used the band up, pressure changes the same way pass until the path is back near
+     * the barometer.
      */
     val baroMaxHeldM: Double = 1.5,
 

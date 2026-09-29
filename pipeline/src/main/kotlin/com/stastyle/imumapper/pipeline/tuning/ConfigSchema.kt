@@ -134,24 +134,23 @@ object ConfigSchema {
         ConfigFieldSpec(
             "baroConfirmSteps", FieldKind.INTEGER, "steps", 0.0, 50.0,
             "A height change counts only when the height keeps moving the same way step after step, with at " +
-                "least this many steps of baroConfirmStepM or more, as on stairs or a slope; shorter changes " +
-                "(pressure zones indoors, doors) are held out, while wobble slower than about 4 s passes. " +
-                "0 turns the filter off. Raise it when the height jumps on flat ground; lower it when short " +
-                "flights of stairs are missing, but not below 4: at 3 about half of sudden pressure jumps pass, " +
-                "at 2 or 1 nearly all.",
+                "least this many steps of baroConfirmStepM or more, as on stairs or a slope, and is not shaped " +
+                "like a jump; sudden changes (pressure zones indoors, doors) are held out at any count, while " +
+                "changes spread over a second or more and wobble slower than about 4 s pass in part. 0 turns the " +
+                "filter off. Raise it when the height moves on flat ground in a listed climb; lower it when short " +
+                "flights of stairs are missing, but not below 3, where noise starts to pass as climbs.",
         ),
         ConfigFieldSpec(
             "baroConfirmStepM", FieldKind.NUMBER, "m", 0.0, 0.5,
             "Height change of one step from which it counts toward baroConfirmSteps; a smaller step the same " +
-                "way neither counts nor breaks the run. Lower it when gentle slopes come out flat; raise it when " +
-                "noise on flat ground passes as a climb.",
+                "way neither counts nor breaks the run. Lower it when a short gentle slope comes out flat.",
         ),
         ConfigFieldSpec(
             "baroMaxHeldM", FieldKind.NUMBER, "m", 0.0, 50.0,
             "With baroConfirmSteps on, the height stays within this of the barometer's: held-out change beyond " +
                 "it comes through. It acts only once that much is held out, so lower it only when a long gentle " +
                 "slope has lost about this much (baroLimitM above 0); raise it when pressure zones larger than " +
-                "it show as steps on one floor with no gentle slope before them.",
+                "it show as steps on one floor with no gentle slope or held-out climb the same way before them.",
         ),
         ConfigFieldSpec(
             "loopClosure", FieldKind.BOOLEAN, "", 0.0, 1.0,
