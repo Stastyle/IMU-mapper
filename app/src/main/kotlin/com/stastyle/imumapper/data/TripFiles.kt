@@ -10,6 +10,7 @@ import java.io.File
  * files/trips/<tripId>/raw.imul            raw sensor log (LogFormat)
  * files/trips/<tripId>/results/run-<n>.json PathResult per processing run
  * files/trips/<tripId>/photos/<name>.jpg    keyframes
+ * files/trips/<tripId>/survey.json          Survey mode facts (SurveyStore)
  * cache/export/                             ZIPs for the share sheet
  * cache/import/                             staging area while a ZIP or log is imported
  * cache/updates/                            downloaded APKs
@@ -36,6 +37,9 @@ class TripFiles(private val filesDir: File, private val cacheDir: File) {
 
     fun photosDir(tripId: Long): File = File(tripDir(tripId), PHOTOS_DIR_NAME).also { it.mkdirs() }
 
+    /** Survey mode's facts for the trip; absent until Survey mode first opens on it. */
+    fun surveyFile(tripId: Long): File = File(tripDir(tripId), SURVEY_NAME)
+
     fun exportDir(): File = File(cacheDir, "export").also { it.mkdirs() }
 
     fun importDir(): File = File(cacheDir, "import").also { it.mkdirs() }
@@ -61,5 +65,6 @@ class TripFiles(private val filesDir: File, private val cacheDir: File) {
         const val RAW_LOG_NAME = "raw.imul"
         const val RESULTS_DIR_NAME = "results"
         const val PHOTOS_DIR_NAME = "photos"
+        const val SURVEY_NAME = "survey.json"
     }
 }

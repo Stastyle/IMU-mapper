@@ -4,6 +4,7 @@ import android.content.Context
 import com.stastyle.imumapper.data.CalibrationRepository
 import com.stastyle.imumapper.data.RoomCalibrationRepository
 import com.stastyle.imumapper.data.RoomTripRepository
+import com.stastyle.imumapper.data.SurveyStore
 import com.stastyle.imumapper.data.TripExporter
 import com.stastyle.imumapper.data.TripFiles
 import com.stastyle.imumapper.data.TripImporter
@@ -53,6 +54,8 @@ class AppContainer(context: Context) {
     val tripExporter: TripExporter by lazy { TripExporter(appContext, tripRepository, tripFiles) }
 
     val tripImporter: TripImporter by lazy { TripImporter(appContext, tripRepository, tripFiles) }
+
+    val surveyStore: SurveyStore by lazy { SurveyStore(tripFiles) }
 
     val updateManager: UpdateManager by lazy { UpdateManager.get(appContext) }
 }
