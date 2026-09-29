@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="ic_launcher_background">#10233A</color>
+    <!-- The theme's background, shown before Compose draws, so a cold start is navy, not white. -->
+    <color name="window_background">#07111F</color>
 </resources>

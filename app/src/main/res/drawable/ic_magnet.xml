@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Horseshoe magnet for the recording screen's Mag tile; material-icons-extended has no magnet glyph.
+    One colour, so Icon tints it; not auto-mirrored, since a magnet has no reading direction.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- The U-shaped body. -->
+    <path
+        android:pathData="M4,8 L4,12 A8,8 0 0,0 20,12 L20,8 L15,8 L15,12 A3,3 0 0,1 9,12 L9,8 Z"
+        android:fillColor="#FF000000" />
+    <!-- The two pole tips, set off from the body by a gap. -->
+    <path
+        android:pathData="M4,3 L9,3 L9,6.5 L4,6.5 Z M15,3 L20,3 L20,6.5 L15,6.5 Z"
+        android:fillColor="#FF000000" />
+</vector>
