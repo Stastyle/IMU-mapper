@@ -5,6 +5,7 @@ import com.stastyle.imumapper.data.SurveyLoad
 import com.stastyle.imumapper.pipeline.survey.Detail
 import com.stastyle.imumapper.pipeline.survey.Station
 import com.stastyle.imumapper.pipeline.survey.StationKind
+import com.stastyle.imumapper.pipeline.survey.SurveyStations
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -183,6 +184,27 @@ class SurveyEditsTest {
         assertEquals(SurveySelection.None, fine.selection)
         assertEquals(listOf(seeded.doc), fine.undo)
         assertEquals(seeded.doc, SurveyController.undo(fine).doc)
+
+        // Undoing it clears the selection as well: the new corner tapped here has id 4, which the
+        // seeded doc also uses, and a Detail change is free to give that id to another station.
+        val undone = SurveyController.undo(tap(fine, 4))
+        assertEquals(seeded.doc, undone.doc)
+        assertEquals(SurveySelection.None, undone.selection)
+    }
+
+    @Test
+    fun undoingADetailChangeDoesNotMoveTheSelectionToAnotherStation() {
+        // Corners found on an earlier run's path: this doc's C1 (id 4) is 3 m in, where the shown path
+        // is straight.
+        val stations = SurveyStations.ordered(seeded.doc.stations.map { if (it.id == 4) it.copy(tNs = t(6)) else it })
+        val stale = SurveyController.open(SurveyLoad.Loaded(seeded.doc.copy(stations = stations)), geo).state
+        val fine = SurveyController.setDetail(stale, geo, Detail.FINE)
+        // The new corner at the bend takes id 4 again.
+        assertEquals(t(20), fine.station(4).tNs)
+        val undone = SurveyController.undo(tap(fine, 4))
+        assertEquals(t(6), undone.station(4).tNs)
+        // Chain(4) would now ring the old C1, and Move here would move it.
+        assertEquals(SurveySelection.None, undone.selection)
     }
 
     @Test

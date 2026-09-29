@@ -346,11 +346,17 @@ object SurveyController {
                 .count { it.kind == StationKind.CORNER }
         }
 
-    /** Back to the doc before the last edit; the selection is pruned against it, the cursor stays. */
+    /**
+     * Back to the doc before the last edit; the selection is pruned against it, the cursor stays. Undoing
+     * a Detail change clears the selection, as [setDetail] does: the two docs' corners may share ids, so a
+     * selected new corner would otherwise become another station of the same id.
+     */
     fun undo(state: SurveyState): SurveyState {
         if (state.readOnly) return state
         val previous = state.undo.lastOrNull() ?: return state
-        return state.copy(doc = previous, undo = state.undo.dropLast(1), selection = prune(state.selection, previous))
+        val detailChange = previous.detail != state.doc.detail
+        val selection = if (detailChange) SurveySelection.None else prune(state.selection, previous)
+        return state.copy(doc = previous, undo = state.undo.dropLast(1), selection = selection)
     }
 
     // --- north edits: the facts the rotation is solved from; each is one undo entry, refused read-only ---

@@ -975,7 +975,9 @@ Behaviour, all binding:
 - **edits:** a private `edit(state, newDoc)` returns `state` unchanged when read-only or when
   `newDoc == state.doc`; otherwise pushes the old doc (dropping the oldest past `MAX_UNDO`) and prunes
   the selection against the new stations (chain ids removed, a stretch with a missing id becomes
-  `None`). `undo` pops the last doc and prunes the same way; selection and cursor are not undone.
+  `None`). `undo` pops the last doc and prunes the same way; selection and cursor are not undone. Undoing
+  a Detail change (the popped doc's `detail` differs) clears the selection instead, as `setDetail` does,
+  because the two docs' corners may reuse the same ids for different stations.
 - **addStation:** `SurveyStations.user(stations, tNs)` added, list re-ordered with `SurveyStations.ordered`.
 - **moveStation:** only CORNER or USER; the station keeps id and name, gets `tNs`, and a CORNER becomes
   USER (so a Detail change keeps it). Other kinds: unchanged.
