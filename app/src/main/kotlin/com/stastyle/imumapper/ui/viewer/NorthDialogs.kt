@@ -41,6 +41,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.stastyle.imumapper.pipeline.survey.Measure
 import com.stastyle.imumapper.pipeline.survey.ReferenceLine
 import com.stastyle.imumapper.pipeline.survey.SurveyCsv
 import java.util.Locale
@@ -100,7 +101,16 @@ fun SetAzimuthDialog(
                 }
                 LineOption(ReferenceLine.CHORD, line, "Point to point (the straight line)") { line = it }
                 LineOption(ReferenceLine.FITTED, line, "Passage direction (the fitted line)") { line = it }
-                if (bearing != null && shown != null) {
+                // Ends with no direction are said at once, in place of a turn that could never happen.
+                val noDirection = shown != null && shown.chordDeg == null
+                if (noDirection) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        noDirectionText(fromName, toName),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                } else if (bearing != null && shown != null) {
                     Spacer(Modifier.height(8.dp))
                     Text(
                         turnText(shown),
@@ -120,7 +130,8 @@ fun SetAzimuthDialog(
             }
         },
         confirmButton = {
-            // Without a chord on the path the reading could never be used, so it is not offered.
+            // Without a chord on the path the reading could never be used, so Apply stays off; the line
+            // above says why.
             TextButton(
                 onClick = { if (bearing != null) onConfirm(bearing, backBearing, line) },
                 enabled = bearing != null && shown?.chordDeg != null,
@@ -278,6 +289,14 @@ private fun turnText(preview: AzimuthPreview): String {
     val earlier = abs(preview.rotationDeg - preview.changeDeg) >= SAME_TURN_DEG
     return if (earlier) "$turn (north ${SurveyFormat.rotation(preview.rotationDeg)} in all)" else turn
 }
+
+/**
+ * Said in place of the turn when the two ends are under Measure.MIN_HORIZONTAL_M apart on the plan: they
+ * have no chord, so no reading on them can be applied.
+ */
+internal fun noDirectionText(fromName: String, toName: String): String =
+    "$fromName and $toName are less than ${Measure.MIN_HORIZONTAL_M} m apart on the plan, so they give no " +
+        "direction. Pick points farther apart."
 
 /**
  * A warning's line in the Set azimuth dialog. With [backBearing] ticked a turn over 45° cannot be an

@@ -182,6 +182,24 @@ class SurveyNorthEditsTest {
     }
 
     @Test
+    fun previewOfPointsWithNoDirectionTurnsNothingAndWarnsOfNothing() {
+        // A leg from a station to itself is under Measure.MIN_HORIZONTAL_M across, so it has no chord and
+        // its reading could never be used: the dialog says why instead of a turn or a SHORT warning.
+        val nowhere = SurveyController.selectLeg(seeded, 2, 2)
+        val preview = assertNotNull(SurveyController.azimuthPreview(nowhere, geo, 45.0, false, ReferenceLine.CHORD))
+        assertNull(preview.chordDeg)
+        assertNull(preview.fittedDeg)
+        assertEquals(0.0, preview.rotationDeg, 1e-9)
+        assertEquals(0.0, preview.changeDeg, 1e-9)
+        assertEquals(emptySet(), preview.warnings)
+        assertEquals(
+            "Pillar A and S2 are less than 0.3 m apart on the plan, so they give no direction. " +
+                "Pick points farther apart.",
+            noDirectionText("Pillar A", "S2"),
+        )
+    }
+
+    @Test
     fun previewAcrossTheCornerSaysItIsCrooked() {
         // Start to End reads atan2(5, 10) = 26.6 degrees over 11.2 m, but the path walks 15 m: straightness 0.75.
         val chordDeg = Math.toDegrees(atan2(5.0, 10.0))

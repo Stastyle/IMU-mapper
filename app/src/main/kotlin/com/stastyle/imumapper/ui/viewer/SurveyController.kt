@@ -397,7 +397,8 @@ object SurveyController {
     /**
      * What adding the reference would do, shown before it is added: the selection's readings now, the
      * rotation after, and a warning for each way a reading usually goes wrong. Null without a pair or
-     * stretch, or for a bearing that is not a number.
+     * stretch, or for a bearing that is not a number. Ends with no chord give a null chordDeg, no change
+     * and no warning, since addReference refuses them.
      *
      * The size of the change is judged only when north means something already: on a relative-north run
      * with no compass reading and no hand turn in use, north is arbitrary, so the first reading may turn
@@ -413,6 +414,11 @@ object SurveyController {
         val reference = newReference(state, geo, bearingDeg, backBearing, line) ?: return null
         val measure = Measure.stretch(geo.timeline, reference.fromNs, reference.toNs)
         val nowSolution = NorthSolver.solve(state.doc, geo.plain, geo.runId)
+        // Ends under Measure.MIN_HORIZONTAL_M apart have no chord, so the reading can never be added:
+        // nothing turns and nothing warns, and the dialog says why instead.
+        if (measure.leg.azimuthDeg == null) {
+            return AzimuthPreview(null, measure.fittedAzimuthDeg, nowSolution.rotationDeg, 0.0, emptySet())
+        }
         val arbitrary = nowSolution.source == NorthSource.NONE &&
             !NorthSolver.isMagnetic(geo.shown.diagnostics, nowSolution)
         val withReference = state.doc.copy(references = state.doc.references + reference)
