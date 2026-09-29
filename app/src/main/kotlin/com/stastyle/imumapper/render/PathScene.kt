@@ -9,7 +9,11 @@ import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.roundToInt
 
-enum class ColorMode { TIME, ALTITUDE, SOURCE }
+/**
+ * What a path segment's colour shows. [PROGRESS] is the share of the path's length walked (see [PathProgress]), so a
+ * standing pause keeps its colour; [TIME] is elapsed time, [ALTITUDE] height, [SOURCE] whether PDR or VIO placed it.
+ */
+enum class ColorMode { PROGRESS, TIME, ALTITUDE, SOURCE }
 
 enum class MarkerKind { START, END, ANNOTATION, KEYFRAME }
 
@@ -60,7 +64,15 @@ class SceneModel(
     val cloudColor: Int,
     val markers: List<SceneMarker>,
     val labels: List<SceneLabel>,
-)
+    /**
+     * Lines [pathLineStart] until [pathLineEnd] are the main path's segments, the only ones the renderer draws a glow
+     * under: the grid, the axes and an overlaid run lie outside the range. Empty when the path has no segment.
+     */
+    val pathLineStart: Int = 0,
+    val pathLineEnd: Int = 0,
+) {
+    fun isPathLine(line: Int): Boolean = line >= pathLineStart && line < pathLineEnd
+}
 
 /** ARGB colour helpers; Compose's Color is not available in pure Kotlin. */
 object SceneColors {
@@ -107,6 +119,16 @@ object SceneColors {
         argb(255, 255, 241, 118),
     )
 
+    /** Blue -> cyan -> green -> yellow -> orange -> red: the vivid ramp of distance along the path. */
+    val PROGRESS_STOPS = intArrayOf(
+        argb(255, 0x2F, 0x6B, 0xFF),
+        argb(255, 0x22, 0xD3, 0xEE),
+        argb(255, 0x34, 0xD3, 0x99),
+        argb(255, 0xFA, 0xCC, 0x15),
+        argb(255, 0xFB, 0x92, 0x3C),
+        argb(255, 0xEF, 0x44, 0x44),
+    )
+
     val SOURCE_PDR = argb(255, 255, 167, 38)
     val SOURCE_VIO = argb(255, 38, 198, 218)
     val SOURCE_INTERPOLATED = argb(255, 158, 158, 158)
@@ -115,8 +137,9 @@ object SceneColors {
     val END = argb(255, 244, 67, 54)
     val KEYFRAME = argb(255, 100, 181, 246)
     val CLOUD = argb(80, 176, 190, 197)
-    val GRID_MINOR = argb(40, 255, 255, 255)
-    val GRID_MAJOR = argb(90, 255, 255, 255)
+    /** Blue-tinted so the floor reads as part of the navy canvas rather than a grey mesh over it. */
+    val GRID_MINOR = argb(48, 90, 150, 230)
+    val GRID_MAJOR = argb(104, 100, 165, 245)
     val AXIS_EAST = argb(255, 229, 57, 53)
     val AXIS_NORTH = argb(255, 67, 160, 71)
     val AXIS_UP = argb(255, 66, 165, 245)
@@ -221,7 +244,9 @@ object PathScene {
         addAxes(lines, labels, spacing)
 
         if (overlay != null) addPath(lines, overlay, options, OVERLAY_WIDTH_DP, OVERLAY_ALPHA)
+        val pathLineStart = lines.count
         addPath(lines, result, options, PATH_WIDTH_DP, 0xFF)
+        val pathLineEnd = lines.count
 
         val markers = if (options.showMarkers) buildMarkers(result) else emptyList()
 
@@ -249,6 +274,8 @@ object PathScene {
             cloudColor = SceneColors.CLOUD,
             markers = markers,
             labels = labels,
+            pathLineStart = pathLineStart,
+            pathLineEnd = pathLineEnd,
         )
     }
 
@@ -281,9 +308,8 @@ object PathScene {
         lines.add(base, tip, SceneColors.NORTH_ARROW, AXIS_WIDTH_DP)
         lines.add(tip, Vec3(maxX - head, minY + len - head, floorZ), SceneColors.NORTH_ARROW, AXIS_WIDTH_DP)
         lines.add(tip, Vec3(maxX + head, minY + len - head, floorZ), SceneColors.NORTH_ARROW, AXIS_WIDTH_DP)
+        // The spacing is not labelled here: the viewer shows it in a chip that stays put while the grid moves.
         labels.add(SceneLabel(Vec3(maxX, minY + len + head, floorZ), "N", SceneColors.NORTH_ARROW))
-        val spacingText = if (spacing >= 1.0) "${spacing.roundToInt()} m grid" else "$spacing m grid"
-        labels.add(SceneLabel(Vec3(minX, minY, floorZ), spacingText, SceneColors.GRID_MAJOR))
     }
 
     private fun addAxes(lines: LineSink, labels: MutableList<SceneLabel>, spacing: Double) {
@@ -305,10 +331,13 @@ object PathScene {
         val tSpan = max((pts.last().tNs - t0).toDouble(), 1.0)
         val zMin = result.stats.minZ
         val zSpan = max(result.stats.maxZ - zMin, 1e-6)
+        // From every point, not the decimated ones, so a colour marks the same place as in a thumbnail.
+        val progress = if (options.colorMode == ColorMode.PROGRESS) PathProgress.fractions(pts) else DoubleArray(0)
         for (k in 0 until idx.size - 1) {
             val a = pts[idx[k]]
             val b = pts[idx[k + 1]]
             val color = when (options.colorMode) {
+                ColorMode.PROGRESS -> PathProgress.color(progress[idx[k]])
                 ColorMode.TIME -> SceneColors.gradient(SceneColors.TIME_STOPS, (a.tNs - t0) / tSpan)
                 ColorMode.ALTITUDE -> SceneColors.gradient(SceneColors.ALTITUDE_STOPS, (a.p.z - zMin) / zSpan)
                 ColorMode.SOURCE -> SceneColors.forSource(a.source)

@@ -9,6 +9,7 @@ import com.stastyle.imumapper.pipeline.core.PathStats
 import com.stastyle.imumapper.pipeline.core.PipelineConfig
 import com.stastyle.imumapper.pipeline.core.PositionSource
 import com.stastyle.imumapper.pipeline.core.Vec3
+import com.stastyle.imumapper.pipeline.post.PathBuilder
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
@@ -213,6 +214,125 @@ class PathSceneTest {
         val depth = -1.0 + (3.0 - -1.0) * t
         assertTrue(depth >= Projector.NEAR_M && depth < Projector.NEAR_M + 1e-5, "depth $depth")
         assertEquals(1.0, ProjectedScene.clipFraction(-1.0, Projector.NEAR_M))
+    }
+
+    /** A path through [positions], one point a second, with no annotations. */
+    private fun pathThrough(positions: List<Vec3>): PathResult {
+        val points = positions.mapIndexed { i, p -> PathPoint(i * 1_000_000_000L, p, PositionSource.PDR, 0.0) }
+        return PathResult(
+            pipelineVersion = 1,
+            config = PipelineConfig(),
+            points = points,
+            stats = PathBuilder.stats(points, positions.size.toDouble(), 0, null),
+        )
+    }
+
+    @Test
+    fun theDefaultColourModeStaysTime() {
+        assertEquals(ColorMode.TIME, SceneOptions().colorMode)
+    }
+
+    @Test
+    fun progressColoursEachSegmentByTheShareOfTheLengthAtItsStart() {
+        val scene = PathScene.build(result(n = 20), SceneOptions(showGrid = false, colorMode = ColorMode.PROGRESS))
+        val first = 3 // after the axis triad
+        assertEquals(3 + 19, scene.lineCount)
+        assertEquals(SceneColors.PROGRESS_STOPS.first(), scene.lineColors[first])
+        // The circle's 19 segments are equally long, so the last one starts 18/19 of the way along.
+        val expectedLast = SceneColors.gradient(SceneColors.PROGRESS_STOPS, 18.0 / 19)
+        assertEquals(expectedLast, scene.lineColors[scene.lineCount - 1])
+    }
+
+    @Test
+    fun progressColoursTheOverlayByItsOwnLength() {
+        val main = result(n = 20)
+        // Half as long a run: its own fractions, not the main path's, set its colours.
+        val overlay = pathThrough((0 until 11).map { Vec3(it * 0.5, 0.0, 0.0) })
+        val scene = PathScene.build(main, SceneOptions(showGrid = false, colorMode = ColorMode.PROGRESS), overlay)
+        val overlayFirst = 3
+        val overlayLast = overlayFirst + 9
+        val expectedLast = SceneColors.gradient(SceneColors.PROGRESS_STOPS, 0.9)
+        assertEquals(SceneColors.withAlpha(expectedLast, PathScene.OVERLAY_ALPHA), scene.lineColors[overlayLast])
+        assertEquals(SceneColors.PROGRESS_STOPS.first(), scene.lineColors[overlayLast + 1])
+    }
+
+    @Test
+    fun aStandingPauseKeepsTheProgressColourButNotTheTimeColour() {
+        // 10 m east, 20 s standing at the far end, then 10 m more.
+        val positions = (0..10).map { Vec3(it.toDouble(), 0.0, 0.0) } +
+            List(20) { Vec3(10.0, 0.0, 0.0) } +
+            (1..10).map { Vec3(10.0 + it, 0.0, 0.0) }
+        val r = pathThrough(positions)
+        val options = SceneOptions(showGrid = false, showMarkers = false)
+        val byProgress = PathScene.build(r, options.copy(colorMode = ColorMode.PROGRESS))
+        val byTime = PathScene.build(r, options.copy(colorMode = ColorMode.TIME))
+        // Segments starting at the first and the last standing point: points 10 and 30, lines 3 + 10 and 3 + 30.
+        val arrive = 3 + 10
+        val leave = 3 + 30
+        assertEquals(byProgress.lineColors[arrive], byProgress.lineColors[leave])
+        assertNotEquals(byTime.lineColors[arrive], byTime.lineColors[leave])
+    }
+
+    @Test
+    fun coincidentPointsBuildUnderProgress() {
+        val r = pathThrough(List(5) { Vec3(1.0, 1.0, 0.0) })
+        val scene = PathScene.build(r, SceneOptions(colorMode = ColorMode.PROGRESS))
+        val path = scene.pathLineStart until scene.pathLineEnd
+        assertEquals(4, path.count())
+        // Index fractions: the colours still run from the first stop to near the last.
+        assertEquals(SceneColors.PROGRESS_STOPS.first(), scene.lineColors[path.first])
+        assertEquals(SceneColors.gradient(SceneColors.PROGRESS_STOPS, 0.75), scene.lineColors[path.last])
+        for (v in scene.lineCoords) assertTrue(v.isFinite())
+    }
+
+    @Test
+    fun theGridSpacingIsNoLongerALabel() {
+        val scene = PathScene.build(result(n = 50))
+        assertTrue(scene.labels.none { it.text.contains("grid") }, "labels ${scene.labels.map { it.text }}")
+        // The north arrow's N and the axis letters stay.
+        assertEquals(listOf("N", "E", "N", "Up"), scene.labels.map { it.text })
+        val bare = PathScene.build(result(n = 50), SceneOptions(showGrid = false))
+        assertEquals(listOf("E", "N", "Up"), bare.labels.map { it.text })
+    }
+
+    @Test
+    fun thePathLineRangeCoversExactlyTheMainPath() {
+        val r = result(n = 20)
+        val bare = PathScene.build(r, SceneOptions(showGrid = false))
+        assertEquals(3, bare.pathLineStart)
+        assertEquals(3 + 19, bare.pathLineEnd)
+        assertEquals(bare.lineCount, bare.pathLineEnd)
+
+        val withOverlay = PathScene.build(r, SceneOptions(showGrid = false), overlay = r)
+        assertEquals(3 + 19, withOverlay.pathLineStart)
+        assertEquals(3 + 19 + 19, withOverlay.pathLineEnd)
+        assertTrue(!withOverlay.isPathLine(3 + 18), "the overlay's last line is not the main path")
+        assertTrue(withOverlay.isPathLine(3 + 19))
+
+        val withGrid = PathScene.build(r, overlay = r)
+        assertEquals(withGrid.lineCount - 19, withGrid.pathLineStart)
+        assertEquals(withGrid.lineCount, withGrid.pathLineEnd)
+        // Only the main path is drawn opaque at the path width; grid, axes, arrow and overlay all differ.
+        for (i in 0 until withGrid.lineCount) {
+            val opaque = SceneColors.alpha(withGrid.lineColors[i]) == 0xFF
+            val main = opaque && withGrid.lineWidths[i] == PathScene.PATH_WIDTH_DP
+            assertEquals(main, withGrid.isPathLine(i), "line $i")
+        }
+
+        // A single point has no segment, so the range is empty.
+        val single = PathScene.build(pathThrough(listOf(Vec3.ZERO)))
+        assertEquals(single.pathLineStart, single.pathLineEnd)
+        assertTrue((0 until single.lineCount).none { single.isPathLine(it) })
+    }
+
+    @Test
+    fun aHandBuiltSceneHasNoPathLines() {
+        val scene = SceneModel(
+            bounds = Bounds.EMPTY, lineCount = 1, lineCoords = DoubleArray(6), lineColors = intArrayOf(0),
+            lineWidths = floatArrayOf(1f), cloudCount = 0, cloudCoords = DoubleArray(0), cloudColor = 0,
+            markers = emptyList(), labels = emptyList(),
+        )
+        assertTrue(!scene.isPathLine(0))
     }
 
     @Test

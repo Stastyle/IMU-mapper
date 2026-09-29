@@ -3,7 +3,9 @@ package com.stastyle.imumapper.render
 import androidx.compose.ui.geometry.Offset
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 /**
  * The label placement rule. drawText throws when the text origin lies past the right or bottom
@@ -39,6 +41,34 @@ class PathRendererTest {
         assertEquals(Offset(-146f, -38f), PathRenderer.labelOrigin(-150f, -30f, w, h))
         assertNull(PathRenderer.labelOrigin(-300f, 100f, w, h))
         assertNull(PathRenderer.labelOrigin(100f, -100f, w, h))
+    }
+
+    @Test
+    fun anExplicitOffsetReplacesTheDefaultOne() {
+        assertEquals(Offset(130f, 190f), PathRenderer.labelOrigin(100f, 200f, w, h, dx = 30f, dy = -10f))
+        // The edge rule applies to the offset origin: an anchor well inside can still push its text past the edge.
+        assertNull(PathRenderer.labelOrigin(w - 20f, 200f, w, h, dx = 30f, dy = 0f))
+    }
+
+    @Test
+    fun endLabelsMergeWithinTheThreshold() {
+        // A closed loop: both markers on the same pixel.
+        assertTrue(PathRenderer.mergeEndLabels(500f, 500f, 500f, 500f, 24f))
+        assertTrue(PathRenderer.mergeEndLabels(500f, 500f, 510f, 510f, 24f))
+        // Exactly at the threshold still merges; a pixel past it does not.
+        assertTrue(PathRenderer.mergeEndLabels(500f, 500f, 524f, 500f, 24f))
+        assertTrue(PathRenderer.mergeEndLabels(500f, 500f, 500f, 476f, 24f))
+        assertFalse(PathRenderer.mergeEndLabels(500f, 500f, 525f, 500f, 24f))
+        // Distance, not per axis: 20 px across and 20 px down is 28 px apart.
+        assertFalse(PathRenderer.mergeEndLabels(500f, 500f, 520f, 520f, 24f))
+        assertFalse(PathRenderer.mergeEndLabels(0f, 0f, 1000f, 1000f, 24f))
+    }
+
+    @Test
+    fun aNonFiniteEndPositionNeverMerges() {
+        assertFalse(PathRenderer.mergeEndLabels(Float.NaN, 500f, 500f, 500f, 24f))
+        assertFalse(PathRenderer.mergeEndLabels(500f, 500f, 500f, Float.NaN, 24f))
+        assertFalse(PathRenderer.mergeEndLabels(Float.POSITIVE_INFINITY, 500f, Float.POSITIVE_INFINITY, 500f, 24f))
     }
 
     @Test
