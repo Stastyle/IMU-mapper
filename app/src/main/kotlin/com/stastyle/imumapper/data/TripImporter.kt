@@ -122,6 +122,7 @@ class TripImporter(
         extracted.rawLog?.let { move(it, files.rawLog(tripId)) }
         for (f in extracted.results) move(f, File(files.resultsDir(tripId), f.name))
         for (f in extracted.photos) move(f, File(files.photosDir(tripId), f.name))
+        extracted.survey?.let { move(it, files.surveyFile(tripId)) }
     }
 
     /** Inserts the manifest's result rows whose files were present; returns how many. */

@@ -126,6 +126,8 @@ data class ExtractedTrip(
     /** `results/run-<n>.json` files, in archive order. */
     val results: List<File>,
     val photos: List<File>,
+    /** survey.json when the archive carried one (exports from builds with Survey mode). */
+    val survey: File? = null,
 )
 
 /**
@@ -136,8 +138,11 @@ data class ExtractedTrip(
  * trip.json              TripManifest
  * raw.imul               the raw log
  * results/run-<n>.json   PathResult per run
+ * survey.json            Survey mode facts (SurveyStore), when the trip has them
  * photos/<name>          keyframes
  * ```
+ *
+ * [MANIFEST_VERSION] stays 1 with survey.json in the layout: older builds skip entries they do not know.
  */
 object TripArchive {
     const val MANIFEST_VERSION = 1
@@ -148,7 +153,7 @@ object TripArchive {
 
     /**
      * Writes the archive for [trip] to [out]. Only files that exist are added, so a trip without
-     * results or photos still exports. [tripDir] is `files/trips/<id>`.
+     * results, photos or a survey still exports. [tripDir] is `files/trips/<id>`.
      */
     fun write(
         trip: TripEntity,
@@ -171,6 +176,10 @@ object TripArchive {
             for (f in sortedFiles(resultsDir)) {
                 if (f.extension == "json") addFile(zip, "${TripFiles.RESULTS_DIR_NAME}/${f.name}", f)
             }
+
+            // Only the exact name: a survey.json.tmp left by an interrupted save is not the survey.
+            val survey = File(tripDir, TripFiles.SURVEY_NAME)
+            if (survey.isFile) addFile(zip, TripFiles.SURVEY_NAME, survey)
 
             val photosDir = File(tripDir, TripFiles.PHOTOS_DIR_NAME)
             for (f in sortedFiles(photosDir)) addFile(zip, "${TripFiles.PHOTOS_DIR_NAME}/${f.name}", f)
@@ -199,6 +208,7 @@ object TripArchive {
         var rawLog: File? = null
         val results = ArrayList<File>()
         val photos = ArrayList<File>()
+        var survey: File? = null
         ZipInputStream(BufferedInputStream(input)).use { zip ->
             while (true) {
                 val entry = zip.nextEntry ?: break
@@ -212,6 +222,7 @@ object TripArchive {
                 when {
                     name == MANIFEST_NAME -> manifest = decodeManifest(zip.readBytes().toString(Charsets.UTF_8))
                     name == TripFiles.RAW_LOG_NAME -> rawLog = copyEntry(zip, File(stagingDir, TripFiles.RAW_LOG_NAME))
+                    name == TripFiles.SURVEY_NAME -> survey = copyEntry(zip, File(stagingDir, TripFiles.SURVEY_NAME))
                     parts.size == 2 && parts[0] == TripFiles.RESULTS_DIR_NAME && parts[1].endsWith(".json") ->
                         results += copyEntry(zip, File(File(stagingDir, TripFiles.RESULTS_DIR_NAME), parts[1]))
                     parts.size == 2 && parts[0] == TripFiles.PHOTOS_DIR_NAME ->
@@ -221,7 +232,7 @@ object TripArchive {
                 zip.closeEntry()
             }
         }
-        return ExtractedTrip(manifest, rawLog, results, photos)
+        return ExtractedTrip(manifest, rawLog, results, photos, survey)
     }
 
     /** Copies a bare `.imul` stream into [stagingDir] as `raw.imul`. */
