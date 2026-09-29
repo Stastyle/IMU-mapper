@@ -1197,8 +1197,9 @@ fun ManualRotationDialog(rotationDeg: Double, fromRunId: Int?, toRunId: Int, onA
    VM ignores it, and clearing is only the Clear button. Double-tap still fits (the first tap of a double
    tap is delivered, as today).
 2. **Long press inside the existing gesture loop.** No second `pointerInput`. In `awaitEachGesture`,
-   while Survey mode is on, one pointer is down, nothing has long-pressed yet and the finger has travelled
-   less than `touchSlop`, the next event is awaited with
+   while Survey mode is on, one pointer is down, nothing has long-pressed yet and the finger has stayed
+   within `touchSlop` of where it went down (`TouchSlopGate`: the largest distance, not the summed path,
+   so a still finger's jitter cannot add up past it), the next event is awaited with
    `withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis - (lastChange.uptimeMillis - first.uptimeMillis)) { awaitPointerEvent() }`
    (a member of `AwaitPointerEventScope`; a non-positive remainder counts as elapsed). A null result ends
    the timer for this gesture (`longPressTimed = true`). When the hit at `lastChange.position` is a station

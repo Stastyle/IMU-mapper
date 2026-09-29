@@ -102,7 +102,7 @@ fun ViewerCanvas(
                     var previousX = first.position.x
                     var previousY = first.position.y
                     var previousSpread = 0f
-                    var travelled = 0f
+                    val slopGate = TouchSlopGate(slop, first.position.x, first.position.y)
                     var maxPointers = 1
                     var lastChange: PointerInputChange = first
                     var longPressed = false
@@ -110,7 +110,7 @@ fun ViewerCanvas(
                     var longPressTimed = false
                     while (true) {
                         val timing = latestSurvey.value != null && !longPressTimed &&
-                            maxPointers == 1 && travelled < slop
+                            maxPointers == 1 && !slopGate.exceeded
                         val event = if (timing) {
                             // One finger at rest in Survey mode: waiting for its next move times the long press.
                             val remaining = longPressTimeout - (lastChange.uptimeMillis - first.uptimeMillis)
@@ -137,7 +137,8 @@ fun ViewerCanvas(
                         }
                         if (pressed.isEmpty()) {
                             val up = event.changes.firstOrNull() ?: lastChange
-                            if (maxPointers == 1 && travelled < slop) {
+                            if (maxPointers == 1) slopGate.moveTo(up.position.x, up.position.y)
+                            if (maxPointers == 1 && !slopGate.exceeded) {
                                 val now = up.uptimeMillis
                                 val nearLast = abs(up.position.x - lastTapX) < slop * 4 &&
                                     abs(up.position.y - lastTapY) < slop * 4
@@ -168,6 +169,9 @@ fun ViewerCanvas(
                         }
                         lastChange = pressed[0]
                         val count = pressed.size
+                        if (maxPointers == 1 && count == 1) {
+                            slopGate.moveTo(lastChange.position.x, lastChange.position.y)
+                        }
                         var cx = 0f
                         var cy = 0f
                         for (c in pressed) {
@@ -192,7 +196,6 @@ fun ViewerCanvas(
                         } else {
                             val dx = cx - previousX
                             val dy = cy - previousY
-                            travelled += sqrt(dx * dx + dy * dy)
                             if (count == 1) {
                                 if (dx != 0f || dy != 0f) {
                                     if (latestOrbitLocked.value) {
@@ -222,5 +225,23 @@ fun ViewerCanvas(
         val s = projectedSurvey ?: return@Canvas
         s.update(camera, size.width, size.height)
         with(SurveyRenderer) { drawSurvey(s, textMeasurer) }
+    }
+}
+
+/**
+ * Whether one finger has left the touch slop around where it went down. It keeps the largest distance
+ * from that point, not the path length: a finger held still keeps sending small moves, and summed over a
+ * long press (up to 1.5 s with Samsung's Touch and hold delay) they would pass the slop although the
+ * finger never went anywhere. Once left, the slop stays left, so a drag that comes back is not a tap.
+ * GestureDetector and awaitTouchSlopOrCancellation measure it the same way.
+ */
+internal class TouchSlopGate(private val slop: Float, private val downX: Float, private val downY: Float) {
+    var exceeded: Boolean = false
+        private set
+
+    fun moveTo(x: Float, y: Float) {
+        val dx = x - downX
+        val dy = y - downY
+        if (dx * dx + dy * dy >= slop * slop) exceeded = true
     }
 }
