@@ -95,6 +95,11 @@ class ProjectedSurveyTest {
         val north = screenOf(Vec3(0.0, 2.5, 0.0))
         val onNorthLeg = assertIs<SurveyHit.OnPath>(p.hitTest(north.x - 10f, north.y, density = 1f))
         assertEquals(2.5, onNorthLeg.distanceM, 0.1)
+        // Vertices are 0.5 m apart, so only interpolating along the 2.0..2.5 m segment (f = 0.6) gives 2.3 m;
+        // snapping to a vertex, or an unnormalised f clamped to 1, would give 2.5 m.
+        val between = screenOf(Vec3(0.0, 2.3, 0.0))
+        val midSegment = assertIs<SurveyHit.OnPath>(p.hitTest(between.x - 10f, between.y, density = 1f))
+        assertEquals(2.3, midSegment.distanceM, 1e-3)
         // Half-way along the east leg: 10 m north, then 2.5 m east.
         val east = screenOf(Vec3(2.5, 10.0, 0.0))
         val onEastLeg = assertIs<SurveyHit.OnPath>(p.hitTest(east.x, east.y + 10f, density = 1f))
