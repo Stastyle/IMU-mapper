@@ -14,10 +14,13 @@ import com.stastyle.imumapper.data.db.TripEntity
 import com.stastyle.imumapper.data.db.TripStatus
 import com.stastyle.imumapper.pipeline.core.PathResult
 import com.stastyle.imumapper.pipeline.post.RawPath
+import com.stastyle.imumapper.pipeline.survey.Detail
 import com.stastyle.imumapper.pipeline.survey.LegTotals
 import com.stastyle.imumapper.pipeline.survey.NorthSolution
 import com.stastyle.imumapper.pipeline.survey.NorthSolver
+import com.stastyle.imumapper.pipeline.survey.StationKind
 import com.stastyle.imumapper.pipeline.survey.SurveyDoc
+import com.stastyle.imumapper.pipeline.survey.SurveyStations
 import com.stastyle.imumapper.pipeline.survey.Traverse
 import com.stastyle.imumapper.pipeline.survey.TraverseLeg
 import com.stastyle.imumapper.process.TripProcessor
@@ -431,6 +434,63 @@ class ViewerViewModel(
     /** A row of the Legs table. */
     fun selectLeg(fromId: Int, toId: Int) = changeSurvey { state, _ -> SurveyController.selectLeg(state, fromId, toId) }
 
+    /** A long press on the path adds a station there. */
+    fun addStationAt(distanceM: Double) {
+        val geometry = surveyGeometry ?: return
+        addStationAtTime(geometry.timeline.timeAtDistance(distanceM))
+    }
+
+    /** "+ Station" adds one at the scrubber's cursor, which can pick either pass of an out-and-back. */
+    fun addStationAtCursor() {
+        val state = surveyState ?: return
+        addStationAtTime(state.cursorNs)
+    }
+
+    /** "Move here": the one selected corner or user station goes to the cursor. */
+    fun moveSelectedStationToCursor() {
+        val state = surveyState ?: return
+        val id = SurveyController.movableStationId(state) ?: return
+        val name = state.doc.stations.firstOrNull { it.id == id }?.name ?: return
+        editSurvey({ "Moved $name to the cursor" }) { s, _ -> SurveyController.moveStation(s, id, s.cursorNs) }
+    }
+
+    fun renameStation(stationId: Int, name: String) =
+        editSurvey { state, _ -> SurveyController.renameStation(state, stationId, name) }
+
+    fun deleteStation(stationId: Int) {
+        val name = surveyState?.doc?.stations?.firstOrNull { it.id == stationId }?.name ?: return
+        editSurvey({ "Deleted $name" }) { state, _ -> SurveyController.deleteStation(state, stationId) }
+    }
+
+    /** Regenerates the automatic corners; the message says how many the new level gave. */
+    fun setDetail(detail: Detail) = editSurvey({ next ->
+        val corners = next.doc.stations.count { it.kind == StationKind.CORNER }
+        "${SurveyFormat.detailLabel(detail)}: ${SurveyFormat.corners(corners)}"
+    }) { state, geometry -> SurveyController.setDetail(state, geometry, detail) }
+
+    /** For the Detail dialog; empty outside Survey mode. */
+    fun cornerCounts(): Map<Detail, Int> {
+        val state = surveyState ?: return emptyMap()
+        val geometry = surveyGeometry ?: return emptyMap()
+        return SurveyController.cornerCounts(state, geometry)
+    }
+
+    /** The top bar's and the snackbar's Undo. */
+    fun surveyUndo() {
+        if (!_ui.value.surveyMode) return
+        val state = surveyState ?: return
+        val next = SurveyController.undo(state)
+        _ui.update { it.copy(surveyMessage = null) }
+        if (next !== state) applySurvey(next)
+    }
+
+    fun dismissSurveyMessage() = _ui.update { it.copy(surveyMessage = null) }
+
+    private fun addStationAtTime(tNs: Long) {
+        val name = SurveyStations.nextUserName(surveyState?.doc?.stations ?: return)
+        editSurvey({ "Added $name" }) { state, _ -> SurveyController.addStation(state, tNs) }
+    }
+
     private fun showSurvey() {
         publishSurvey()
         applyPreset(CameraPreset.TOP)
@@ -443,6 +503,26 @@ class ViewerViewModel(
         val geometry = surveyGeometry ?: return
         val next = change(state, geometry)
         if (next !== state) applySurvey(next)
+    }
+
+    /**
+     * Runs one doc edit. Read-only refuses it with a message; an edit the controller refused leaves
+     * everything as it was; a real one is saved, and [message] (given the new state) offers Undo.
+     */
+    private fun editSurvey(
+        message: (SurveyState) -> String? = { null },
+        edit: (SurveyState, SurveyGeometry) -> SurveyState,
+    ) {
+        if (!_ui.value.surveyMode) return
+        val state = surveyState ?: return
+        val geometry = surveyGeometry ?: return
+        if (state.readOnly) {
+            _ui.update { it.copy(surveyMessage = SurveyMessage(READ_ONLY_MESSAGE, undoable = false)) }
+            return
+        }
+        val next = edit(state, geometry)
+        if (next === state) return
+        applySurvey(next, message(next)?.let { SurveyMessage(it, undoable = true) })
     }
 
     /** Stores [next], saves its doc when an edit changed it, and republishes. */
@@ -614,6 +694,9 @@ class ViewerViewModel(
         /** Full-width drag on a ~1000 px screen turns the scene by roughly 290 degrees. */
         const val ORBIT_RAD_PER_PX = 0.005
         const val MAX_PHOTO_PX = 1600
+
+        /** Shown when an edit is tried on a survey whose file could not be read. */
+        const val READ_ONLY_MESSAGE = "Survey mode is read-only: survey.json could not be read"
 
         /** Decodes [file] with a power-of-two sample size so the longest side is at most [maxPx]. */
         fun decodeDownsampled(file: File, maxPx: Int): Bitmap? {

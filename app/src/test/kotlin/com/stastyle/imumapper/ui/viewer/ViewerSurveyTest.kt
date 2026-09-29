@@ -12,6 +12,7 @@ import com.stastyle.imumapper.pipeline.core.PathResult
 import com.stastyle.imumapper.pipeline.core.PipelineConfig
 import com.stastyle.imumapper.pipeline.core.TripMode
 import com.stastyle.imumapper.pipeline.core.Vec3
+import com.stastyle.imumapper.pipeline.survey.Detail
 import com.stastyle.imumapper.pipeline.survey.Station
 import com.stastyle.imumapper.pipeline.survey.StationKind
 import com.stastyle.imumapper.pipeline.survey.SurveyDoc
@@ -286,5 +287,111 @@ class ViewerSurveyTest {
         vm.toggleSurvey()
         assertFalse(vm.ui.value.surveyMode)
         assertEquals(SurveyMessage("Nothing to measure yet", undoable = false), vm.ui.value.surveyMessage)
+    }
+
+    // --- station edits, Detail and undo ---
+
+    @Test
+    fun addedStationIsSavedWithAnUndoableMessageAndUndoFollowsToTheFile() = runBlocking<Unit> {
+        val id = processedTrip(SurveyFixtures.lWalk())
+        val vm = viewer(id)
+        vm.toggleSurvey()
+
+        vm.addStationAt(7.5)
+        val added = survey(vm).state.doc.stations.single { it.name == "S1" }
+        assertEquals(Station(id = 5, kind = StationKind.USER, name = "S1", tNs = t(15)), added)
+        assertEquals(SurveyMessage("Added S1", undoable = true), vm.ui.value.surveyMessage)
+        assertEquals(survey(vm).state.doc, savedDoc(id))
+
+        vm.surveyUndo()
+        assertEquals(4, survey(vm).state.doc.stations.size)
+        assertNull(vm.ui.value.surveyMessage)
+        assertTrue(savedDoc(id).stations.none { it.name == "S1" })
+    }
+
+    @Test
+    fun leavingSurveyModeDropsTheUndoMessage() = runBlocking<Unit> {
+        val id = processedTrip(SurveyFixtures.lWalk())
+        val vm = viewer(id)
+        vm.toggleSurvey()
+        vm.addStationAt(7.5)
+        assertEquals(SurveyMessage("Added S1", undoable = true), vm.ui.value.surveyMessage)
+
+        // Undo works only in Survey mode, so the snackbar must not stay up offering it.
+        vm.toggleSurvey()
+        assertNull(vm.ui.value.surveyMessage)
+        vm.surveyUndo()
+        assertTrue(savedDoc(id).stations.any { it.name == "S1" })
+    }
+
+    @Test
+    fun selectedCornerMovesToTheCursorAndAStationCanBeAddedThere() = runBlocking<Unit> {
+        val id = processedTrip(SurveyFixtures.lWalk())
+        val vm = viewer(id)
+        vm.toggleSurvey()
+        vm.surveyTap(SurveyHit.OnStation(4))
+        vm.setSurveyCursor(12.5)
+
+        vm.moveSelectedStationToCursor()
+        val moved = Station(id = 4, kind = StationKind.USER, name = "C1", tNs = t(25))
+        assertEquals(moved, survey(vm).state.doc.stations.single { it.id == 4 })
+        assertEquals(SurveyMessage("Moved C1 to the cursor", undoable = true), vm.ui.value.surveyMessage)
+        assertEquals(moved, savedDoc(id).stations.single { it.id == 4 })
+
+        vm.addStationAtCursor()
+        assertEquals(t(25), savedDoc(id).stations.single { it.name == "S1" }.tNs)
+    }
+
+    @Test
+    fun renameAndDeleteReachTheFile() = runBlocking<Unit> {
+        val id = processedTrip(SurveyFixtures.lWalk())
+        val vm = viewer(id)
+        vm.toggleSurvey()
+
+        vm.renameStation(2, "  Big room ")
+        assertEquals("Big room", savedDoc(id).stations.single { it.id == 2 }.name)
+        assertNull(vm.ui.value.surveyMessage)
+
+        vm.deleteStation(4)
+        assertTrue(savedDoc(id).stations.none { it.id == 4 })
+        assertEquals(SurveyMessage("Deleted C1", undoable = true), vm.ui.value.surveyMessage)
+    }
+
+    @Test
+    fun detailBringsBackADeletedCornerAndCanBeUndone() = runBlocking<Unit> {
+        val id = processedTrip(SurveyFixtures.lWalk())
+        val vm = viewer(id)
+        vm.toggleSurvey()
+        vm.deleteStation(4)
+        assertEquals(mapOf(Detail.COARSE to 1, Detail.NORMAL to 1, Detail.FINE to 1), vm.cornerCounts())
+
+        vm.setDetail(Detail.FINE)
+        val fine = survey(vm).state.doc
+        assertEquals(Detail.FINE, fine.detail)
+        assertEquals(listOf(t(20)), fine.stations.filter { it.kind == StationKind.CORNER }.map { it.tNs })
+        assertEquals(SurveyMessage("Fine (0.25 m): 1 corner", undoable = true), vm.ui.value.surveyMessage)
+        assertEquals(fine, savedDoc(id))
+
+        vm.surveyUndo()
+        assertEquals(Detail.NORMAL, savedDoc(id).detail)
+        assertTrue(savedDoc(id).stations.none { it.kind == StationKind.CORNER })
+    }
+
+    @Test
+    fun readOnlyRefusesEditsWithAMessageAndNeverWrites() = runBlocking<Unit> {
+        val id = processedTrip(SurveyFixtures.lWalk())
+        files.surveyFile(id).writeText("{ not json")
+        val vm = viewer(id)
+        vm.toggleSurvey()
+
+        vm.addStationAt(7.5)
+        vm.renameStation(1, "Entrance")
+        vm.surveyUndo()
+        val doc = survey(vm).state.doc
+        assertEquals(4, doc.stations.size)
+        assertEquals("Start", doc.stations.single { it.id == 1 }.name)
+        vm.renameStation(1, "Entrance")
+        assertEquals(SurveyMessage(ViewerViewModel.READ_ONLY_MESSAGE, undoable = false), vm.ui.value.surveyMessage)
+        assertEquals("{ not json", files.surveyFile(id).readText())
     }
 }
