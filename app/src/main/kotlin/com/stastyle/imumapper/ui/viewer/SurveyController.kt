@@ -75,7 +75,7 @@ data class SurveyState(
     val cursorNs: Long = 0L,
     /** Earlier docs, oldest first, at most SurveyController.MAX_UNDO. */
     val undo: List<SurveyDoc> = emptyList(),
-    /** survey.json could not be read: nothing is edited or saved. */
+    /** survey.json could not be read, or a newer app saved it: nothing is edited or saved. */
     val readOnly: Boolean = false,
 )
 
@@ -86,6 +86,8 @@ class SurveyOpen(
     val seeded: Boolean,
     /** Why the survey is read-only; null otherwise. */
     val error: String?,
+    /** The read-only banner offers Start over: only for an unreadable file, not a newer app's good one. */
+    val canStartOver: Boolean = false,
 )
 
 /** What the panel shows for the selection. [names] feed the selection row. */
@@ -135,19 +137,27 @@ object SurveyController {
 
     /**
      * Only a missing file seeds (and must be saved). A loaded doc is kept as it is, even when empty,
-     * so a trip is seeded once. A malformed file is seeded in memory only and the survey is read-only,
-     * so the file is never overwritten.
+     * so a trip is seeded once. A newer app's doc is shown as it is but read-only, since saving it here
+     * would drop the fields this build does not know. A malformed file is seeded in memory only and the
+     * survey is read-only. Read-only never overwrites the file.
      */
     fun open(load: SurveyLoad, geo: SurveyGeometry): SurveyOpen {
         val start = geo.timeline.startNs
         return when (load) {
             SurveyLoad.Missing -> SurveyOpen(SurveyState(seededDoc(geo), cursorNs = start), seeded = true, error = null)
             is SurveyLoad.Loaded -> SurveyOpen(SurveyState(load.doc, cursorNs = start), seeded = false, error = null)
+            is SurveyLoad.Newer -> SurveyOpen(
+                SurveyState(load.doc, cursorNs = start, readOnly = true),
+                seeded = false,
+                error = "survey.json was saved by a newer version of IMU Mapper. Update the app to edit this " +
+                    "survey; until then Survey mode is read-only and the file is left as it is.",
+            )
             is SurveyLoad.Malformed -> SurveyOpen(
                 SurveyState(seededDoc(geo), cursorNs = start, readOnly = true),
                 seeded = false,
                 error = "survey.json could not be read (${load.message}). " +
                     "Survey mode is read-only and the file is left as it is.",
+                canStartOver = true,
             )
         }
     }

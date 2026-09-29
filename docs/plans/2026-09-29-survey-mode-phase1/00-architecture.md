@@ -568,6 +568,8 @@ sealed interface SurveyLoad {
     /** No file yet: Survey mode has never been opened on this trip, so it seeds. */
     data object Missing : SurveyLoad
     data class Loaded(val doc: SurveyDoc) : SurveyLoad
+    /** formatVersion above SurveyDoc.FORMAT_VERSION: read-only, never overwritten, no Start over. */
+    data class Newer(val doc: SurveyDoc) : SurveyLoad
     /** Unreadable or undecodable: Survey mode goes read-only and never overwrites it. */
     data class Malformed(val message: String) : SurveyLoad
 }
@@ -874,7 +876,7 @@ data class SurveyState(
     val cursorNs: Long = 0L,
     /** Earlier docs, oldest first, at most SurveyController.MAX_UNDO. */
     val undo: List<SurveyDoc> = emptyList(),
-    /** survey.json could not be read: nothing is edited or saved. */
+    /** survey.json could not be read, or a newer app saved it: nothing is edited or saved. */
     val readOnly: Boolean = false,
 )
 
@@ -885,6 +887,8 @@ class SurveyOpen(
     val seeded: Boolean,
     /** Why the survey is read-only; null otherwise. */
     val error: String?,
+    /** The read-only banner offers Start over: only for an unreadable file, not a newer app's good one. */
+    val canStartOver: Boolean = false,
 )
 
 /** What the panel shows for the selection. [names] feed the selection row. */
@@ -958,7 +962,9 @@ Behaviour, all binding:
 - **open:** `Missing` gives `SurveyDoc(stations = SurveyStations.seed(geo.timeline, geo.framed.annotations))`,
   `seeded = true`. `Loaded(doc)` gives that doc unchanged, `seeded = false` (never re-seeded, even when
   empty). `Malformed(message)` gives the seeded stations in memory, `readOnly = true`, `seeded = false`,
-  `error = "survey.json could not be read ($message). Survey mode is read-only and the file is left as it is."`.
+  `error = "survey.json could not be read ($message). Survey mode is read-only and the file is left as it is."`,
+  `canStartOver = true`. `Newer(doc)` gives that doc unchanged, `readOnly = true`, `seeded = false`, an error
+  asking for an update and `canStartOver = false`: saving it would drop the fields this build does not know.
   In every case `cursorNs = geo.timeline.startNs`, selection `None`, empty undo.
 - **tapStation:** from `None` or `Stretch`, `Chain(listOf(id))`; in a chain, tapping the last id removes it
   (an empty chain becomes `None`), any other id is appended. Unknown ids are ignored.
@@ -1031,6 +1037,8 @@ data class SurveyUi(
     val askManualRotation: Boolean,
     /** SurveyOpen.error while read-only. */
     val error: String?,
+    /** SurveyOpen.canStartOver while read-only: the banner offers Start over. */
+    val canStartOver: Boolean,
 )
 
 // ViewerUiState gains:
@@ -1058,8 +1066,8 @@ class ViewerViewModel(
 ) : ViewModel()
 
 // companion object gains [Task 24]:
-    /** Shown when an edit is tried on a survey whose file could not be read. */
-    const val READ_ONLY_MESSAGE = "Survey mode is read-only: survey.json could not be read"
+    /** Shown when an edit is tried on a read-only survey; the banner says why. */
+    const val READ_ONLY_MESSAGE = "Survey mode is read-only: survey.json is left as it is"
 
 // Task 23: mode, loading, geometry, selection
 fun toggleSurvey()

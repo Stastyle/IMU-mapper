@@ -126,7 +126,7 @@ fun StationSheet(
             }
             if (readOnly) {
                 Text(
-                    "survey.json could not be read, so nothing can be changed.",
+                    "Survey mode is read-only, so nothing can be changed.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error,
                 )

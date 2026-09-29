@@ -125,6 +125,26 @@ class SurveyStoreTest {
     }
 
     @Test
+    fun fileFromANewerFormatIsNewerNotLoadedAndLeftAsItIs() {
+        // What a later build could write: a field this build does not know would be lost on the next save.
+        val newer = """
+            {"formatVersion": ${SurveyDoc.FORMAT_VERSION + 1}, "planImage": {"scale": 100},
+             "stations": [{"id": 1, "kind": "START", "name": "Entrance", "tNs": 1000000000}]}
+        """.trimIndent()
+        files.surveyFile(tripId).writeText(newer)
+        val load = assertIs<SurveyLoad.Newer>(store.load(tripId))
+        assertEquals(SurveyDoc.FORMAT_VERSION + 1, load.doc.formatVersion)
+        assertEquals(listOf("Entrance"), load.doc.stations.map { it.name })
+        assertEquals(newer, files.surveyFile(tripId).readText())
+    }
+
+    @Test
+    fun fileWithoutAFormatVersionIsLoaded() {
+        files.surveyFile(tripId).writeText("""{"stations": []}""")
+        assertEquals(SurveyLoad.Loaded(SurveyDoc()), store.load(tripId))
+    }
+
+    @Test
     fun directoryInTheFilesPlaceIsMalformed() {
         val dir = files.surveyFile(tripId).also { it.mkdirs() }
         val load = assertIs<SurveyLoad.Malformed>(store.load(tripId))

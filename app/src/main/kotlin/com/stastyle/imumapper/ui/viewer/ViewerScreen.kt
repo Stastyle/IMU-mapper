@@ -355,7 +355,7 @@ fun ViewerScreen(
                 onAnswer = vm::answerManualRotation,
             )
         }
-        if (confirmStartOver && survey.state.readOnly) {
+        if (confirmStartOver && survey.canStartOver) {
             StartOverDialog(
                 onConfirm = {
                     confirmStartOver = false
@@ -470,7 +470,8 @@ private fun SurveyMenu(ui: ViewerUiState, vm: ViewerViewModel, onDetail: () -> U
 
 /**
  * A read-only survey and an arbitrary north are said at the top, where the plan is not covered by the
- * panel. The read-only one offers Start over, so an unreadable survey.json does not lock the trip's survey.
+ * panel. An unreadable survey.json's banner offers Start over, so it does not lock the trip's survey; a
+ * newer app's file does not, since updating the app edits it and moving it aside would hide it from that app.
  */
 @Composable
 private fun SurveyBanners(survey: SurveyUi, onStartOver: () -> Unit, modifier: Modifier = Modifier) {
@@ -486,7 +487,7 @@ private fun SurveyBanners(survey: SurveyUi, onStartOver: () -> Unit, modifier: M
                 error,
                 MaterialTheme.colorScheme.errorContainer,
                 MaterialTheme.colorScheme.onErrorContainer,
-                actionLabel = "Start over",
+                actionLabel = if (survey.canStartOver) "Start over" else null,
                 onAction = onStartOver,
             )
         }

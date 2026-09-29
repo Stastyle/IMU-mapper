@@ -258,6 +258,7 @@ class ViewerSurveyTest {
 
         val survey = survey(vm)
         assertTrue(survey.state.readOnly)
+        assertTrue(survey.canStartOver)
         assertEquals(4, survey.state.doc.stations.size)
         assertTrue(assertNotNull(survey.error).startsWith("survey.json could not be read ("))
         assertEquals("{ not json", files.surveyFile(id).readText())
@@ -613,6 +614,38 @@ class ViewerSurveyTest {
 
         assertSame(state, survey(vm).state)
         assertEquals(saved, files.surveyFile(id).readText())
+        assertEquals(listOf(TripFiles.SURVEY_NAME), files.tripDir(id).list()!!.filter { it.startsWith("survey") })
+    }
+
+    @Test
+    fun fileFromANewerAppShowsItsStationsReadOnlyAndItsBytesAreKept() = runBlocking<Unit> {
+        val id = processedTrip(SurveyFixtures.lWalk())
+        // A later build's file, as an import of its ZIP restores it: a field this build would drop on save.
+        val newer = """
+            {"formatVersion": ${SurveyDoc.FORMAT_VERSION + 1}, "planImage": {"scale": 100},
+             "stations": [{"id": 7, "kind": "USER", "name": "Pillar", "tNs": ${t(12)}}],
+             "manualRotationDeg": 5.0, "manualRotationRunId": 9}
+        """.trimIndent()
+        files.surveyFile(id).writeText(newer)
+        val vm = viewer(id)
+        vm.toggleSurvey()
+
+        val survey = survey(vm)
+        assertTrue(survey.state.readOnly)
+        assertFalse(survey.canStartOver)
+        assertFalse(survey.askManualRotation, "applying it is an edit, so a read-only survey does not ask")
+        assertEquals(listOf("Pillar"), survey.state.doc.stations.map { it.name })
+        assertTrue(assertNotNull(survey.error).startsWith("survey.json was saved by a newer version of IMU Mapper."))
+
+        vm.renameStation(7, "Column")
+        assertEquals(SurveyMessage(ViewerViewModel.READ_ONLY_MESSAGE, undoable = false), vm.ui.value.surveyMessage)
+        vm.addStationAt(2.5)
+        vm.setDetail(Detail.FINE)
+        // Start over is not offered, and a stray call does not move the file aside either.
+        vm.startSurveyOver()
+        assertTrue(survey(vm).state.readOnly)
+        assertEquals(listOf("Pillar"), survey(vm).state.doc.stations.map { it.name })
+        assertEquals(newer, files.surveyFile(id).readText())
         assertEquals(listOf(TripFiles.SURVEY_NAME), files.tripDir(id).list()!!.filter { it.startsWith("survey") })
     }
 

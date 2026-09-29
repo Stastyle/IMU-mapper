@@ -12,6 +12,13 @@ sealed interface SurveyLoad {
     data class Loaded(val doc: SurveyDoc) : SurveyLoad
 
     /**
+     * Saved by a newer build (formatVersion above SurveyDoc.FORMAT_VERSION). Unknown keys are ignored on
+     * decode, so saving [doc] back would drop the newer fields: Survey mode shows it read-only and never
+     * overwrites it. The file is fine, so there is no Start over; updating the app edits it.
+     */
+    data class Newer(val doc: SurveyDoc) : SurveyLoad
+
+    /**
      * Unreadable or undecodable: Survey mode goes read-only and never overwrites it. Start over
      * (SurveyStore.setAside) keeps it under another name and seeds a new survey.
      */
@@ -25,17 +32,19 @@ sealed interface SurveyLoad {
 class SurveyStore(private val files: TripFiles) {
 
     /**
-     * Missing when the file does not exist; Malformed on any read or decode exception, carrying the first
-     * line of its message (kotlinx.serialization appends the JSON input on later lines) or its class name.
+     * Missing when the file does not exist; Newer when its formatVersion is above this build's; Malformed
+     * on any read or decode exception, carrying the first line of its message (kotlinx.serialization
+     * appends the JSON input on later lines) or its class name.
      */
     fun load(tripId: Long): SurveyLoad {
         val file = files.surveyFile(tripId)
         if (!file.exists()) return SurveyLoad.Missing
-        return try {
-            SurveyLoad.Loaded(SurveyDoc.fromJson(file.readText(Charsets.UTF_8)))
+        val doc = try {
+            SurveyDoc.fromJson(file.readText(Charsets.UTF_8))
         } catch (e: Exception) {
-            SurveyLoad.Malformed(describe(e))
+            return SurveyLoad.Malformed(describe(e))
         }
+        return if (doc.formatVersion > SurveyDoc.FORMAT_VERSION) SurveyLoad.Newer(doc) else SurveyLoad.Loaded(doc)
     }
 
     /**

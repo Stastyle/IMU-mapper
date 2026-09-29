@@ -70,12 +70,34 @@ class SurveyControllerTest {
         val opened = SurveyController.open(SurveyLoad.Malformed("Unexpected JSON token"), geo)
         assertFalse(opened.seeded)
         assertTrue(opened.state.readOnly)
+        assertTrue(opened.canStartOver)
         assertEquals(4, opened.state.doc.stations.size)
         assertEquals(
             "survey.json could not be read (Unexpected JSON token). " +
                 "Survey mode is read-only and the file is left as it is.",
             opened.error,
         )
+    }
+
+    @Test
+    fun fileFromANewerAppIsReadOnlyWithItsOwnStationsAndNoStartOver() {
+        val doc = SurveyDoc(
+            formatVersion = SurveyDoc.FORMAT_VERSION + 1,
+            stations = listOf(Station(id = 7, kind = StationKind.USER, name = "Pillar", tNs = t(12))),
+        )
+        val opened = SurveyController.open(SurveyLoad.Newer(doc), geo)
+        assertFalse(opened.seeded)
+        assertTrue(opened.state.readOnly)
+        assertFalse(opened.canStartOver, "the file is fine; updating the app edits it")
+        assertSame(doc, opened.state.doc)
+        assertEquals(t(0), opened.state.cursorNs)
+        assertEquals(
+            "survey.json was saved by a newer version of IMU Mapper. Update the app to edit this survey; " +
+                "until then Survey mode is read-only and the file is left as it is.",
+            opened.error,
+        )
+        // Edits are refused, so nothing reaches save.
+        assertSame(opened.state, SurveyController.renameStation(opened.state, 7, "Column"))
     }
 
     @Test

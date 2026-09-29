@@ -74,6 +74,8 @@ data class SurveyUi(
     val askManualRotation: Boolean,
     /** SurveyOpen.error while read-only. */
     val error: String?,
+    /** SurveyOpen.canStartOver while read-only: the banner offers Start over. */
+    val canStartOver: Boolean,
     /**
      * The raw log's START (LogReader.startNs), which trip.startedAtEpochMs was taken with: the scrubber's
      * clock counts from it (SurveyFormat.scrubberLabel). Null when raw.imul is missing or unreadable.
@@ -186,8 +188,10 @@ class ViewerViewModel(
     private var readoutCache: ReadoutCache? = null
     /** The drawn result the bounds were last taken from; they copy every point, so only a new one updates them. */
     private var boundsSource: PathResult? = null
-    /** Why survey.json could not be read; shown while the survey is read-only. */
+    /** Why the survey is read-only (survey.json unreadable, or from a newer app); shown while it is. */
     private var surveyError: String? = null
+    /** SurveyOpen.canStartOver: only an unreadable file may be moved aside; a newer app's file is kept in place. */
+    private var surveyCanStartOver = false
     /** A Start over is moving survey.json aside; a second one must not move the survey it then seeds. */
     private var startingOver = false
     /** The raw log's START, read with survey.json; see SurveyUi.tripStartNs. */
@@ -456,11 +460,12 @@ class ViewerViewModel(
     /**
      * The read-only banner's Start over. survey.json is renamed to survey.json.bad-<n>, so the unreadable
      * file is kept and never overwritten, and a new survey is seeded and saved as on a first entry. The
-     * camera stays where it is. Nothing happens unless the survey is read-only.
+     * camera stays where it is. Nothing happens unless the survey is read-only because its file could not
+     * be read: a newer app's file is fine and stays where that app looks for it.
      */
     fun startSurveyOver() {
         val state = surveyState
-        if (!_ui.value.surveyMode || state == null || !state.readOnly || startingOver) return
+        if (!_ui.value.surveyMode || state == null || !state.readOnly || !surveyCanStartOver || startingOver) return
         startingOver = true
         viewModelScope.launch {
             try {
@@ -472,6 +477,7 @@ class ViewerViewModel(
                 // The file is gone either way, so a survey left in memory would be the unreadable one.
                 surveyState = null
                 surveyError = null
+                surveyCanStartOver = false
                 beforeTap = null
                 afterTap = null
                 if (_ui.value.surveyMode) openSurvey(SurveyLoad.Missing)
@@ -501,6 +507,7 @@ class ViewerViewModel(
         surveyGeometry = geometry
         surveyState = opened.state
         surveyError = opened.error
+        surveyCanStartOver = opened.canStartOver
         if (opened.seeded) persist(opened.state.doc)
         return true
     }
@@ -794,9 +801,11 @@ class ViewerViewModel(
             totals = base.totals,
             layer = SurveyLayer.build(geometry.timeline, state.doc.stations, selection, state.cursorNs),
             northWarning = base.northWarning,
-            askManualRotation = NorthSolver.manualNeedsConfirmation(state.doc, runId) &&
+            // Applying it is an edit, so a read-only survey (a newer app's doc may carry one) does not ask.
+            askManualRotation = !state.readOnly && NorthSolver.manualNeedsConfirmation(state.doc, runId) &&
                 manualPromptDismissedRunId != runId,
             error = if (state.readOnly) surveyError else null,
+            canStartOver = state.readOnly && surveyCanStartOver,
             tripStartNs = tripStartNs,
         )
     }
@@ -895,8 +904,11 @@ class ViewerViewModel(
         const val ORBIT_RAD_PER_PX = 0.005
         const val MAX_PHOTO_PX = 1600
 
-        /** Shown when an edit is tried on a survey whose file could not be read. */
-        const val READ_ONLY_MESSAGE = "Survey mode is read-only: survey.json could not be read"
+        /**
+         * Shown when an edit is tried on a read-only survey. The banner says why (unreadable, or from a newer
+         * app), so this only says that nothing changed.
+         */
+        const val READ_ONLY_MESSAGE = "Survey mode is read-only: survey.json is left as it is"
 
         /** Decodes [file] with a power-of-two sample size so the longest side is at most [maxPx]. */
         fun decodeDownsampled(file: File, maxPx: Int): Bitmap? {
