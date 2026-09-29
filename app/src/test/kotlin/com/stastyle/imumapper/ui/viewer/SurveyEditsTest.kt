@@ -78,10 +78,36 @@ class SurveyEditsTest {
     fun renameTrimsAndRefusesABlankName() {
         val renamed = SurveyController.renameStation(seeded, 2, "  Big room  ")
         assertEquals("Big room", renamed.station(2).name)
+        // Only a corner changes kind; a renamed mark stays a mark.
+        assertEquals(StationKind.MARK, renamed.station(2).kind)
         assertEquals(1, renamed.undo.size)
         assertSame(renamed, SurveyController.renameStation(renamed, 2, "   "))
         assertSame(renamed, SurveyController.renameStation(renamed, 2, "Big room"))
         assertSame(renamed, SurveyController.renameStation(renamed, 99, "Nowhere"))
+    }
+
+    @Test
+    fun renamedCornerBecomesAUserStationThatADetailChangeKeeps() {
+        // Its own name is no rename, so it stays a corner.
+        assertSame(seeded, SurveyController.renameStation(seeded, 4, " C1 "))
+        val renamed = SurveyController.renameStation(seeded, 4, "Squeeze")
+        val expected = Station(id = 4, kind = StationKind.USER, name = "Squeeze", tNs = t(20))
+        assertEquals(expected, renamed.station(4))
+        assertEquals(listOf(seeded.doc), renamed.undo)
+
+        // FINE would place its corner at 10 m, where the renamed station already stands, so none is added.
+        val fine = SurveyController.setDetail(renamed, geo, Detail.FINE)
+        assertEquals(expected, fine.station(4))
+        assertTrue(fine.cornerTimes().isEmpty())
+        // Undoing the Detail change brings back the renamed station, not the corner.
+        assertEquals(renamed.doc, SurveyController.undo(fine).doc)
+
+        // Moved 2.5 m on, it leaves room for that corner, which takes C1: the old corner's name is free.
+        val moved = SurveyController.moveStation(renamed, 4, t(25))
+        val movedFine = SurveyController.setDetail(moved, geo, Detail.FINE)
+        assertEquals("Squeeze", movedFine.station(4).name)
+        assertEquals(listOf(t(20)), movedFine.cornerTimes())
+        assertEquals(listOf("C1"), movedFine.doc.stations.filter { it.kind == StationKind.CORNER }.map { it.name })
     }
 
     @Test

@@ -118,7 +118,8 @@ fun StationSheet(
             }
             if (station.kind == StationKind.CORNER) {
                 Text(
-                    "A deleted corner comes back only when the corner detail changes.",
+                    "A change of corner detail places the automatic corners again. Rename or move this one " +
+                        "to keep it. A deleted corner comes back only then.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -144,7 +145,7 @@ fun DetailDialog(current: Detail, counts: Map<Detail, Int>, onSelect: (Detail) -
         text = {
             Column {
                 Text(
-                    "A change places the automatic corners again. Stations you added or moved stay.",
+                    "A change places the automatic corners again. Stations you added, moved or renamed stay.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

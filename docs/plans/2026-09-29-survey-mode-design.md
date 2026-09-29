@@ -62,8 +62,8 @@ shown. Kinds:
 - The first time Survey mode opens on a trip, it seeds START, END, MARK and CORNER stations and
   saves them. REORIENT and LOOP_CLOSED annotations are not stations.
 - The traverse is the list of stations in time order. Consecutive stations form the legs.
-- Stations can be renamed and deleted. Deleting a CORNER keeps it deleted until the Detail setting
-  changes.
+- Stations can be renamed and deleted. A renamed CORNER becomes a USER station, so a Detail change
+  keeps it and its name. Deleting a CORNER keeps it deleted until the Detail setting changes.
 
 ### Automatic corners
 
@@ -72,8 +72,8 @@ shown. Kinds:
 - Keep only vertices where the direction turns by at least 20°. Remove the weakest vertex and
   re-check until every remaining vertex passes.
 - Drop a corner within 1.5 m of path distance of another station. No leg shorter than 1.5 m.
-- Changing Detail regenerates the CORNER stations. Corners the user moved have become USER stations,
-  so they are kept. The panel shows how many corners the setting gives.
+- Changing Detail regenerates the CORNER stations. Corners the user moved or renamed have become USER
+  stations, so they are kept. The panel shows how many corners the setting gives.
 - A vertex is always an existing path point, so a corner is a place where the user actually stood.
 
 ### Gestures in Survey mode

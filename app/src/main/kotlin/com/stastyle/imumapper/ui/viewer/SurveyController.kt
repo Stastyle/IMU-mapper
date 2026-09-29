@@ -270,11 +270,17 @@ object SurveyController {
         return edit(state, state.doc.copy(stations = SurveyStations.ordered(stations)))
     }
 
-    /** Trimmed; a blank name is refused, since the table and the CSV name every leg by its stations. */
+    /**
+     * Trimmed; a blank name is refused, since the table and the CSV name every leg by its stations, and
+     * so is the current name. A renamed corner becomes USER so a Detail change keeps it and its name.
+     */
     fun renameStation(state: SurveyState, stationId: Int, name: String): SurveyState {
         val trimmed = name.trim()
-        if (trimmed.isEmpty()) return state
-        val stations = state.doc.stations.map { if (it.id == stationId) it.copy(name = trimmed) else it }
+        val station = state.doc.stations.firstOrNull { it.id == stationId } ?: return state
+        if (trimmed.isEmpty() || trimmed == station.name) return state
+        val kind = if (station.kind == StationKind.CORNER) StationKind.USER else station.kind
+        val renamed = station.copy(name = trimmed, kind = kind)
+        val stations = state.doc.stations.map { if (it.id == stationId) renamed else it }
         return edit(state, state.doc.copy(stations = stations))
     }
 

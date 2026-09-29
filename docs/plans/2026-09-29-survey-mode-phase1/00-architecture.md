@@ -976,7 +976,8 @@ Behaviour, all binding:
 - **addStation:** `SurveyStations.user(stations, tNs)` added, list re-ordered with `SurveyStations.ordered`.
 - **moveStation:** only CORNER or USER; the station keeps id and name, gets `tNs`, and a CORNER becomes
   USER (so a Detail change keeps it). Other kinds: unchanged.
-- **renameStation:** trimmed; a blank name is refused (unchanged).
+- **renameStation:** trimmed; a blank name or the current name is refused (unchanged). A renamed CORNER
+  becomes USER (so a Detail change keeps it and its name); other kinds keep their kind.
 - **deleteStation:** removes it; no tombstone (a deleted CORNER only returns when Detail changes).
 - **setDetail:** `doc.copy(detail, stations = SurveyStations.regenerateCorners(stations, geo.timeline,
   detail))`, selection cleared to `None` (ids may be reused). Choosing the current Detail is a no-op.
@@ -1192,7 +1193,7 @@ fun ManualRotationDialog(rotationDeg: Double, fromRunId: Int?, toRunId: Int, onA
    mode first opens, with rotation 0 because a new doc has no correction) and the VM saves at once. A
    loaded file is never re-seeded. A malformed file is seeded in memory only, read-only, never saved.
 5. **Corners regenerate only on a Detail change**, on the currently shown (framed) path, keeping every
-   non-CORNER station (START, END, MARK, USER and moved corners) as spacing anchors; the new corners are
+   non-CORNER station (START, END, MARK, USER and moved or renamed corners) as spacing anchors; the new corners are
    named C1.. in time order, skipping names already in use (a moved corner keeps its "C<n>" name, and legs
    and CSV rows name stations only by name); the selection is cleared; one undo entry. Deleting a corner
    leaves no tombstone. The Detail dialog shows `cornerCounts` for all three levels.
