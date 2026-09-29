@@ -3551,7 +3551,7 @@ private fun SelectionReadout(readout: SurveyReadout?, magnetic: Boolean) {
         when (readout) {
             null -> Unit
             is SurveyReadout.First -> Text(
-                "Tap another station, or the path",
+                "Tap another station to measure to it",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
