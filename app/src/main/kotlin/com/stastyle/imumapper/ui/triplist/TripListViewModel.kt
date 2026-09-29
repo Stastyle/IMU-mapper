@@ -2,18 +2,16 @@ package com.stastyle.imumapper.ui.triplist
 
 import android.content.Intent
 import android.net.Uri
-import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.stastyle.imumapper.data.CalibrationRepository
+import com.stastyle.imumapper.capture.RecordingState
 import com.stastyle.imumapper.data.TripExporter
 import com.stastyle.imumapper.data.TripImporter
 import com.stastyle.imumapper.data.TripRepository
 import com.stastyle.imumapper.data.db.TripEntity
-import com.stastyle.imumapper.pipeline.core.CarryPosition
+import com.stastyle.imumapper.data.db.TripStatus
 import com.stastyle.imumapper.pipeline.core.TripMode
 import com.stastyle.imumapper.process.TripProcessor
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -35,34 +33,17 @@ data class TripListUiState(
 
 class TripListViewModel(
     private val trips: TripRepository,
-    private val calibration: CalibrationRepository,
     private val processor: TripProcessor,
     private val exporter: TripExporter,
     private val importer: TripImporter,
-    /** The "Default trip mode" setting (`UpdatePreferences.defaultTripMode`), preselected in the new-trip dialog. */
-    defaultTripMode: Flow<TripMode>,
 ) : ViewModel() {
 
     /** Newest first, as the DAO orders them. */
     val tripList: StateFlow<List<TripEntity>> = trips.observeTrips()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), emptyList())
 
-    val carryPosition: StateFlow<CarryPosition> = calibration.observeCarryPosition()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), CarryPosition.HAND)
-
-    val defaultTripMode: StateFlow<TripMode> = defaultTripMode
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), TripMode.POCKET)
-
     private val _ui = MutableStateFlow(TripListUiState())
     val ui: StateFlow<TripListUiState> = _ui.asStateFlow()
-
-    /** Stores the carry position chosen in the new-trip dialog; the recorder reads it from calibration. */
-    fun saveCarryPosition(position: CarryPosition) {
-        viewModelScope.launch {
-            runCatching { calibration.saveCarryPosition(position) }
-                .onFailure { Log.w(TAG, "carry position save failed", it) }
-        }
-    }
 
     fun rename(tripId: Long, newName: String) {
         val name = newName.trim()
@@ -138,7 +119,18 @@ class TripListViewModel(
     private fun Throwable.describe(): String = message?.takeIf { it.isNotBlank() } ?: javaClass.simpleName
 
     private companion object {
-        const val TAG = "TripListViewModel"
         const val STOP_TIMEOUT_MS = 5_000L
     }
 }
+
+/**
+ * The mode being recorded when [trip] is the recording running now, else null. Only that trip reopens
+ * the record screen; any other row, a RECORDING one being saved or left behind by a process that died
+ * included, opens the viewer as before.
+ */
+internal fun recordingModeFor(trip: TripEntity, state: RecordingState): TripMode? =
+    if (trip.status == TripStatus.RECORDING && state is RecordingState.Recording && state.tripId == trip.id) {
+        state.mode
+    } else {
+        null
+    }

@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -24,6 +26,7 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.Button
@@ -73,11 +76,18 @@ import kotlin.math.roundToInt
 
 /**
  * Carry position, default trip mode, north from compass, steps to confirm a height change, check for
- * updates, about.
+ * updates, the tools (assisted tuning and Debug), about.
+ *
+ * As the Settings tab it has no back arrow ([onBack] null) and hosts the tab bar in [bottomBar].
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(onBack: () -> Unit) {
+fun SettingsScreen(
+    onBack: (() -> Unit)?,
+    onOpenTuning: () -> Unit = {},
+    onOpenDebug: () -> Unit = {},
+    bottomBar: @Composable () -> Unit = {},
+) {
     val context = LocalContext.current
     val container = appContainer()
     val vm: SettingsViewModel = viewModel {
@@ -95,12 +105,15 @@ fun SettingsScreen(onBack: () -> Unit) {
             TopAppBar(
                 title = { Text("Settings") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    if (onBack != null) {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
                     }
                 },
             )
         },
+        bottomBar = bottomBar,
     ) { padding ->
         Column(
             modifier = Modifier
@@ -136,6 +149,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                 onDismiss = vm::dismissUpdate,
                 onOpenUrl = { url -> openUrl(context, url) },
             )
+            ToolsSection(onOpenTuning = onOpenTuning, onOpenDebug = onOpenDebug)
             AboutSection(installedVersion = vm.installedVersion, onOpenUrl = { url -> openUrl(context, url) })
             Spacer(Modifier.height(16.dp))
         }
@@ -437,6 +451,45 @@ private fun AvailableBlock(release: ReleaseInfo, onDownload: () -> Unit, onDismi
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Button(onClick = onDownload) { Text("Update") }
         TextButton(onClick = onDismiss) { Text("Later") }
+    }
+}
+
+@Composable
+private fun ToolsSection(onOpenTuning: () -> Unit, onOpenDebug: () -> Unit) {
+    SectionCard(title = "Tools") {
+        ToolRow(
+            title = "Assisted tuning",
+            detail = "Let a chat model propose thresholds for a walk you describe, and check them before saving.",
+            onClick = onOpenTuning,
+        )
+        HorizontalDivider()
+        ToolRow(
+            title = "Debug",
+            detail = "Live sensors, raw logs, stored runs, re-processing with an edited config, the last crash.",
+            onClick = onOpenDebug,
+        )
+    }
+}
+
+/** A whole-row button, so the target is large and TalkBack reads the title and detail together. */
+@Composable
+private fun ToolRow(title: String, detail: String, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .clickable(role = Role.Button, onClick = onClick),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f).padding(vertical = 4.dp)) {
+            Text(title, style = MaterialTheme.typography.labelLarge)
+            Text(
+                detail,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null)
     }
 }
 

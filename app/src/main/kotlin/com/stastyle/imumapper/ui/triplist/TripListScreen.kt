@@ -21,8 +21,6 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.FolderOpen
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Straighten
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
@@ -44,7 +42,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -53,6 +50,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.stastyle.imumapper.capture.RecordingController
 import com.stastyle.imumapper.data.TripExporter
 import com.stastyle.imumapper.data.TripImporter
 import com.stastyle.imumapper.data.db.TripEntity
@@ -61,40 +59,40 @@ import com.stastyle.imumapper.pipeline.core.TripMode
 import com.stastyle.imumapper.ui.common.appContainer
 
 /**
- * Home screen: list of recorded trips, start a new one, and entry points to the other screens.
+ * Home screen and the Trips tab: the recorded trips, the way to a new one, import and Debug.
  *
- * [banner] is a slot above the list for the updater's "new version available" banner
- * (`com.stastyle.imumapper.ui.settings.UpdateBanner`), wired by the navigation graph.
+ * [onOpenRecording] is called instead of [onOpenTrip] for the trip being recorded right now, with the
+ * mode it is recorded in. [onNewTrip] opens the Record tab. [banner] is a slot above the list for the
+ * updater's "new version available" banner (`com.stastyle.imumapper.ui.settings.UpdateBanner`), and
+ * [bottomBar] the slot for the tab bar, both wired by the navigation graph.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TripListScreen(
-    onNewTrip: (TripMode) -> Unit,
-    onOpenTrip: (tripId: Long) -> Unit,
-    onOpenCalibration: () -> Unit,
+    onOpenTrip: (Long) -> Unit,
+    onOpenRecording: (TripMode) -> Unit,
+    onNewTrip: () -> Unit,
     onOpenDebug: () -> Unit,
-    onOpenSettings: () -> Unit,
     banner: @Composable () -> Unit = {},
+    bottomBar: @Composable () -> Unit = {},
 ) {
     val context = LocalContext.current
     val container = appContainer()
     val vm: TripListViewModel = viewModel {
         TripListViewModel(
             trips = container.tripRepository,
-            calibration = container.calibrationRepository,
             processor = container.tripProcessor,
             exporter = TripExporter(context.applicationContext, container.tripRepository, container.tripFiles),
             importer = TripImporter(context.applicationContext, container.tripRepository, container.tripFiles),
-            defaultTripMode = container.updateManager.preferences.defaultTripMode,
         )
     }
     val trips by vm.tripList.collectAsStateWithLifecycle()
-    val carryPosition by vm.carryPosition.collectAsStateWithLifecycle()
-    val defaultTripMode by vm.defaultTripMode.collectAsStateWithLifecycle()
     val ui by vm.ui.collectAsStateWithLifecycle()
+    val recorder = remember(context) { RecordingController.get(context) }
+    // Read only when a row is tapped, so the recorder's ticks do not recompose the list.
+    val recording by recorder.state.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
 
-    var showNewTrip by rememberSaveable { mutableStateOf(false) }
     var sheetTrip by remember { mutableStateOf<TripEntity?>(null) }
     var renameTrip by remember { mutableStateOf<TripEntity?>(null) }
     var deleteTrip by remember { mutableStateOf<TripEntity?>(null) }
@@ -123,14 +121,8 @@ fun TripListScreen(
                     IconButton(onClick = { importLauncher.launch(IMPORT_MIME_TYPES) }, enabled = !ui.importing) {
                         Icon(Icons.Filled.FolderOpen, contentDescription = "Import trip")
                     }
-                    IconButton(onClick = onOpenCalibration) {
-                        Icon(Icons.Filled.Straighten, contentDescription = "Calibration")
-                    }
                     IconButton(onClick = onOpenDebug) {
                         Icon(Icons.Filled.BugReport, contentDescription = "Debug")
-                    }
-                    IconButton(onClick = onOpenSettings) {
-                        Icon(Icons.Filled.Settings, contentDescription = "Settings")
                     }
                 },
             )
@@ -139,9 +131,10 @@ fun TripListScreen(
             ExtendedFloatingActionButton(
                 text = { Text("New trip") },
                 icon = { Icon(Icons.Filled.Add, contentDescription = null) },
-                onClick = { showNewTrip = true },
+                onClick = onNewTrip,
             )
         },
+        bottomBar = bottomBar,
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
@@ -155,7 +148,10 @@ fun TripListScreen(
                 TripList(
                     trips = trips,
                     busyTripIds = ui.busyTripIds,
-                    onOpen = onOpenTrip,
+                    onOpen = { trip ->
+                        val mode = recordingModeFor(trip, recording)
+                        if (mode != null) onOpenRecording(mode) else onOpenTrip(trip.id)
+                    },
                     onLongPress = { sheetTrip = it },
                     onShowError = { errorTrip = it },
                 )
@@ -163,18 +159,6 @@ fun TripListScreen(
         }
     }
 
-    if (showNewTrip) {
-        NewTripDialog(
-            initialMode = defaultTripMode,
-            initialCarryPosition = carryPosition,
-            onDismiss = { showNewTrip = false },
-            onStart = { mode, carry ->
-                showNewTrip = false
-                vm.saveCarryPosition(carry)
-                onNewTrip(mode)
-            },
-        )
-    }
     sheetTrip?.let { trip ->
         TripActionsSheet(
             trip = trip,
@@ -213,7 +197,7 @@ fun TripListScreen(
 private fun TripList(
     trips: List<TripEntity>,
     busyTripIds: Set<Long>,
-    onOpen: (Long) -> Unit,
+    onOpen: (TripEntity) -> Unit,
     onLongPress: (TripEntity) -> Unit,
     onShowError: (TripEntity) -> Unit,
 ) {
@@ -226,7 +210,7 @@ private fun TripList(
             TripRow(
                 trip = trip,
                 busy = trip.id in busyTripIds,
-                onOpen = { onOpen(trip.id) },
+                onOpen = { onOpen(trip) },
                 onLongPress = { onLongPress(trip) },
                 onShowError = { onShowError(trip) },
             )
@@ -313,9 +297,10 @@ private fun EmptyState(modifier: Modifier = Modifier) {
             Text("No trips yet", style = MaterialTheme.typography.titleLarge)
             Spacer(Modifier.height(8.dp))
             Text(
-                "1. Open Calibration and do the still and stride steps once; the heading step is optional.\n" +
-                    "2. Tap New trip, pick a mode and where the phone is carried, and wait for the compass " +
-                    "to find north.\n" +
+                "1. Open the Calibrate tab and do the still and stride steps once; the heading step is " +
+                    "optional.\n" +
+                    "2. Open the Record tab, pick a mode and tap Continue, then pick where the phone is carried " +
+                    "and wait for the compass to find north.\n" +
                     "3. Walk, then stop: the route appears as a 3D path you can rotate.\n\n" +
                     "Every raw log is kept, so a trip can be re-processed after calibration improves. " +
                     "Use Import to open a ZIP or .imul exported from another phone.",

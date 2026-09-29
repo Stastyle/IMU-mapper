@@ -52,10 +52,19 @@ import com.stastyle.imumapper.ui.common.appContainer
 import com.stastyle.imumapper.ui.common.findActivity
 import com.stastyle.imumapper.ui.record.CompassDialog
 
-/** Calibration flows: still bias, stride walk, heading offset, square test, ARCore vs PDR, assisted tuning. */
+/**
+ * Calibration flows: still bias, stride walk, heading offset, square test, ARCore vs PDR, assisted tuning.
+ *
+ * As the Calibrate tab it has no back arrow ([onBack] null) and hosts the tab bar in [bottomBar]. The bar
+ * is hidden while a flow's sensors run, because leaving the screen cancels the flow.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CalibrationScreen(onBack: () -> Unit, onOpenTuning: () -> Unit) {
+fun CalibrationScreen(
+    onBack: (() -> Unit)?,
+    onOpenTuning: () -> Unit,
+    bottomBar: @Composable () -> Unit = {},
+) {
     val context = LocalContext.current
     val container = appContainer()
     val vm: CalibrationViewModel = viewModel {
@@ -104,12 +113,15 @@ fun CalibrationScreen(onBack: () -> Unit, onOpenTuning: () -> Unit) {
             TopAppBar(
                 title = { Text("Calibration") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    if (onBack != null) {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
                     }
                 },
             )
         },
+        bottomBar = { if (!ui.sensorsRunning) bottomBar() },
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
         Column(
