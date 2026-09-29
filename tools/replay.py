@@ -14,6 +14,7 @@ Only numpy and matplotlib are needed (tools/requirements.txt). Usage: see tools/
 
 import argparse
 import csv
+import decimal
 import json
 import math
 import os
@@ -301,6 +302,9 @@ CONFIG_DEFAULTS = [
     ("preferHardwareSteps", False),
     ("baroSmoothingS", 1.0),
     ("baroHoldWhenStill", True),
+    ("baroConfirmSteps", 4),
+    ("baroConfirmStepM", 0.02),
+    ("baroMaxHeldM", 1.5),
     ("loopClosure", True),
     ("smoothingWindow", 3),
     ("pdrFallbackWhenTrackingLost", True),
@@ -477,10 +481,23 @@ class Angles:
         return Angles.wrap(np.asarray(a) - np.asarray(b))
 
 
+_DIAG_CONTEXT = decimal.Context(prec=400)
+
+
 class Diag:
     @staticmethod
     def num(x, decimals=3):
-        return "%.*f" % (decimals, x)
+        """String.format(Locale.US, "%.<decimals>f", x) as Java's Formatter does it: the shortest
+        decimal form of x, rounded half-up. Python's % rounds the binary value instead, so 14.95
+        (stored as 14.9499...) would print 14.9 where Kotlin prints 15.0."""
+        x = float(x)
+        if math.isnan(x):
+            return "NaN"
+        if math.isinf(x):
+            return "Infinity" if x > 0 else "-Infinity"
+        q = decimal.Decimal(repr(x)).quantize(decimal.Decimal(1).scaleb(-decimals),
+                                              rounding=decimal.ROUND_HALF_UP, context=_DIAG_CONTEXT)
+        return format(q, "f")
 
 
 def floor_index(times, queries):
@@ -1141,10 +1158,47 @@ class AltitudeTrack:
         self.times = times
         self.heights = heights
         self.p0_hpa = p0_hpa
+        # Built on first use by mean_over, like the lazy Kotlin `integral`.
+        self._integral = None
+        self._times_list = None
+        self._heights_list = None
 
     @property
     def size(self):
         return len(self.times)
+
+    def _integral_table(self):
+        """Integral of the height from the first sample up to each sample, metre-seconds (a plain
+        running sum in Kotlin order)."""
+        if self._integral is None:
+            times = self.times.tolist()
+            heights = self.heights.tolist()
+            out = [0.0] * len(times)
+            for k in range(1, len(times)):
+                out[k] = out[k - 1] + (heights[k - 1] + heights[k]) * 0.5 * ((times[k] - times[k - 1]) / 1e9)
+            self._integral = out
+            self._times_list = times
+            self._heights_list = heights
+        return self._integral
+
+    def mean_over(self, from_ns, to_ns):
+        """Mean of `at` over [from_ns, to_ns], with the same interpolation and clamping; the value at
+        to_ns for an empty or backwards range (AltitudeTrack.meanOver)."""
+        if len(self.times) == 0:
+            return 0.0
+        if to_ns <= from_ns:
+            return self.at(to_ns)
+        return (self._integral_to(to_ns) - self._integral_to(from_ns)) / ((to_ns - from_ns) / 1e9)
+
+    def _integral_to(self, t_ns):
+        """Integral of `at` from the first sample to t_ns, negative before it (integralTo)."""
+        integral = self._integral_table()
+        times = self._times_list
+        heights = self._heights_list
+        i = int(floor_index(self.times, t_ns))
+        if i < 0:
+            return heights[0] * ((t_ns - times[0]) / 1e9)
+        return integral[i] + (heights[i] + self.at(t_ns)) * 0.5 * ((t_ns - times[i]) / 1e9)
 
     def at(self, t_ns):
         t = np.asarray(t_ns, dtype=np.int64)
@@ -1202,6 +1256,259 @@ class AltitudeTrack:
 
 
 # ----------------------------------------------------------------------------------------------
+# Climbs (pdr/Climbs.kt)
+# ----------------------------------------------------------------------------------------------
+
+class Climbs:
+    """The barometric height change each step takes into the path when baroConfirmSteps is on.
+
+    The height changes only in climbs: runs of consecutive steps that all move the unsmoothed
+    height (averaged over each step's interval, from the step before or the trip start to the step)
+    the same way, of which at least min_steps move it by min_step_m or more, and which are not
+    shaped like a jump (Run.jump_shaped: two consecutive changes carry JUMP_SHARE of the run). A
+    climb takes the changes from its first large step to its last; every other step takes none. Two
+    remedies keep the path from drifting away from the barometer:
+    - A run right after a taken run, in the other direction, that brings the height at least half
+      way back is taken too, unless it is a jump the run before it was not (Run.is_jump_against:
+      jump-shaped, with its largest change JUMP_STEP_RATIO times the typical step of the run before
+      or more), so that wobble mostly passes whole while a door zone right after a flight stays out.
+    - The path stays within max_held_m of the barometer's own height (the step means with the
+      paused changes left out): what is held beyond that comes through. changes() applies the band
+      per path segment, centred where the segment starts; limit_m adds up what it lets through over
+      the whole trip.
+    See the KDoc of Climbs.kt for the reasons.
+
+    Kotlin also takes the trip pauses: a step interval that touches one gives no change, ends every
+    run and blocks the way-back rule across it. The replay has no pauses (see "Not covered" in
+    tools/README.md), so `paused` is all False here; the structure is kept so a port can fill it."""
+
+    # Smallest height change of a held-out run that held_runs counts, metres.
+    HELD_REPORT_M = 0.25
+    # Share of a run in two consecutive changes from which it is shaped like a jump.
+    JUMP_SHARE = 0.75
+    # How many times a climb's typical step a jump's largest change must be.
+    JUMP_STEP_RATIO = 2.0
+
+    def __init__(self, interval_start_ns, step_ns, change, taken, max_held_m, firsts, lasts, held_runs, held_m,
+                 limit_m):
+        self._interval_start_ns = interval_start_ns
+        self._step_ns = step_ns
+        # Height change of the barometer at each step, metres: 0 across a pause and at the first step.
+        self._change = change
+        # The part of _change the climbs take.
+        self._taken = taken
+        self._max_held_m = max_held_m
+        self._firsts = firsts
+        self._lasts = lasts
+        # Runs held out that would have moved the height by HELD_REPORT_M or more: pressure changes
+        # on flat ground, or climbs with too few steps. Smaller runs are barometer noise.
+        self.held_runs = held_runs
+        # Sizes of the held_runs added up, metres, up and down alike: not a net height.
+        self.held_m = held_m
+        # Height the max_held_m limit let through, metres, up and down alike.
+        self.limit_m = limit_m
+
+    @property
+    def size(self):
+        """Number of climbs, ways back included."""
+        return len(self._firsts)
+
+    def first_step(self, k):
+        """First step of climb k, at least 1; the path starts to change height after the step before it."""
+        return self._firsts[k]
+
+    def last_step(self, k):
+        """Last step of climb k."""
+        return self._lasts[k]
+
+    def changes(self, first, last, from_ns):
+        """Height change of the path at steps first until last when it starts at from_ns: the climbs,
+        kept within max_held_m of the barometer's own height from there on. A step whose interval
+        from_ns cuts into, as a VIO gap does, takes its share of the interval (changes)."""
+        out = [0.0] * max(0, last - first)
+        offset = 0.0  # path height minus the barometer's, since from_ns
+        m = self._max_held_m
+        for i in range(first, last):
+            f = self._share(i, from_ns)
+            nxt = Climbs._coerce_in(offset + (self._taken[i] - self._change[i]) * f, -m, m)
+            out[i - first] = self._change[i] * f + nxt - offset
+            offset = nxt
+        return out
+
+    def _share(self, i, from_ns):
+        """Share of step i's interval after from_ns (share)."""
+        lo = self._interval_start_ns[i]
+        hi = self._step_ns[i]
+        if from_ns <= lo or hi <= lo:
+            return 1.0
+        if from_ns >= hi:
+            return 0.0
+        return float(hi - from_ns) / float(hi - lo)
+
+    @staticmethod
+    def _coerce_in(value, lo, hi):
+        """Kotlin's Double.coerceIn: a NaN bound compares false and leaves the value as it is."""
+        if value < lo:
+            return lo
+        if value > hi:
+            return hi
+        return value
+
+    class Run:
+        """Steps first..last that all move the height in direction `dir`; `large` of them by
+        min_step_m or more. A climb takes first_taken..last_taken, from its first large step to its
+        last: small steps at the ends are mostly noise that happens to lean the same way (Climbs.Run)."""
+
+        def __init__(self, first, last, direction, large, total, first_taken, last_taken):
+            self.first = first
+            self.last = last
+            self.dir = direction
+            self.large = large
+            self.total = total
+            self.first_taken = first_taken
+            self.last_taken = last_taken
+
+        def taken(self, change):
+            total = 0.0
+            for k in range(self.first_taken, self.last_taken + 1):
+                total += change[k]
+            return total
+
+        def jump_shaped(self, change):
+            """True when two consecutive changes carry JUMP_SHARE or more of the run, as a pressure
+            jump does; a run of two steps or fewer always counts as one (jumpShaped)."""
+            if self.last - self.first < 2:
+                return True
+            most = 0.0
+            for k in range(self.first, self.last):
+                most = max(most, abs(change[k] + change[k + 1]))
+            return most >= Climbs.JUMP_SHARE * abs(self.total)
+
+        def is_jump_against(self, change, typical_m):
+            """True when the run is jump_shaped and its largest change is JUMP_STEP_RATIO times
+            typical_m or more (isJumpAgainst)."""
+            if not self.jump_shaped(change):
+                return False
+            largest = 0.0
+            for k in range(self.first, self.last + 1):
+                largest = max(largest, abs(change[k]))
+            return largest >= Climbs.JUMP_STEP_RATIO * typical_m
+
+        def typical_step(self, change):
+            """Median size of the taken changes, metres: the pace of a climb (typicalStep). Sorted as
+            Kotlin's DoubleArray.sort, NaN last; an even count takes the mean of the two middles."""
+            sizes = sorted((abs(change[k]) for k in range(self.first_taken, self.last_taken + 1)),
+                           key=lambda v: (math.isnan(v), v))
+            m = len(sizes) // 2
+            return sizes[m] if len(sizes) % 2 == 1 else (sizes[m - 1] + sizes[m]) / 2
+
+        @staticmethod
+        def of(first, last, direction, change, min_step_m):
+            large = 0
+            first_large = -1
+            last_large = -1
+            total = 0.0
+            for k in range(first, last + 1):
+                if abs(change[k]) >= min_step_m:
+                    large += 1
+                    if first_large < 0:
+                        first_large = k
+                    last_large = k
+                total += change[k]
+            if large > 0:
+                return Climbs.Run(first, last, direction, large, total, first_large, last_large)
+            return Climbs.Run(first, last, direction, 0, total, first, last)
+
+    @staticmethod
+    def detect(raw, steps, trip_start_ns, min_steps, min_step_m, max_held_m):
+        """Finds the climbs of `steps` in the unsmoothed height `raw`. trip_start_ns opens the interval
+        of the first step. min_steps must be at least 1 (Climbs.detect)."""
+        if min_steps < 1:
+            raise ValueError("minSteps must be at least 1: %d" % min_steps)
+        n = steps.size
+        t = [int(v) for v in steps.t_ns.tolist()]
+        start = [min(trip_start_ns, t[0]) if i == 0 else t[i - 1] for i in range(n)]
+        mean = [raw.mean_over(start[i], t[i]) for i in range(n)]
+        # Kotlin: pauses.coveredNs(start[i], t[i]) > 0. The replay has no pauses.
+        paused = [False] * n
+        # Change and direction from the interval before each step to its own: +1 up, -1 down, 0
+        # across a pause. The first step has no interval before it.
+        change = [0.0] * n
+        direction = [0] * n
+        for i in range(1, n):
+            if paused[i] or paused[i - 1]:
+                continue
+            change[i] = mean[i] - mean[i - 1]
+            direction[i] = 1 if change[i] > 0.0 else (-1 if change[i] < 0.0 else 0)
+
+        # Runs: consecutive steps that all move the height the same way.
+        runs = []
+        first = 1
+        while first < n:
+            if direction[first] == 0:
+                first += 1
+                continue
+            last = first
+            while last + 1 < n and direction[last + 1] == direction[first]:
+                last += 1
+            runs.append(Climbs.Run.of(first, last, direction[first], change, min_step_m))
+            first = last + 1
+
+        taken = [0.0] * n
+        firsts = []
+        lasts = []
+        held = 0
+        held_m = 0.0
+        min_climb_m = min_steps * min_step_m
+        # The last taken run, or run of min_climb_m or more, and whether it was taken.
+        previous = None
+        previous_taken = False
+        for r in runs:
+            climb = r.large >= min_steps and not r.jump_shaped(change)
+            # A run right after a taken run, in the other direction, that brings the height at least
+            # half way back is taken too (the way back), unless it is a jump the run before it was not.
+            back = (not climb and previous_taken and previous is not None and r.dir == -previous.dir
+                    and abs(r.total) >= 0.5 * abs(previous.taken(change))
+                    and r.first - previous.last_taken <= min_steps
+                    and not Climbs._paused_between(paused, previous.last_taken, r.first)
+                    and (previous.jump_shaped(change)
+                         or not r.is_jump_against(change, previous.typical_step(change))))
+            if climb or back:
+                for k in range(r.first_taken, r.last_taken + 1):
+                    taken[k] = change[k]
+                firsts.append(r.first_taken)
+                lasts.append(r.last_taken)
+                previous = r
+                previous_taken = True
+            else:
+                if abs(r.total) >= Climbs.HELD_REPORT_M:
+                    held += 1
+                    held_m += abs(r.total)
+                if abs(r.total) >= min_climb_m:
+                    previous = r
+                    previous_taken = False
+
+        # What the limit lets through over the whole trip. Note the order of the sum, as in Kotlin:
+        # (offset + taken) - change here, offset + (taken - change) * share in changes().
+        offset = 0.0
+        limit_m = 0.0
+        for i in range(n):
+            free = offset + taken[i] - change[i]
+            nxt = Climbs._coerce_in(free, -max_held_m, max_held_m)
+            limit_m += abs(nxt - free)
+            offset = nxt
+        return Climbs(start, t, change, taken, max_held_m, firsts, lasts, held, held_m, limit_m)
+
+    @staticmethod
+    def _paused_between(paused, a, b):
+        """True when a step interval after a up to b touches a pause (pausedBetween)."""
+        for k in range(a + 1, b + 1):
+            if paused[k]:
+                return True
+        return False
+
+
+# ----------------------------------------------------------------------------------------------
 # PathPoint (core/PathResult.kt) and PdrSolver (pdr/PdrSolver.kt)
 # ----------------------------------------------------------------------------------------------
 
@@ -1250,7 +1557,8 @@ class HeadingSegment:
 
 class PdrContext:
     def __init__(self, log, config, orientation, orientation_source, world_accel, steps, software_step_count,
-                 hardware_step_count, heading_segments, step_heading_rad, step_stride_m, altitude, diagnostics):
+                 hardware_step_count, heading_segments, step_heading_rad, step_stride_m, altitude, climbs,
+                 diagnostics):
         self.log = log
         self.config = config
         self.orientation = orientation
@@ -1263,6 +1571,9 @@ class PdrContext:
         self.step_heading_rad = step_heading_rad
         self.step_stride_m = step_stride_m
         self.altitude = altitude
+        # The barometric height change of each step when baroConfirmSteps is on; None when the path
+        # follows `altitude`.
+        self.climbs = climbs
         self.diagnostics = diagnostics
 
     def segment_at(self, t_ns):
@@ -1319,9 +1630,17 @@ class PdrSolver:
         diag["baro"] = "absent" if altitude is None else "present"
         if altitude is not None:
             diag["baroP0hPa"] = Diag.num(altitude.p0_hpa, 2)
+        climbs = None
+        if altitude is not None and config.baroConfirmSteps > 0:
+            # Climbs are judged and measured on the unsmoothed height; see Climbs.
+            raw = AltitudeTrack.from_baro(log.baro_t, log.baro_hpa, 0.0)
+            start_ns = log.first_timestamp_ns()
+            climbs = Climbs.detect(raw, steps, start_ns, int(config.baroConfirmSteps), config.baroConfirmStepM,
+                                   PdrSolver.max_of_zero(config.baroMaxHeldM))
+            PdrSolver.add_climb_diagnostics(climbs, steps, start_ns, diag)
 
         return PdrContext(log, config, track, source, world, steps, software.size, hardware.size, segments,
-                          headings, strides, altitude, diag)
+                          headings, strides, altitude, climbs, diag)
 
     def solve_segment(self, ctx, from_ns, to_ns, start, start_heading_rad):
         steps = ctx.steps
@@ -1334,20 +1653,59 @@ class PdrSolver:
         x, y, z = float(start[0]), float(start[1]), float(start[2])
         prev_ns = from_ns
         altitude = ctx.altitude
+        climbs = ctx.climbs
         hold = ctx.config.baroHoldWhenStill
+        # The climbs with the baroMaxHeldM band centred where this segment starts.
+        climb_changes = climbs.changes(first, last, from_ns) if climbs is not None else None
         for i in range(first, last):
             t = int(steps.t_ns[i])
             h = Angles.wrap(ctx.step_heading_rad[i] + correction)
             d = ctx.step_stride_m[i]
             x += d * math.sin(h)
             y += d * math.cos(h)
-            if altitude is not None:
+            if climb_changes is not None:
+                z += climb_changes[i - first]
+            elif altitude is not None:
+                # Only with baroConfirmSteps 0. Kotlin freezes only the middle of a gap longer than
+                # baroStillGapS; the replay freezes the whole of a gap longer than a fixed 2 s (see
+                # "Not covered" in tools/README.md).
                 gap_s = (t - prev_ns) / 1e9
                 if not hold or gap_s <= self.still_gap_s:
-                    z += altitude.at(t) - altitude.at(prev_ns)
+                    z += PdrSolver.altitude_delta(altitude, prev_ns, t)
             out.append(PathPoint(t, [x, y, z], "PDR", h, i))
             prev_ns = t
         return out
+
+    @staticmethod
+    def altitude_delta(altitude, from_ns, to_ns):
+        """Barometric altitude change over [from_ns, to_ns] (PdrSolver.altitudeDelta). Kotlin leaves
+        the paused parts out; the replay has no pauses."""
+        if to_ns <= from_ns:
+            return 0.0
+        return altitude.at(to_ns) - altitude.at(from_ns)
+
+    @staticmethod
+    def max_of_zero(value):
+        """Kotlin's maxOf(0.0, value), which keeps a NaN where Python's max would drop it."""
+        value = float(value)
+        return value if math.isnan(value) else max(0.0, value)
+
+    @staticmethod
+    def add_climb_diagnostics(climbs, steps, start_ns, diag):
+        """baroClimbs and baroClimbsHeld count the climbs (ways back included) and the held-out runs,
+        baroHeldM adds up the sizes of those runs, baroLimitM is what the baroMaxHeldM limit let
+        through, and baroClimbTimesS gives each climb as start-end seconds, from the step before it to
+        its last step (PdrSolver.addClimbDiagnostics)."""
+        diag["baroClimbs"] = str(climbs.size)
+        diag["baroClimbsHeld"] = str(climbs.held_runs)
+        diag["baroHeldM"] = Diag.num(climbs.held_m, 2)
+        diag["baroLimitM"] = Diag.num(climbs.limit_m, 2)
+        if climbs.size > 0:
+            t = steps.t_ns
+            diag["baroClimbTimesS"] = ";".join(
+                Diag.num((int(t[climbs.first_step(k) - 1]) - start_ns) / 1e9, 1) + "-" +
+                Diag.num((int(t[climbs.last_step(k)]) - start_ns) / 1e9, 1)
+                for k in range(climbs.size))
 
     def solve(self, log, config):
         """Whole trip: (points, ctx) with the start point at the origin followed by one point per step."""
@@ -1447,7 +1805,12 @@ class PathBuilder:
     #    instead of being re-estimated from the gait, so moving the phone no longer turns the path.
     # 5: +Y is magnetic north, set from the fused rotation vector at the start of the trip
     #    (northFromCompass); before, every trip kept the game rotation vector's arbitrary yaw.
-    PIPELINE_VERSION = 5
+    # 6: a barometric height change reaches the path only in a climb, a run of steps that all move the
+    #    height the same way with at least baroConfirmSteps steps of baroConfirmStepM or more, measured
+    #    on per-step means of the unsmoothed pressure, or in a way back right after one; the path stays
+    #    within baroMaxHeldM of the barometer. Pressure changes on flat ground indoors no longer show as
+    #    climbs.
+    PIPELINE_VERSION = 6
 
     @staticmethod
     def nearest_index(points, t_ns):

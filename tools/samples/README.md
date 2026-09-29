@@ -46,7 +46,12 @@ then corrects. Expected results with that config (`PipelineConfig` defaults othe
 
 - about 30 steps, distance about 20.8 m before closure
 - `closureErrorM` between 0.1 and 3 m, last point within 0.3 m of the origin after closure
-- z stays within a few centimetres of 0 (flat walk)
+- z is 0 at every point (flat walk): no run of steps that all move the barometric height the same
+  way has `baroConfirmSteps` (default 4) steps of `baroConfirmStepM` (2 cm) or more, so
+  `baroClimbs` is 0 and no change reaches the path. `baroClimbsHeld` is 0 and `baroHeldM` 0.00,
+  because no held run moves the height by 0.25 m, and `baroLimitM` is 0.00, because the
+  barometer's own height never gets `baroMaxHeldM` (1.5 m) from the path. With
+  `baroConfirmSteps` 0, which takes every change, z stays within a few centimetres of 0.
 
 ## synthetic_carry_change.imul
 
