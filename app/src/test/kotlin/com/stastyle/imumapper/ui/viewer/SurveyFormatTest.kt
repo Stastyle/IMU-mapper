@@ -153,6 +153,17 @@ class SurveyFormatTest {
     }
 
     @Test
+    fun theTopBarChipLeavesOutTheReferenceCountSoTheTitleKeepsRoom() {
+        // At 384 dp the full "N +4.0° M · 2 refs" left the trip name and "Survey (beta)" as "S…".
+        assertEquals("N +0.0° R", SurveyFormat.northChipShort(solution(0.0, NorthSource.NONE, used = 0), magnetic = false))
+        assertEquals("N -1.5° R", SurveyFormat.northChipShort(solution(-1.5, NorthSource.MANUAL, used = 0), magnetic = false))
+        assertEquals(
+            "N +4.0° M",
+            SurveyFormat.northChipShort(solution(4.0, NorthSource.REFERENCES, used = 2), magnetic = true),
+        )
+    }
+
+    @Test
     fun cursorLabelShowsTheClockWhenTheStartIsKnownElseTheElapsedTime() {
         // 1_700_000_000_000 ms is 2023-11-14 22:13:20 UTC; 125 s later is 22:15:25.
         assertEquals(

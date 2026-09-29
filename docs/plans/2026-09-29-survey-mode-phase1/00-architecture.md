@@ -808,7 +808,8 @@ object SurveyFormat {
     fun stretchLine(measure: StretchMeasure, magnetic: Boolean): String  // "fitted 046° M · straight 0.89"
     fun copyLine(from: String, to: String, leg: LegMeasure, magnetic: Boolean): String
         // "Junction 2 → Chamber: 34.2 m, horiz 33.9 m, 047° M, +7° (Δh +4.1 m), path 38.5 m"
-    fun northChip(north: NorthSolution, magnetic: Boolean): String // "N +4.0° M", "N +4.0° M · 1 ref", "N +4.0° M · 2 refs"
+    fun northChipShort(north: NorthSolution, magnetic: Boolean): String // top bar: "N +4.0° M"
+    fun northChip(north: NorthSolution, magnetic: Boolean): String // North sheet: "N +4.0° M", "N +4.0° M · 1 ref", "N +4.0° M · 2 refs"
     fun cursorLabel(startedAtEpochMs: Long?, elapsedNs: Long, distanceM: Double, zone: ZoneId): String
         // "12:40:18 · 41.2 m"; with no start time the elapsed formatDuration(): "3:05 · 41.2 m"
     fun shareText(tripName: String, runId: Int, raw: Boolean, north: NorthSolution): String
@@ -1230,7 +1231,8 @@ fun ManualRotationDialog(rotationDeg: Double, fromRunId: Int?, toRunId: Int, onA
     `SurveyShare.intent` and `startActivity`, then `consumeCsvShare()`, like the trip list's ZIP export.
 13. **Survey mode UI.** The stats panel is replaced by `SurveyPanel`, the overlay run and scene markers
     are hidden, `MarkerCard` is not shown. Top bar in Survey mode: title "<trip name>" with the subtitle
-    "Survey (beta) · Run n · v5", then actions north chip (`SurveyFormat.northChip`, opens `NorthSheet`),
+    "Survey (beta)" ("Survey (beta) · raw" on the raw path; the run is checked in the overflow), then
+    actions north chip (`SurveyFormat.northChipShort`, opens `NorthSheet`),
     Undo (`Icons.AutoMirrored.Filled.Undo`), the ruler (`Icons.Filled.SquareFoot`, toggles Survey mode;
     also shown in normal mode between the view menu and Debug), and an overflow (`Icons.Filled.MoreVert`)
     with Export CSV, Detail, Raw path and the run list. Back leaves Survey mode (`BackHandler`).

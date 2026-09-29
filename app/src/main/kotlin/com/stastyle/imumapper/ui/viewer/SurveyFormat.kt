@@ -82,9 +82,16 @@ object SurveyFormat {
             "${azimuth(leg.azimuthDeg, magnetic)}, ${signedDegrees(leg.slopeDeg)} " +
             "(Δh ${signedMetres(leg.heightChangeM)} m), path ${metres(leg.pathM)}"
 
-    /** The top bar's north chip: the rotation in use and how many compass readings set it. */
+    /**
+     * The top bar's north chip: the rotation in use only. The reference count stays in the North
+     * sheet ([northChip]), since beside Undo, the ruler and the menu it left the title no room.
+     */
+    fun northChipShort(north: NorthSolution, magnetic: Boolean): String =
+        "N ${rotation(north.rotationDeg)} ${suffix(magnetic)}"
+
+    /** The North sheet's header: the rotation in use and how many compass readings set it. */
     fun northChip(north: NorthSolution, magnetic: Boolean): String {
-        val chip = "N ${rotation(north.rotationDeg)} ${suffix(magnetic)}"
+        val chip = northChipShort(north, magnetic)
         return when (val used = north.usedCount) {
             0 -> chip
             1 -> "${chip}${SEPARATOR}1 ref"

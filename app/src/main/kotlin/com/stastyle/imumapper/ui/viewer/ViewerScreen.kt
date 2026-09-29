@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -166,8 +167,11 @@ fun ViewerScreen(
                 actions = {
                     if (ui.surveyMode) {
                         if (survey != null) {
-                            TextButton(onClick = { showNorth = true }) {
-                                Text(SurveyFormat.northChip(survey.north, survey.magnetic), maxLines = 1)
+                            TextButton(
+                                onClick = { showNorth = true },
+                                contentPadding = PaddingValues(horizontal = 8.dp),
+                            ) {
+                                Text(SurveyFormat.northChipShort(survey.north, survey.magnetic), maxLines = 1)
                             }
                             IconButton(onClick = vm::surveyUndo, enabled = survey.state.undo.isNotEmpty()) {
                                 Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "Undo")
@@ -351,19 +355,28 @@ private fun ViewerTitle(ui: ViewerUiState, tripId: Long) {
     Column {
         Text(ui.trip?.name ?: "Trip $tripId", maxLines = 1, overflow = TextOverflow.Ellipsis)
         val run = ui.runs.firstOrNull { it.runId == ui.selectedRunId }
-        val parts = buildList {
-            if (ui.surveyMode) add("Survey (beta)")
-            if (run != null) add(runLabel(run) + if (ui.showRaw && ui.rawResult != null) " · raw" else "")
-        }
-        if (parts.isNotEmpty()) {
+        val subtitle = viewerSubtitle(ui.surveyMode, run?.let(::runLabel), ui.showRaw && ui.rawResult != null)
+        if (subtitle != null) {
             Text(
-                parts.joinToString(" · "),
+                subtitle,
                 style = MaterialTheme.typography.labelSmall,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
         }
     }
+}
+
+/**
+ * The top bar's second line: the run shown, and "raw" when the raw path is. Survey mode says
+ * "Survey (beta)" in place of the run, which its menu checks, since the north chip, Undo, the ruler
+ * and the menu leave the title too little room for both.
+ */
+internal fun viewerSubtitle(surveyMode: Boolean, run: String?, raw: Boolean): String? = when {
+    surveyMode -> if (raw) "Survey (beta) · raw" else "Survey (beta)"
+    run == null -> null
+    raw -> "$run · raw"
+    else -> run
 }
 
 /** The ruler: enters and leaves Survey mode, tinted while it is on. */

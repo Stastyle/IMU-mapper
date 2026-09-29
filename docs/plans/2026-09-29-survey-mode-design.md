@@ -204,9 +204,10 @@ The survey stores facts; the rotation is solved from them for whichever run is s
   ticked). The two change warnings are left out while north is arbitrary (a relative-north run with no
   reference and no manual rotation in use), since the first reading there may turn the map by any
   angle, and a warning would push the user to tick the back-bearing box wrongly.
-- **The north chip** in the top bar shows the rotation in use ("N +4.0° M", or "N +4.0° M · 2
-  refs"). It opens the North sheet: the manual steppers, each reference with its residual and a
-  delete button, and Reset north.
+- **The north chip** in the top bar shows the rotation in use ("N +4.0° M"). It opens the North
+  sheet, whose header adds how many references set it ("N +4.0° M · 2 refs"): the manual steppers,
+  each reference with its residual and a delete button, and Reset north. The count stays off the
+  chip so the trip name and "Survey (beta)" keep room on a narrow phone.
 - **Undo.** Every survey edit (stations, references, manual rotation, Detail) goes on an in-memory
   undo stack of about 50 snapshots, behind the top-bar Undo and the snackbar.
 
