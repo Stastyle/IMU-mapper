@@ -6,13 +6,28 @@ import android.graphics.Matrix
 import android.media.ExifInterface
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.stastyle.imumapper.data.SurveyCsvFile
+import com.stastyle.imumapper.data.SurveyLoad
+import com.stastyle.imumapper.data.SurveyStore
 import com.stastyle.imumapper.data.TripFiles
 import com.stastyle.imumapper.data.TripRepository
 import com.stastyle.imumapper.data.db.PathResultEntity
 import com.stastyle.imumapper.data.db.TripEntity
 import com.stastyle.imumapper.data.db.TripStatus
 import com.stastyle.imumapper.pipeline.core.PathResult
+import com.stastyle.imumapper.pipeline.log.LogReader
 import com.stastyle.imumapper.pipeline.post.RawPath
+import com.stastyle.imumapper.pipeline.survey.Detail
+import com.stastyle.imumapper.pipeline.survey.LegTotals
+import com.stastyle.imumapper.pipeline.survey.NorthSolution
+import com.stastyle.imumapper.pipeline.survey.NorthSolver
+import com.stastyle.imumapper.pipeline.survey.ReferenceLine
+import com.stastyle.imumapper.pipeline.survey.StationKind
+import com.stastyle.imumapper.pipeline.survey.SurveyCsv
+import com.stastyle.imumapper.pipeline.survey.SurveyDoc
+import com.stastyle.imumapper.pipeline.survey.SurveyStations
+import com.stastyle.imumapper.pipeline.survey.Traverse
+import com.stastyle.imumapper.pipeline.survey.TraverseLeg
 import com.stastyle.imumapper.process.TripProcessor
 import com.stastyle.imumapper.render.Bounds
 import com.stastyle.imumapper.render.CameraPreset
@@ -20,6 +35,10 @@ import com.stastyle.imumapper.render.ColorMode
 import com.stastyle.imumapper.render.OrbitCamera
 import com.stastyle.imumapper.render.SceneMarker
 import com.stastyle.imumapper.render.SceneOptions
+import com.stastyle.imumapper.render.SurveyHit
+import com.stastyle.imumapper.render.SurveyLayer
+import com.stastyle.imumapper.ui.calibration.CalibrationMath
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,8 +46,42 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
+
+/** Snackbar text from a survey edit; Undo is offered when [undoable]. */
+data class SurveyMessage(val text: String, val undoable: Boolean)
+
+/** A written CSV waiting for the share sheet; the screen builds the Intent (SurveyShare), keeping this JVM-testable. */
+data class SurveyCsvShare(val file: File, val subject: String, val text: String)
+
+/** Everything the survey panel, sheets and layer need, rebuilt after each change. */
+data class SurveyUi(
+    val state: SurveyState,
+    val geometry: SurveyGeometry,
+    val north: NorthSolution,
+    /** Suffix M when true, R when false (NorthSolver.isMagnetic). */
+    val magnetic: Boolean,
+    val readout: SurveyReadout?,
+    val legs: List<TraverseLeg>,
+    val totals: LegTotals,
+    val layer: SurveyLayer,
+    /** CalibrationMath.northProblem's reason, set on an R run without references, for the banner. */
+    val northWarning: String?,
+    /** The manual rotation was set on another run: ask before using it (ManualRotationDialog). */
+    val askManualRotation: Boolean,
+    /** SurveyOpen.error while read-only. */
+    val error: String?,
+    /** SurveyOpen.canStartOver while read-only: the banner offers Start over. */
+    val canStartOver: Boolean,
+    /**
+     * The raw log's START (LogReader.startNs), which trip.startedAtEpochMs was taken with: the scrubber's
+     * clock counts from it (SurveyFormat.scrubberLabel). Null when raw.imul is missing or unreadable.
+     */
+    val tripStartNs: Long?,
+)
 
 data class ViewerUiState(
     val trip: TripEntity? = null,
@@ -53,6 +106,13 @@ data class ViewerUiState(
     val photoTitle: String = "",
     val photoLoading: Boolean = false,
     val photoError: String? = null,
+    /** Plan view, orbit locked, the survey panel instead of the stats panel. */
+    val surveyMode: Boolean = false,
+    /** Null while Survey mode is off or its file is loading. */
+    val survey: SurveyUi? = null,
+    val surveyMessage: SurveyMessage? = null,
+    /** One-shot: the screen hands it to the share sheet, then calls consumeCsvShare. */
+    val pendingCsv: SurveyCsvShare? = null,
 ) {
     /** What the canvas draws as the main path and what the stats panel describes. */
     val shownResult: PathResult? get() = if (showRaw) rawResult ?: result else result
@@ -62,6 +122,12 @@ data class ViewerUiState(
      * run, the corrected path of the same run so the two can be compared in place.
      */
     val shownOverlay: PathResult? get() = overlayResult ?: if (showRaw && rawResult != null) result else null
+
+    /** What the canvas draws: in Survey mode the north-corrected path. */
+    val sceneResult: PathResult? get() = if (surveyMode) survey?.geometry?.framed ?: shownResult else shownResult
+
+    /** Survey mode hides the overlay run. */
+    val sceneOverlay: PathResult? get() = if (surveyMode) null else shownOverlay
 
     /** True when the selected run predates stored raw paths, so the raw toggle can say why it changes nothing. */
     val rawUnavailable: Boolean get() = result != null && result.pipelineVersion < RAW_POINTS_VERSION
@@ -82,6 +148,9 @@ class ViewerViewModel(
     private val trips: TripRepository,
     private val files: TripFiles,
     private val tripProcessor: TripProcessor,
+    private val surveys: SurveyStore = SurveyStore(files),
+    /** Tests pass Dispatchers.Unconfined so file work finishes inside the call. */
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : ViewModel() {
 
     private val _ui = MutableStateFlow(ViewerUiState())
@@ -101,6 +170,44 @@ class ViewerViewModel(
     /** The first result to arrive is framed once the viewport size is known. */
     private var needsFit = true
     private var currentBounds: Bounds = Bounds.EMPTY
+    /** Height of the survey panel over the bottom of the canvas, as last measured. */
+    private var surveyPanelPx = 0f
+    /** What fits keep the path clear of: the survey panel in Survey mode, nothing outside it (as before). */
+    private val bottomInset: Float get() = if (_ui.value.surveyMode) surveyPanelPx else 0f
+    /** The camera the last fit or preset produced; while the view is still that one, a panel change refits. */
+    private var lastFit: OrbitCamera? = null
+
+    // Survey mode. Declared before init, which may already publish a loaded run.
+    /** Kept after leaving Survey mode, so undo survives a re-entry; null until the mode first opens. */
+    private var surveyState: SurveyState? = null
+    /** The geometry last published (already rotated); reused while the shown result and the angle stay. */
+    private var surveyGeometry: SurveyGeometry? = null
+    /** What the snapshot computed over the whole path; reused until the doc, run, result or raw view changes. */
+    private var surveyBase: SurveyBase? = null
+    /** The last readout; a stretch's refits the path, so it is reused until the selection changes. */
+    private var readoutCache: ReadoutCache? = null
+    /** The drawn result the bounds were last taken from; they copy every point, so only a new one updates them. */
+    private var boundsSource: PathResult? = null
+    /** Why the survey is read-only (survey.json unreadable, or from a newer app); shown while it is. */
+    private var surveyError: String? = null
+    /** SurveyOpen.canStartOver: only an unreadable file may be moved aside; a newer app's file is kept in place. */
+    private var surveyCanStartOver = false
+    /** A Start over is moving survey.json aside; a second one must not move the survey it then seeds. */
+    private var startingOver = false
+    /** The raw log's START, read with survey.json; see SurveyUi.tripStartNs. */
+    private var tripStartNs: Long? = null
+    /** "Not now" on the manual-rotation prompt, for this run and this screen only. */
+    private var manualPromptDismissedRunId: Int? = null
+    /**
+     * The states either side of the last map tap. The canvas applies a tap at once, so when it turns out
+     * to be the first of a double-tap, [surveyDoubleTap] takes back its selection while the state is
+     * still [afterTap]; any change since has replaced that object, and then nothing is taken back.
+     */
+    private var beforeTap: SurveyState? = null
+    private var afterTap: SurveyState? = null
+    /** The newest doc not yet written; saves run one at a time and skip docs a later edit overtook. */
+    private var docToSave: SurveyDoc? = null
+    private val saveLock = Mutex()
 
     init {
         viewModelScope.launch {
@@ -187,7 +294,7 @@ class ViewerViewModel(
             return
         }
         viewModelScope.launch {
-            val loaded = withContext(Dispatchers.IO) {
+            val loaded = withContext(ioDispatcher) {
                 runCatching { PathResult.fromJson(files.resultFile(tripId, runId).readText()) }
             }
             loaded.onSuccess { result ->
@@ -208,7 +315,8 @@ class ViewerViewModel(
             if (_ui.value.selectedRunId != runId) return
             val raw = if (_ui.value.showRaw) rawViewOf(runId, result) else null
             _ui.update { it.copy(result = result, rawResult = raw, error = null) }
-            updateBounds()
+            // In Survey mode the stations are placed again on the new run; either way the bounds follow.
+            publishSurvey()
             if (needsFit) fitIfPossible()
         }
     }
@@ -219,9 +327,9 @@ class ViewerViewModel(
         return rawCache.getOrPut(runId) { RawPath.view(result) }
     }
 
-    /** Fit and presets frame the path on screen, so they follow the raw toggle. */
+    /** Fit and presets frame the path on screen, so they follow the raw toggle and Survey mode's north. */
     private fun updateBounds() {
-        val shown = _ui.value.shownResult ?: return
+        val shown = _ui.value.sceneResult ?: return
         currentBounds = Bounds.of(shown.points.map { p -> p.p })
     }
 
@@ -239,7 +347,8 @@ class ViewerViewModel(
 
     /**
      * Switches between the corrected path and the one before loop closure and smoothing. The
-     * selected marker is dropped because its position belongs to the other path.
+     * selected marker is dropped because its position belongs to the other path; survey stations
+     * are stored by time, so they follow.
      */
     fun toggleRaw() {
         val state = _ui.value
@@ -248,7 +357,7 @@ class ViewerViewModel(
         val result = state.result
         val raw = if (show && runId != null && result != null) rawViewOf(runId, result) else null
         _ui.update { it.copy(showRaw = show, rawResult = raw, selectedMarker = null) }
-        updateBounds()
+        publishSurvey()
     }
 
     fun selectMarker(marker: SceneMarker?) = _ui.update { it.copy(selectedMarker = marker) }
@@ -263,9 +372,27 @@ class ViewerViewModel(
         if (changed && needsFit) fitIfPossible()
     }
 
+    /**
+     * The survey panel's measured height. Fits and presets frame the plan above it in Survey mode, and
+     * when it changes there (a selection's readout grows it) the view follows: a view nobody moved since
+     * the last fit is fitted again, and a moved one keeps its zoom and moves by half the change.
+     */
+    fun setBottomInset(heightPx: Float) {
+        val old = bottomInset
+        surveyPanelPx = heightPx.coerceAtLeast(0f)
+        val now = bottomInset
+        if (now == old || viewportHeight <= 0f) return
+        if (_camera.value == lastFit) {
+            fitToPath()
+        } else {
+            _camera.update { it.shiftedForInset(old, now, viewportHeight) }
+        }
+    }
+
     private fun fitIfPossible() {
         if (viewportWidth <= 0f || _ui.value.result == null) return
-        _camera.update { it.fitted(currentBounds, viewportWidth, viewportHeight) }
+        _camera.update { it.fitted(currentBounds, viewportWidth, viewportHeight, bottomInset) }
+        lastFit = _camera.value
         needsFit = false
     }
 
@@ -284,13 +411,459 @@ class ViewerViewModel(
 
     fun fitToPath() {
         if (viewportWidth <= 0f) return
-        _camera.update { it.fitted(currentBounds, viewportWidth, viewportHeight) }
+        _camera.update { it.fitted(currentBounds, viewportWidth, viewportHeight, bottomInset) }
+        lastFit = _camera.value
     }
 
     fun applyPreset(preset: CameraPreset) {
         if (viewportWidth <= 0f) return
-        _camera.update { it.withPreset(preset, currentBounds, viewportWidth, viewportHeight) }
+        _camera.update { it.withPreset(preset, currentBounds, viewportWidth, viewportHeight, bottomInset) }
+        lastFit = _camera.value
     }
+
+    // --- survey mode ---
+
+    /**
+     * Enters or leaves Survey mode. Leaving keeps the camera where it is and the survey in memory, so
+     * undo survives a re-entry. The first entry reads survey.json (seeding and saving it when the trip
+     * has none yet), then shows the north-corrected plan from the top.
+     */
+    fun toggleSurvey() {
+        if (_ui.value.surveyMode) {
+            // The snackbar's Undo works only in Survey mode, so a pending message leaves with it.
+            _ui.update { it.copy(surveyMode = false, surveyMessage = null) }
+            // A tap from before leaving is never the first of a double-tap after re-entering.
+            beforeTap = null
+            afterTap = null
+            publishSurvey()
+            return
+        }
+        val shown = _ui.value.shownResult
+        if (shown == null || shown.points.size < 2) {
+            _ui.update { it.copy(surveyMessage = SurveyMessage("Nothing to measure yet", undoable = false)) }
+            return
+        }
+        _ui.update { it.copy(surveyMode = true, selectedMarker = null) }
+        if (surveyState != null) {
+            showSurvey()
+            return
+        }
+        viewModelScope.launch {
+            val (load, startNs) = withContext(ioDispatcher) { surveys.load(tripId) to readTripStartNs() }
+            // Leaving while the file was read, or a second entry that got there first, makes this load stale.
+            if (!_ui.value.surveyMode || surveyState != null) return@launch
+            tripStartNs = startNs
+            if (openSurvey(load)) showSurvey()
+        }
+    }
+
+    /**
+     * The read-only banner's Start over. survey.json is renamed to survey.json.bad-<n>, so the unreadable
+     * file is kept and never overwritten, and a new survey is seeded and saved as on a first entry. The
+     * camera stays where it is. Nothing happens unless the survey is read-only because its file could not
+     * be read: a newer app's file is fine and stays where that app looks for it.
+     */
+    fun startSurveyOver() {
+        val state = surveyState
+        if (!_ui.value.surveyMode || state == null || !state.readOnly || !surveyCanStartOver || startingOver) return
+        startingOver = true
+        viewModelScope.launch {
+            try {
+                val kept = runCatching { withContext(ioDispatcher) { surveys.setAside(tripId) } }.getOrElse { e ->
+                    val message = SurveyMessage("Could not start over: ${describe(e)}", undoable = false)
+                    _ui.update { it.copy(surveyMessage = message) }
+                    return@launch
+                }
+                // The file is gone either way, so a survey left in memory would be the unreadable one.
+                surveyState = null
+                surveyError = null
+                surveyCanStartOver = false
+                beforeTap = null
+                afterTap = null
+                if (_ui.value.surveyMode) openSurvey(SurveyLoad.Missing)
+                publishSurvey()
+                val text = if (kept != null) {
+                    "Started over. The unreadable file is kept as ${kept.name}"
+                } else {
+                    "Started over"
+                }
+                _ui.update { it.copy(surveyMessage = SurveyMessage(text, undoable = false)) }
+            } finally {
+                startingOver = false
+            }
+        }
+    }
+
+    /**
+     * Opens [load] on the shown run, saving a newly seeded doc; false when nothing is shown. A new doc has
+     * no correction yet, so it is seeded on the uncorrected path.
+     */
+    private fun openSurvey(load: SurveyLoad): Boolean {
+        val ui = _ui.value
+        val current = ui.shownResult?.takeIf { it.points.isNotEmpty() } ?: return false
+        val runId = ui.selectedRunId ?: return false
+        val geometry = SurveyGeometry.of(current, runId, raw = ui.showRaw && ui.rawResult != null)
+        val opened = SurveyController.open(load, geometry)
+        surveyGeometry = geometry
+        surveyState = opened.state
+        surveyError = opened.error
+        surveyCanStartOver = opened.canStartOver
+        if (opened.seeded) persist(opened.state.doc)
+        return true
+    }
+
+    /** A tap in Survey mode: a station extends the chain, the path selects a stretch, a miss does nothing. */
+    fun surveyTap(hit: SurveyHit) {
+        beforeTap = surveyState
+        changeSurvey { state, geometry ->
+            when (hit) {
+                is SurveyHit.OnStation -> SurveyController.tapStation(state, hit.stationId)
+                is SurveyHit.OnStations -> SurveyController.tapStations(state, hit.stationIds)
+                is SurveyHit.OnPath -> SurveyController.tapPath(state, geometry, hit.distanceM)
+                SurveyHit.Miss -> state
+            }
+        }
+        afterTap = surveyState
+    }
+
+    /**
+     * Double-tap in Survey mode fits the plan. Its first tap was already applied as a tap, so the
+     * selection and cursor that tap changed go back first: fitting never swaps a chain for a stretch or
+     * adds a station to it.
+     */
+    fun surveyDoubleTap() {
+        val before = beforeTap
+        val after = afterTap
+        beforeTap = null
+        afterTap = null
+        val state = surveyState
+        if (_ui.value.surveyMode && before != null && state != null && state === after && after !== before) {
+            applySurvey(state.copy(selection = before.selection, cursorNs = before.cursorNs))
+        }
+        fitToPath()
+    }
+
+    fun clearSurveySelection() = changeSurvey { state, _ -> SurveyController.clearSelection(state) }
+
+    /** The scrubber: [distanceM] along the shown path. */
+    fun setSurveyCursor(distanceM: Double) =
+        changeSurvey { state, geometry -> SurveyController.setCursor(state, geometry, distanceM) }
+
+    /** The scrubber's arrows: [delta] path points back or forward. */
+    fun stepSurveyCursor(delta: Int) =
+        changeSurvey { state, geometry -> SurveyController.stepCursor(state, geometry, delta) }
+
+    /** A row of the Legs table. */
+    fun selectLeg(fromId: Int, toId: Int) = changeSurvey { state, _ -> SurveyController.selectLeg(state, fromId, toId) }
+
+    /** A long press on the path adds a station there. */
+    fun addStationAt(distanceM: Double) {
+        val geometry = surveyGeometry ?: return
+        addStationAtTime(geometry.timeline.timeAtDistance(distanceM))
+    }
+
+    /** "+ Station" adds one at the scrubber's cursor, which can pick either pass of an out-and-back. */
+    fun addStationAtCursor() {
+        val state = surveyState ?: return
+        addStationAtTime(state.cursorNs)
+    }
+
+    /** "Move here": the one selected corner or user station goes to the cursor, unless another stands there. */
+    fun moveSelectedStationToCursor() {
+        val state = surveyState ?: return
+        val id = SurveyController.movableStationId(state) ?: return
+        val name = state.doc.stations.firstOrNull { it.id == id }?.name ?: return
+        editSurvey(
+            message = { "Moved $name to the cursor" },
+            refusal = { s, geometry ->
+                SurveyController.stationAt(s, geometry, s.cursorNs, exceptId = id)
+                    ?.let { "$name not moved: ${it.name} is already here" }
+            },
+        ) { s, geometry -> SurveyController.moveStation(s, geometry, id, s.cursorNs) }
+    }
+
+    fun renameStation(stationId: Int, name: String) =
+        editSurvey { state, _ -> SurveyController.renameStation(state, stationId, name) }
+
+    fun deleteStation(stationId: Int) {
+        val name = surveyState?.doc?.stations?.firstOrNull { it.id == stationId }?.name ?: return
+        editSurvey({ "Deleted $name" }) { state, _ -> SurveyController.deleteStation(state, stationId) }
+    }
+
+    /** Regenerates the automatic corners; the message says how many the new level gave. */
+    fun setDetail(detail: Detail) = editSurvey({ next ->
+        val corners = next.doc.stations.count { it.kind == StationKind.CORNER }
+        "${SurveyFormat.detailLabel(detail)}: ${SurveyFormat.corners(corners)}"
+    }) { state, geometry -> SurveyController.setDetail(state, geometry, detail) }
+
+    /**
+     * For the Detail dialog; empty outside Survey mode, even though leaving keeps the survey in memory
+     * for a re-entry.
+     */
+    fun cornerCounts(): Map<Detail, Int> {
+        if (!_ui.value.surveyMode) return emptyMap()
+        val state = surveyState ?: return emptyMap()
+        val geometry = surveyGeometry ?: return emptyMap()
+        return SurveyController.cornerCounts(state, geometry)
+    }
+
+    /** The top bar's and the snackbar's Undo. */
+    fun surveyUndo() {
+        if (!_ui.value.surveyMode) return
+        val state = surveyState ?: return
+        val next = SurveyController.undo(state)
+        _ui.update { it.copy(surveyMessage = null) }
+        if (next !== state) applySurvey(next)
+    }
+
+    fun dismissSurveyMessage() = _ui.update { it.copy(surveyMessage = null) }
+
+    /** What the Set azimuth dialog shows for a bearing on the current pair or stretch. */
+    fun azimuthPreview(bearingDeg: Double, backBearing: Boolean, line: ReferenceLine): AzimuthPreview? {
+        val state = surveyState ?: return null
+        val geometry = surveyGeometry ?: return null
+        return SurveyController.azimuthPreview(state, geometry, bearingDeg, backBearing, line)
+    }
+
+    fun addReference(bearingDeg: Double, backBearing: Boolean, line: ReferenceLine) =
+        editSurvey({ "Compass reading added" }) { state, geometry ->
+            SurveyController.addReference(state, geometry, bearingDeg, backBearing, line)
+        }
+
+    fun deleteReference(referenceId: Int) =
+        editSurvey({ "Compass reading deleted" }) { state, _ -> SurveyController.deleteReference(state, referenceId) }
+
+    /** The North sheet's steppers start from the rotation in use, which is what the user sees. */
+    fun nudgeRotation(deltaDeg: Double) {
+        val current = _ui.value.survey?.north?.rotationDeg ?: return
+        setRotation(current + deltaDeg)
+    }
+
+    /** A manual rotation, tagged with the shown run. */
+    fun setRotation(rotationDeg: Double) =
+        editSurvey { state, geometry -> SurveyController.setManualRotation(state, rotationDeg, geometry.runId) }
+
+    fun resetNorth() = editSurvey({ "North reset" }) { state, _ -> SurveyController.resetNorth(state) }
+
+    /** The manual-rotation prompt: Apply tags the rotation with this run, Not now hides it for this run. */
+    fun answerManualRotation(apply: Boolean) {
+        if (apply) {
+            editSurvey { state, geometry -> SurveyController.confirmManualRotation(state, geometry.runId) }
+        } else {
+            manualPromptDismissedRunId = surveyGeometry?.runId
+            publishSurvey()
+        }
+    }
+
+    /**
+     * Writes the traverse as CSV into the export cache and hands it to the screen for the share sheet.
+     * The numbers are the ones on screen: the shown run, raw or not, north-corrected.
+     */
+    fun exportSurveyCsv() {
+        val survey = _ui.value.survey ?: return
+        val geometry = survey.geometry
+        val tripName = _ui.value.trip?.name ?: "Trip $tripId"
+        val origin = geometry.framed.points.first().p
+        val text = SurveyCsv.text(survey.legs, geometry.timeline.startNs, origin, survey.magnetic)
+        val fileName = SurveyCsvFile.fileName(tripName, tripId, geometry.runId, geometry.raw)
+        val shareText = SurveyFormat.shareText(tripName, geometry.runId, geometry.raw, survey.north)
+        viewModelScope.launch {
+            runCatching { withContext(ioDispatcher) { SurveyCsvFile.write(files.exportDir(), fileName, text) } }
+                .onSuccess { file ->
+                    _ui.update { it.copy(pendingCsv = SurveyCsvShare(file, "IMU Mapper survey: $tripName", shareText)) }
+                }
+                .onFailure { e ->
+                    val message = SurveyMessage("Could not export the CSV: ${describe(e)}", undoable = false)
+                    _ui.update { it.copy(surveyMessage = message) }
+                }
+        }
+    }
+
+    fun consumeCsvShare() = _ui.update { it.copy(pendingCsv = null) }
+
+    /** Refused with a message naming the station already there, such as Start under the untouched cursor. */
+    private fun addStationAtTime(tNs: Long) {
+        val name = SurveyStations.nextUserName(surveyState?.doc?.stations ?: return)
+        editSurvey(
+            message = { "Added $name" },
+            refusal = { state, geometry ->
+                SurveyController.stationAt(state, geometry, tNs)?.let { "No station added: ${it.name} is already here" }
+            },
+        ) { state, geometry -> SurveyController.addStation(state, geometry, tNs) }
+    }
+
+    private fun showSurvey() {
+        publishSurvey()
+        applyPreset(CameraPreset.TOP)
+    }
+
+    /** The raw log's START, reading only the log's first records; null when the log is missing or unreadable. */
+    private fun readTripStartNs(): Long? = runCatching {
+        val log = files.rawLog(tripId)
+        if (log.isFile) log.inputStream().use { LogReader.startNs(it) } else null
+    }.getOrNull()
+
+    /** Runs a selection or cursor change; these need no file and work read-only too. */
+    private fun changeSurvey(change: (SurveyState, SurveyGeometry) -> SurveyState) {
+        if (!_ui.value.surveyMode) return
+        val state = surveyState ?: return
+        val geometry = surveyGeometry ?: return
+        val next = change(state, geometry)
+        if (next !== state) applySurvey(next)
+    }
+
+    /**
+     * Runs one doc edit. Read-only refuses it with a message, and so does a [refusal] that gives one;
+     * an edit the controller refused otherwise leaves everything as it was; a real one is saved, and
+     * [message] (given the new state) offers Undo.
+     */
+    private fun editSurvey(
+        message: (SurveyState) -> String? = { null },
+        refusal: (SurveyState, SurveyGeometry) -> String? = { _, _ -> null },
+        edit: (SurveyState, SurveyGeometry) -> SurveyState,
+    ) {
+        if (!_ui.value.surveyMode) return
+        val state = surveyState ?: return
+        val geometry = surveyGeometry ?: return
+        val refused = if (state.readOnly) READ_ONLY_MESSAGE else refusal(state, geometry)
+        if (refused != null) {
+            _ui.update { it.copy(surveyMessage = SurveyMessage(refused, undoable = false)) }
+            return
+        }
+        val next = edit(state, geometry)
+        if (next === state) return
+        applySurvey(next, message(next)?.let { SurveyMessage(it, undoable = true) })
+    }
+
+    /** Stores [next], saves its doc when an edit changed it, and republishes. */
+    private fun applySurvey(next: SurveyState, message: SurveyMessage? = null) {
+        val previous = surveyState
+        surveyState = next
+        val docChanged = previous != null && next.doc !== previous.doc
+        if (docChanged && !next.readOnly) persist(next.doc)
+        publishSurvey()
+        // A doc edit replaces the last message, so the snackbar's Undo always undoes the edit it names.
+        if (docChanged) _ui.update { it.copy(surveyMessage = message) }
+    }
+
+    /**
+     * Saves the whole doc after every edit. Saves run one at a time, and one that starts after a newer
+     * edit writes the newest doc, so the file never goes back to an older state.
+     */
+    private fun persist(doc: SurveyDoc) {
+        docToSave = doc
+        viewModelScope.launch {
+            saveLock.withLock {
+                val latest = docToSave ?: return@withLock
+                docToSave = null
+                runCatching { withContext(ioDispatcher) { surveys.save(tripId, latest) } }.onFailure { e ->
+                    val message = SurveyMessage("Could not save the survey: ${describe(e)}", undoable = false)
+                    _ui.update { it.copy(surveyMessage = message) }
+                }
+            }
+        }
+    }
+
+    /**
+     * Rebuilds the survey snapshot for what is shown now (null outside Survey mode). The bounds copy every
+     * point, so they are recomputed only when a different result is drawn, not on each cursor move.
+     */
+    private fun publishSurvey() {
+        _ui.update { it.copy(survey = surveySnapshot()) }
+        val drawn = _ui.value.sceneResult
+        if (drawn !== boundsSource) {
+            boundsSource = drawn
+            updateBounds()
+        }
+    }
+
+    /**
+     * The survey as the panel and the layer need it, on the shown run turned onto the solved north. What
+     * walks the whole path comes from [surveyBase] and the readout from [readoutCache], so a cursor move
+     * rebuilds only the layer.
+     */
+    private fun surveySnapshot(): SurveyUi? {
+        val ui = _ui.value
+        val state = surveyState
+        val shown = ui.shownResult
+        val runId = ui.selectedRunId
+        if (!ui.surveyMode || state == null || shown == null || runId == null || shown.points.isEmpty()) return null
+        val raw = ui.showRaw && ui.rawResult != null
+        val base = surveyBase?.takeIf { it.isFor(state.doc, shown, runId, raw) }
+            ?: buildSurveyBase(state.doc, shown, runId, raw).also { surveyBase = it }
+        val geometry = base.geometry
+        val readout = readoutCache?.takeIf { it.base === base && it.selection == state.selection }
+            ?: ReadoutCache(base, state.selection, SurveyController.readout(state, geometry)).also { readoutCache = it }
+        val selection = SurveyController.layerSelection(state, geometry)
+        return SurveyUi(
+            state = state,
+            geometry = geometry,
+            north = base.north,
+            magnetic = base.magnetic,
+            readout = readout.value,
+            legs = base.legs,
+            totals = base.totals,
+            layer = SurveyLayer.build(geometry.timeline, state.doc.stations, selection, state.cursorNs),
+            northWarning = base.northWarning,
+            // Applying it is an edit, so a read-only survey (a newer app's doc may carry one) does not ask.
+            askManualRotation = !state.readOnly && NorthSolver.manualNeedsConfirmation(state.doc, runId) &&
+                manualPromptDismissedRunId != runId,
+            error = if (state.readOnly) surveyError else null,
+            canStartOver = state.readOnly && surveyCanStartOver,
+            tripStartNs = tripStartNs,
+        )
+    }
+
+    /** The north solve, the framed path, the legs and their totals for [doc] on the shown run. */
+    private fun buildSurveyBase(doc: SurveyDoc, shown: PathResult, runId: Int, raw: Boolean): SurveyBase {
+        // The run id is checked too: the state flow keeps the old instance when a new run's result is equal.
+        val unturned = surveyGeometry?.takeIf { it.shown === shown && it.runId == runId && it.raw == raw }
+            ?: SurveyGeometry.of(shown, runId, raw)
+        val north = NorthSolver.solve(doc, unturned.plain, runId)
+        val geometry = unturned.rotated(north.rotationDeg)
+        surveyGeometry = geometry
+        val magnetic = NorthSolver.isMagnetic(shown.diagnostics, north)
+        val legs = Traverse.legs(doc.stations, geometry.timeline)
+        return SurveyBase(
+            doc = doc,
+            shown = shown,
+            runId = runId,
+            raw = raw,
+            geometry = geometry,
+            north = north,
+            magnetic = magnetic,
+            legs = legs,
+            totals = Traverse.totals(legs),
+            northWarning = if (!magnetic && doc.references.isEmpty()) {
+                CalibrationMath.northProblem(shown.diagnostics)
+            } else {
+                null
+            },
+        )
+    }
+
+    /**
+     * The parts of the survey snapshot that walk the whole path. The doc and the shown result are compared
+     * as instances: an edit or a new run always brings a new one, and an equal copy costs one rebuild at most.
+     */
+    private class SurveyBase(
+        val doc: SurveyDoc,
+        val shown: PathResult,
+        val runId: Int,
+        val raw: Boolean,
+        val geometry: SurveyGeometry,
+        val north: NorthSolution,
+        val magnetic: Boolean,
+        val legs: List<TraverseLeg>,
+        val totals: LegTotals,
+        val northWarning: String?,
+    ) {
+        fun isFor(doc: SurveyDoc, shown: PathResult, runId: Int, raw: Boolean): Boolean =
+            doc === this.doc && shown === this.shown && runId == this.runId && raw == this.raw
+    }
+
+    /** A readout and what it was computed from. */
+    private class ReadoutCache(val base: SurveyBase, val selection: SurveySelection, val value: SurveyReadout?)
 
     // --- photos ---
 
@@ -304,7 +877,7 @@ class ViewerViewModel(
         val request = ++photoRequest
         _ui.update { it.copy(photoLoading = true, photoError = null, photo = null, photoTitle = name) }
         photoJob = viewModelScope.launch {
-            val decoded = withContext(Dispatchers.IO) {
+            val decoded = withContext(ioDispatcher) {
                 runCatching { decodeDownsampled(File(files.photosDir(tripId), name), MAX_PHOTO_PX) }
             }
             // A decode that outlived its dialog (closed, or replaced by another keyframe) must not
@@ -334,6 +907,12 @@ class ViewerViewModel(
         /** Full-width drag on a ~1000 px screen turns the scene by roughly 290 degrees. */
         const val ORBIT_RAD_PER_PX = 0.005
         const val MAX_PHOTO_PX = 1600
+
+        /**
+         * Shown when an edit is tried on a read-only survey. The banner says why (unreadable, or from a newer
+         * app), so this only says that nothing changed.
+         */
+        const val READ_ONLY_MESSAGE = "Survey mode is read-only: survey.json is left as it is"
 
         /** Decodes [file] with a power-of-two sample size so the longest side is at most [maxPx]. */
         fun decodeDownsampled(file: File, maxPx: Int): Bitmap? {

@@ -1,5 +1,6 @@
 package com.stastyle.imumapper.process
 
+import com.stastyle.imumapper.data.AtomicFiles
 import com.stastyle.imumapper.data.CalibrationRepository
 import com.stastyle.imumapper.data.TripFiles
 import com.stastyle.imumapper.data.TripRepository
@@ -100,7 +101,8 @@ class DefaultTripProcessor(
             val result = withContext(computeDispatcher) { processor.process(log, effectiveConfig) }
             val runId = trips.nextRunId(tripId)
             val resultFile = files.resultFile(tripId, runId)
-            withContext(ioDispatcher) { writeAtomically(resultFile, result.toJson()) }
+            // Temp file and rename, so a half-written result never carries a run name.
+            withContext(ioDispatcher) { AtomicFiles.writeText(resultFile, result.toJson()) }
             val entity = PathResultEntity(
                 tripId = tripId,
                 runId = runId,
@@ -145,18 +147,6 @@ class DefaultTripProcessor(
     private fun outOfMemoryMessage(rawFile: File): String {
         val mb = rawFile.length() / 1_000_000.0
         return String.format(Locale.US, "Not enough memory to process this trip (raw log %.0f MB)", mb)
-    }
-
-    /** Write to a sibling temp file then rename so a half-written result never carries a run name. */
-    private fun writeAtomically(target: File, text: String) {
-        target.parentFile?.mkdirs()
-        val tmp = File(target.parentFile, target.name + ".tmp")
-        tmp.writeText(text)
-        if (!tmp.renameTo(target)) {
-            // Rename can fail across some file systems; a plain copy is the fallback.
-            target.writeText(text)
-            tmp.delete()
-        }
     }
 
     private fun defaultLabel(processor: Processor, log: RawLog): String = when (processor) {

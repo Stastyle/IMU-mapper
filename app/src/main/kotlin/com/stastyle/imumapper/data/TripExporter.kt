@@ -18,9 +18,9 @@ import java.util.Locale
 data class TripExport(val zip: File, val uri: Uri, val shareIntent: Intent)
 
 /**
- * Packs one trip (raw log, every result, photos, `trip.json`) into a ZIP under `cache/export/` and
- * hands it to other apps through the `${applicationId}.fileprovider` authority declared in the
- * manifest (the `cache` path covers the export directory).
+ * Packs one trip (raw log, every result, photos, `survey.json` when present, `trip.json`) into a ZIP
+ * under `cache/export/` and hands it to other apps through the `${applicationId}.fileprovider`
+ * authority declared in the manifest (the `cache` path covers the export directory).
  */
 class TripExporter(
     context: Context,
@@ -87,17 +87,12 @@ class TripExporter(
         fun authority(context: Context): String = "${context.packageName}.fileprovider"
 
         /**
-         * `<name>-<yyyyMMdd-HHmm>-<id>.zip` with the name reduced to file-system-safe ASCII, so the
-         * receiver sees something meaningful and two trips never collide.
+         * `<name>-<yyyyMMdd-HHmm>-<id>.zip` with the name made file-system safe by [ExportNames.safeStem],
+         * so the receiver sees something meaningful and two trips never collide.
          */
         fun exportFileName(tripName: String, startedAtEpochMs: Long, tripId: Long): String {
-            val safe = tripName.map { if (it.isLetterOrDigit()) it else '_' }
-                .joinToString("")
-                .trim('_')
-                .take(40)
-                .ifEmpty { "trip" }
             val stamp = SimpleDateFormat("yyyyMMdd-HHmm", Locale.US).format(Date(startedAtEpochMs))
-            return "$safe-$stamp-$tripId.${TripArchive.ZIP_EXTENSION}"
+            return "${ExportNames.safeStem(tripName)}-$stamp-$tripId.${TripArchive.ZIP_EXTENSION}"
         }
     }
 }

@@ -104,6 +104,26 @@ object LogReader {
     }
 
     /**
+     * The tNs of the log's START event, which LogMeta.startedAtEpochMs was taken with. The recorder
+     * writes START right after the meta record, before any sample, so this stops there and reads one
+     * buffer of a log of any size. Null when the first record after the meta is not START.
+     * @throws LogFormatException if the header is not a valid IMUL header.
+     */
+    fun startNs(input: InputStream): Long? {
+        scan(input, readPayload = true) { type, payload, len ->
+            if (type == LogFormat.T_META) return@scan
+            val b = ByteBuffer.wrap(payload, 0, len).order(ByteOrder.LITTLE_ENDIAN)
+            val event = try {
+                decode(type, b, len) as? EventRecord
+            } catch (e: RuntimeException) {
+                null
+            }
+            return if (event?.kind == EventKind.START) event.tNs else null
+        }
+        return null
+    }
+
+    /**
      * Checks the file header, then calls [onRecord] for every complete record with its type and,
      * when [readPayload], its payload bytes (valid up to len; the array is reused). Returns true
      * when the stream ended inside a record.

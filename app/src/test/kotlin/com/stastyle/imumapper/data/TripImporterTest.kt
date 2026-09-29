@@ -6,6 +6,9 @@ import com.stastyle.imumapper.data.db.TripStatus
 import com.stastyle.imumapper.pipeline.core.CarryPosition
 import com.stastyle.imumapper.pipeline.core.TripMode
 import com.stastyle.imumapper.pipeline.log.LogReader
+import com.stastyle.imumapper.pipeline.survey.Station
+import com.stastyle.imumapper.pipeline.survey.StationKind
+import com.stastyle.imumapper.pipeline.survey.SurveyDoc
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
@@ -76,6 +79,7 @@ class TripImporterTest {
         assertEquals(sampleResult().toJson(), extracted.results[0].readText())
         assertEquals(listOf("p.jpg"), extracted.photos.map { it.name })
         assertTrue(File(staging, "photos/p.jpg").readBytes().contentEquals(byteArrayOf(9)))
+        assertNull(extracted.survey, "a trip without a survey brings none")
 
         // The unpacked log is a readable IMUL file with its meta intact.
         val log = LogReader.read(raw)
@@ -91,6 +95,7 @@ class TripImporterTest {
         val extracted = src.inputStream().use { TripArchive.extractRawLog(it, staging) }
         assertNull(extracted.manifest)
         assertTrue(extracted.results.isEmpty())
+        assertNull(extracted.survey)
         assertTrue(assertNotNull(extracted.rawLog).readBytes().contentEquals(src.readBytes()))
     }
 
@@ -137,6 +142,41 @@ class TripImporterTest {
         assertNull(TripArchive.runIdOf("run-x.json"))
         assertNull(TripArchive.runIdOf("notes.json"))
         assertNull(TripArchive.runIdOf("run-1.json.tmp"))
+    }
+
+    @Test
+    fun surveyIsExtractedWithItsBytes() {
+        val trip = TripEntity(
+            id = 3, name = "Corridor", mode = TripMode.POCKET, carryPosition = CarryPosition.CHEST,
+            startedAtEpochMs = 123L,
+        )
+        writeSampleLog(files.rawLog(3))
+        // A Hebrew station name ("cave"), so the bytes include multi-byte UTF-8.
+        val survey = SurveyDoc(
+            stations = listOf(Station(id = 1, kind = StationKind.USER, name = "\u05DE\u05E2\u05E8\u05D4", tNs = 5L)),
+        ).toJson().toByteArray(Charsets.UTF_8)
+        files.surveyFile(3).writeBytes(survey)
+        val out = ByteArrayOutputStream()
+        TripArchive.write(trip, emptyList(), files.tripDir(3), out)
+
+        val staging = File(files.importDir(), "s")
+        val extracted = TripArchive.extractZip(out.toByteArray().inputStream(), staging)
+
+        val file = assertNotNull(extracted.survey)
+        assertEquals(File(staging, "survey.json"), file)
+        assertTrue(file.readBytes().contentEquals(survey))
+    }
+
+    @Test
+    fun surveyIsTakenOnlyFromTheArchiveRoot() {
+        val bytes = zipOf(
+            "raw.imul" to "IMUL",
+            "other/survey.json" to "{}",
+            "survey.json.tmp" to "{}",
+        )
+        val extracted = TripArchive.extractZip(bytes.inputStream(), File(files.importDir(), "s"))
+        assertNull(extracted.survey)
+        assertEquals("IMUL", extracted.rawLog?.readText())
     }
 
     private fun zipOf(vararg entries: Pair<String, String>): ByteArray {

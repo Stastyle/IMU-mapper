@@ -118,23 +118,65 @@ data class OrbitCamera(
         return copy(target = target + shift)
     }
 
-    /** Keeps the orientation and moves the target and distance so the whole of [bounds] is on screen. */
-    fun fitted(bounds: Bounds, viewportWidthPx: Float, viewportHeightPx: Float): OrbitCamera {
+    /**
+     * Keeps the orientation and moves the target and distance so the whole of [bounds] is on screen.
+     * [bottomInsetPx] is the height of a panel over the bottom of the viewport: the bounds are then
+     * framed and centred in the band above it (at most [MAX_INSET_FRACTION] of the height counts, so the
+     * band never vanishes). The target stays on the viewport's centre line, where orbit and zoom pivot,
+     * and sits below the bounds' centre by as much as the band's centre is above it.
+     */
+    fun fitted(
+        bounds: Bounds,
+        viewportWidthPx: Float,
+        viewportHeightPx: Float,
+        bottomInsetPx: Float = 0f,
+    ): OrbitCamera {
         val aspect = if (viewportHeightPx > 0f && viewportWidthPx > 0f) viewportWidthPx / viewportHeightPx else 1f
-        val fovX = 2.0 * atan(tan(fovYRad / 2.0) * aspect)
-        val halfFov = min(fovYRad, fovX) / 2.0
-        val d = bounds.radius / sin(halfFov) * FIT_MARGIN
-        return copy(target = bounds.center, distance = d.coerceIn(MIN_DISTANCE, MAX_DISTANCE))
+        // Heights on the image plane at unit depth, up positive: the viewport's top edge, the band's centre
+        // and the band's bottom edge (the viewport's bottom edge when there is no panel).
+        val top = tan(fovYRad / 2.0)
+        val centre = top * insetFraction(bottomInsetPx, viewportHeightPx)
+        val bottom = 2.0 * centre - top
+        val centreAngle = atan(centre)
+        // The bounding sphere is seen off the axis when the band is: it has to clear the band's top and
+        // bottom edges and the viewport's sides. With no panel this is the narrower field of view, as before.
+        val sinMaxHalfAngle = minOf(
+            sin(fovYRad / 2.0 - centreAngle),
+            sin(centreAngle - atan(bottom)),
+            sin(atan(top * aspect)) * cos(centreAngle),
+        )
+        // The eye is bounds.radius / sin(angle) from the bounds' centre; distance is measured along the axis.
+        val d = (bounds.radius / sinMaxHalfAngle * FIT_MARGIN * cos(centreAngle)).coerceIn(MIN_DISTANCE, MAX_DISTANCE)
+        val fit = copy(distance = d)
+        return fit.copy(target = bounds.center - fit.up() * (centre * d))
     }
 
-    fun withPreset(preset: CameraPreset, bounds: Bounds, viewportWidthPx: Float, viewportHeightPx: Float): OrbitCamera {
+    /**
+     * Follows a bottom panel whose height changed from [oldInsetPx] to [newInsetPx] without refitting:
+     * the view moves by half the change at the same zoom, so what was centred in the band above the
+     * panel stays centred there, and a panel that grows and shrinks back leaves the view where it was.
+     */
+    fun shiftedForInset(oldInsetPx: Float, newInsetPx: Float, viewportHeightPx: Float): OrbitCamera {
+        val changePx = (insetFraction(newInsetPx, viewportHeightPx) - insetFraction(oldInsetPx, viewportHeightPx)) *
+            viewportHeightPx
+        if (changePx == 0.0) return this
+        return panned(0f, (-changePx / 2.0).toFloat(), viewportHeightPx)
+    }
+
+    fun withPreset(
+        preset: CameraPreset,
+        bounds: Bounds,
+        viewportWidthPx: Float,
+        viewportHeightPx: Float,
+        bottomInsetPx: Float = 0f,
+    ): OrbitCamera {
         val oriented = when (preset) {
             CameraPreset.THREE_D -> copy(yawRad = DEFAULT_YAW_RAD, pitchRad = DEFAULT_PITCH_RAD)
             CameraPreset.TOP -> copy(yawRad = 0.0, pitchRad = MAX_PITCH_RAD)
             // Eye east of the path looking west, so north is on the right and up is up.
             CameraPreset.SIDE -> copy(yawRad = -PI / 2.0, pitchRad = 0.0)
         }
-        return oriented.fitted(bounds, viewportWidthPx, viewportHeightPx)
+        return oriented.fitted(bounds, viewportWidthPx, viewportHeightPx, bottomInsetPx)
     }
 
     companion object {
@@ -146,6 +188,16 @@ data class OrbitCamera(
         const val MIN_DISTANCE = 0.5
         const val MAX_DISTANCE = 5000.0
         private const val FIT_MARGIN = 1.08
+        /** The most of the viewport's height a bottom panel may take from a fit; the rest is the plan's. */
+        const val MAX_INSET_FRACTION = 0.75
+
+        /** The share of [viewportHeightPx] a bottom panel of [insetPx] covers, capped at [MAX_INSET_FRACTION]. */
+        private fun insetFraction(insetPx: Float, viewportHeightPx: Float): Double =
+            if (viewportHeightPx > 0f && insetPx > 0f) {
+                min(insetPx.toDouble() / viewportHeightPx, MAX_INSET_FRACTION)
+            } else {
+                0.0
+            }
 
         private fun wrapAngle(a: Double): Double {
             var r = a

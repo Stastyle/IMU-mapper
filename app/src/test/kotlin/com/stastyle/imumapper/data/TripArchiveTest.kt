@@ -5,6 +5,9 @@ import com.stastyle.imumapper.data.db.TripEntity
 import com.stastyle.imumapper.data.db.TripStatus
 import com.stastyle.imumapper.pipeline.core.CarryPosition
 import com.stastyle.imumapper.pipeline.core.TripMode
+import com.stastyle.imumapper.pipeline.survey.Station
+import com.stastyle.imumapper.pipeline.survey.StationKind
+import com.stastyle.imumapper.pipeline.survey.SurveyDoc
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.nio.file.Files
@@ -119,6 +122,32 @@ class TripArchiveTest {
         val zip = buildZip()
         ZipFile(zip).use { z ->
             assertEquals(listOf("trip.json", "raw.imul"), z.entries().asSequence().map { it.name }.toList())
+        }
+    }
+
+    @Test
+    fun zipCarriesSurveyBetweenResultsAndPhotos() {
+        populateTrip()
+        val survey = SurveyDoc(
+            stations = listOf(Station(id = 1, kind = StationKind.START, name = "Start", tNs = 0L)),
+        ).toJson()
+        files.surveyFile(trip.id).writeText(survey)
+        // Left behind by an interrupted save; only the exact name is the survey.
+        File(files.tripDir(trip.id), "survey.json.tmp").writeText("partial")
+
+        ZipFile(buildZip()).use { z ->
+            assertEquals(
+                listOf(
+                    "trip.json", "raw.imul", "results/run-1.json", "results/run-2.json", "survey.json",
+                    "photos/kf-0001.jpg", "photos/kf-0002.jpg",
+                ),
+                z.entries().asSequence().map { it.name }.toList(),
+            )
+            assertEquals(survey, z.getInputStream(z.getEntry("survey.json")).readBytes().toString(Charsets.UTF_8))
+            val manifest = TripArchive.decodeManifest(
+                z.getInputStream(z.getEntry("trip.json")).readBytes().toString(Charsets.UTF_8),
+            )
+            assertEquals(1, manifest.formatVersion, "older builds keep reading the archive and skip survey.json")
         }
     }
 
