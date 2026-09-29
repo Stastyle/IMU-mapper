@@ -11,7 +11,7 @@ import java.io.File
  * files/trips/<tripId>/results/run-<n>.json PathResult per processing run
  * files/trips/<tripId>/photos/<name>.jpg    keyframes
  * files/trips/<tripId>/survey.json          Survey mode facts (SurveyStore)
- * cache/export/                             ZIPs for the share sheet
+ * cache/export/                             ZIPs and survey CSVs for the share sheet
  * cache/import/                             staging area while a ZIP or log is imported
  * cache/updates/                            downloaded APKs
  * ```
@@ -51,8 +51,8 @@ class TripFiles(private val filesDir: File, private val cacheDir: File) {
     }
 
     /**
-     * Removes export ZIPs older than [maxAgeMs]. Exports live in the cache so the system may also
-     * reclaim them; this just keeps the share sheet from accumulating one file per tap.
+     * Removes exported files (ZIPs, survey CSVs) older than [maxAgeMs]. Exports live in the cache so the
+     * system may also reclaim them; this just keeps the share sheet from accumulating one file per tap.
      */
     fun pruneExports(maxAgeMs: Long, nowMs: Long = System.currentTimeMillis()) {
         val files = exportDir().listFiles() ?: return
