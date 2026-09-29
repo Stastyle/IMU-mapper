@@ -160,15 +160,30 @@ private fun SelectionReadout(readout: SurveyReadout?, magnetic: Boolean) {
                         measure.hops.forEachIndexed { i, hop ->
                             val from = readout.names.getOrElse(i) { "" }
                             val to = readout.names.getOrElse(i + 1) { "" }
-                            Text(
-                                "$from › $to: ${SurveyFormat.metres(hop.lengthM)} · " +
-                                    "${SurveyFormat.azimuth(hop.azimuthDeg, magnetic)} · " +
-                                    SurveyFormat.signedDegrees(hop.slopeDeg),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
+                            // Names first, cut short; the numbers are measured first, so a long name never
+                            // pushes them out of the line.
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                Text(
+                                    "$from › $to:",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f, fill = false),
+                                )
+                                Text(
+                                    "${SurveyFormat.metres(hop.lengthM)} · " +
+                                        "${SurveyFormat.azimuth(hop.azimuthDeg, magnetic)} · " +
+                                        SurveyFormat.signedDegrees(hop.slopeDeg),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                )
+                            }
                         }
                     }
                 }

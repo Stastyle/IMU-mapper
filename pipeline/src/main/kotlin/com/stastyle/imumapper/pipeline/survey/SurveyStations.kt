@@ -11,6 +11,7 @@ object SurveyStations {
         setOf(AnnotationKind.WAYPOINT, AnnotationKind.JUNCTION, AnnotationKind.CHAMBER, AnnotationKind.NOTE)
 
     private val USER_NAME = Regex("S(\\d+)")
+    private val LINE_BREAK = Regex("\\s*\\R\\s*")
 
     /** The traverse order: by tNs, then by id. */
     fun ordered(stations: List<Station>): List<Station> = stations.sortedWith(compareBy({ it.tNs }, { it.id }))
@@ -41,9 +42,19 @@ object SurveyStations {
         return regenerateCorners(out, timeline, detail)
     }
 
-    /** The trimmed note, or the kind in title case and its 1-based [ordinal] among that kind ("Junction 2"). */
+    /**
+     * The note as [oneLineName], or the kind in title case and its 1-based [ordinal] among that kind
+     * ("Junction 2").
+     */
     fun markName(kind: AnnotationKind, note: String, ordinal: Int): String =
-        note.trim().ifEmpty { kind.name.lowercase().replaceFirstChar { it.uppercase() } + " " + ordinal }
+        oneLineName(note).ifEmpty { kind.name.lowercase().replaceFirstChar { it.uppercase() } + " " + ordinal }
+
+    /**
+     * [raw] trimmed, with each line break and the spaces around it made one space. The recorder's Note
+     * field takes several lines, but the viewer shows a chain of names, and each hop's names before its
+     * numbers, on one line, where a break would hide the rest of the chain and the hop's numbers.
+     */
+    fun oneLineName(raw: String): String = raw.trim().replace(LINE_BREAK, " ")
 
     /**
      * Removes every CORNER, detects corners for [detail] keeping all other stations as spacing anchors,

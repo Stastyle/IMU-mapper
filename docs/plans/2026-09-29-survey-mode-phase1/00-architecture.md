@@ -471,8 +471,10 @@ object SurveyStations {
      * stood at that end, and by the id order a clamped mark stays after START and before END.
      */
     fun seed(timeline: PathTimeline, annotations: List<PathAnnotation>, detail: Detail = Detail.NORMAL): List<Station>
-    /** The trimmed note, or the kind in title case and its 1-based [ordinal] among that kind ("Junction 2"). */
+    /** The note as oneLineName, or the kind in title case and its 1-based [ordinal] among that kind ("Junction 2"). */
     fun markName(kind: AnnotationKind, note: String, ordinal: Int): String
+    /** Trimmed, each line break and the spaces around it made one space (the Note field takes several lines). */
+    fun oneLineName(raw: String): String
     /**
      * Removes every CORNER, detects corners for [detail] keeping all other stations, names them C1.. in
      * time order skipping names already in use (a moved corner is a USER station that kept its "C<n>"),
@@ -977,8 +979,9 @@ Behaviour, all binding:
 - **addStation:** `SurveyStations.user(stations, tNs)` added, list re-ordered with `SurveyStations.ordered`.
 - **moveStation:** only CORNER or USER; the station keeps id and name, gets `tNs`, and a CORNER becomes
   USER (so a Detail change keeps it). Other kinds: unchanged.
-- **renameStation:** trimmed; a blank name or the current name is refused (unchanged). A renamed CORNER
-  becomes USER (so a Detail change keeps it and its name); other kinds keep their kind.
+- **renameStation:** made one line (`SurveyStations.oneLineName`); a blank name or the current name is
+  refused (unchanged). A renamed CORNER becomes USER (so a Detail change keeps it and its name); other
+  kinds keep their kind.
 - **deleteStation:** removes it; no tombstone (a deleted CORNER only returns when Detail changes).
 - **setDetail:** `doc.copy(detail, stations = SurveyStations.regenerateCorners(stations, geo.timeline,
   detail))`, selection cleared to `None` (ids may be reused). Choosing the current Detail is a no-op.

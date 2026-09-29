@@ -128,6 +128,14 @@ class SurveyEditsTest {
     }
 
     @Test
+    fun renameJoinsTheLinesOfAPastedName() {
+        // A paste into the one-line field can still carry a line break, which would cut the hop lines short.
+        val renamed = SurveyController.renameStation(seeded, 2, "Squeeze\r\nleft side ")
+        assertEquals("Squeeze left side", renamed.station(2).name)
+        assertSame(renamed, SurveyController.renameStation(renamed, 2, "Squeeze\nleft side"))
+    }
+
+    @Test
     fun renamedCornerBecomesAUserStationThatADetailChangeKeeps() {
         // Its own name is no rename, so it stays a corner.
         assertSame(seeded, SurveyController.renameStation(seeded, 4, " C1 "))

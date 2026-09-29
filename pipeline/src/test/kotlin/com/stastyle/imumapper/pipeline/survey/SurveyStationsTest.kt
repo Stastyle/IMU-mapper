@@ -55,6 +55,15 @@ class SurveyStationsTest {
     }
 
     @Test
+    fun markNameJoinsTheLinesOfAMultiLineNote() {
+        // The recorder's Note field takes several lines; one line keeps the chain row and each hop line whole.
+        assertEquals("Squeeze left side", SurveyStations.markName(AnnotationKind.NOTE, "Squeeze\nleft side", 1))
+        assertEquals("Squeeze left side", SurveyStations.oneLineName(" Squeeze \r\n\r\n  left side "))
+        assertEquals("Note 2", SurveyStations.markName(AnnotationKind.NOTE, " \n\r\n ", 2))
+        assertEquals("Squeeze left side", SurveyStations.oneLineName("Squeeze\u2028left side"))
+    }
+
+    @Test
     fun seedClampsMarksToThePathSoStartAndEndStayOutermost() {
         // A mark tapped while standing after the last step (PDR ends there), and one before the path starts
         // (VIO starts at the first tracking frame): both sit at the nearest end, inside Start and End.

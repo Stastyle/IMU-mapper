@@ -313,11 +313,12 @@ object SurveyController {
     }
 
     /**
-     * Trimmed; a blank name is refused, since the table and the CSV name every leg by its stations, and
-     * so is the current name. A renamed corner becomes USER so a Detail change keeps it and its name.
+     * Made one line ([SurveyStations.oneLineName]), since a paste into the field can carry a line break; a
+     * blank name is refused, since the table and the CSV name every leg by its stations, and so is the
+     * current name. A renamed corner becomes USER so a Detail change keeps it and its name.
      */
     fun renameStation(state: SurveyState, stationId: Int, name: String): SurveyState {
-        val trimmed = name.trim()
+        val trimmed = SurveyStations.oneLineName(name)
         val station = state.doc.stations.firstOrNull { it.id == stationId } ?: return state
         if (trimmed.isEmpty() || trimmed == station.name) return state
         val kind = if (station.kind == StationKind.CORNER) StationKind.USER else station.kind
