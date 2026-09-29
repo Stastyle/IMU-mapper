@@ -1,6 +1,9 @@
 package com.stastyle.imumapper.pipeline.survey
 
 import kotlinx.serialization.SerializationException
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -92,6 +95,42 @@ class SurveyDocTest {
         for (name in listOf("COARSE", "NORMAL", "FINE")) {
             assertEquals(name, SurveyDoc.fromJson("""{"detail": "$name"}""").detail.name)
         }
+    }
+
+    @Test
+    fun keysWrittenByEarlierBuildsStillDecode() {
+        // ignoreUnknownKeys drops the value of a renamed field without an error, so every stored key is
+        // pinned here as a string, each with a non-default value. A new field changes the written key
+        // set and fails the second half until its key is added here too.
+        val text = """
+            {"formatVersion": 1,
+             "stations": [{"id": 4, "kind": "CORNER", "name": "C1", "tNs": 11}],
+             "references": [{"id": 2, "fromNs": 3, "toNs": 9, "bearingDeg": 272.5, "backBearing": true,
+                             "line": "FITTED"}],
+             "manualRotationDeg": -3.5, "manualRotationRunId": 7, "detail": "FINE"}
+        """.trimIndent()
+        val expected = SurveyDoc(
+            formatVersion = 1,
+            stations = listOf(Station(id = 4, kind = StationKind.CORNER, name = "C1", tNs = 11L)),
+            references = listOf(
+                CompassReference(
+                    id = 2, fromNs = 3L, toNs = 9L, bearingDeg = 272.5, backBearing = true,
+                    line = ReferenceLine.FITTED,
+                ),
+            ),
+            manualRotationDeg = -3.5,
+            manualRotationRunId = 7,
+            detail = Detail.FINE,
+        )
+        assertEquals(expected, SurveyDoc.fromJson(text))
+
+        fun keys(json: String): List<Set<String>> {
+            val root = Json.parseToJsonElement(json).jsonObject
+            val station = root.getValue("stations").jsonArray.single().jsonObject
+            val reference = root.getValue("references").jsonArray.single().jsonObject
+            return listOf(root.keys, station.keys, reference.keys)
+        }
+        assertEquals(keys(text), keys(expected.toJson()))
     }
 
     @Test

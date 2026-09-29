@@ -31,9 +31,12 @@ paths:
   - `LogMeta` JSON (`TripMode`, `CarryPosition`, `HeadingAxisMode`).
   - `PathResult` JSON (`PositionSource`, `AnnotationKind`).
   - Room columns (`TripMode`, `CarryPosition`).
-  - `survey.json` (`SurveyDoc`: `StationKind`, `ReferenceLine`, `Detail`). It decodes with
-    `coerceInputValues`, so an unknown or renamed name falls back silently to the field default: a
-    renamed `CORNER` comes back as `USER`. `SurveyDocTest` pins the stored names.
+  - `survey.json` (`SurveyDoc`: `StationKind`, `ReferenceLine`, `Detail`). Unlike `LogMeta`, it
+    decodes with `coerceInputValues`, so a renamed name, or a new one read by an older build, falls
+    back silently to the field default (`USER`, `CHORD`, `NORMAL`) instead of failing, and the next
+    save writes the default over the user's value. A renamed `FITTED` turns every passage-direction
+    reading into a chord reading, which changes the solved north. `SurveyDocTest` pins the stored names. The
+    checklist for its fields is under "Change checklists".
 
   A new value makes older builds lose `LogMeta`. **Never rename a constant**, or the current build
   loses the `LogMeta` of existing logs, fails to decode stored runs and rows, and silently resets
@@ -75,6 +78,14 @@ paths:
   - `CONFIG_DEFAULTS` in `tools/replay.py`.
   - `app/src/main/assets/tuning/master_prompt.md`, if the chat model should reason about it.
   - Never rename a field without `@JsonNames`.
+- **New or changed `survey.json` field or enum constant** (`SurveyDoc`, `Station`,
+  `CompassReference`). The file is the user's hand-entered survey, which no run can rebuild.
+  - Every field keeps a default. The decoder ignores unknown keys, so a renamed field silently drops
+    the stored value: never rename one without `@JsonNames`, and never rename a constant.
+  - Pin the new key or name as a string in `SurveyDocTest`, whose key check fails until you do.
+  - When an older build must not drop the new field or constant, bump `SurveyDoc.FORMAT_VERSION` and
+    make saves write it (a loaded doc keeps the version it was read with). Older builds then open the
+    file read-only (`SurveyLoad.Newer`) instead of saving over it.
 - **Change in `pdr/` or `post/`:**
   - Port it to the same-named class in `tools/replay.py`. The Kotlin code is the reference.
   - Compare the two with `replay.py --compare` against a Kotlin result. Without a phone, add a

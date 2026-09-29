@@ -30,7 +30,9 @@ optionally ARCore, and shows the route as a 3D line, for mapping places without 
   - `capture/`: the recorder and ARCore.
   - `data/`: Room, trip files, ZIP export/import, and `SurveyStore` for
     `files/trips/<id>/survey.json`: the per-trip Survey mode facts (stations, compass readings, the
-    manual rotation). It is user state, not a run, and travels in the ZIP export.
+    manual rotation, the corner detail level). It is user state, not a run, and travels in the ZIP
+    export. It stores field and enum names, and a renamed one silently resets the stored value to its
+    default, so follow the `survey.json` rules in `.claude/rules/pipeline.md`.
   - `process/TripProcessor`.
   - `render/`: pure scene, camera and survey-layer code (`PathScene`, `OrbitCamera`, `SurveyLayer`,
     `ProjectedSurvey`) and the Compose drawing in `PathRenderer` and `SurveyRenderer`.
