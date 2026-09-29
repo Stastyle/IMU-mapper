@@ -55,11 +55,11 @@ fun LegsSheet(
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
     ) {
         Text(
-            "Legs",
+            SurveyFormat.legsTitle(magnetic),
             style = MaterialTheme.typography.titleMedium,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
         )
-        TableRow(SurveyFormat.tableHeader(magnetic), bold = true)
+        TableRow(SurveyFormat.tableHeader(magnetic), header = true)
         HorizontalDivider()
         // Not filling: the totals row stays on screen under a long table.
         LazyColumn(modifier = Modifier.weight(1f, fill = false)) {
@@ -169,16 +169,27 @@ fun DetailDialog(current: Detail, counts: Map<Detail, Int>, onSelect: (Detail) -
     )
 }
 
-/** One row of the legs table; the two name columns get more room than the numbers. */
+/**
+ * One row of the legs table; the two name columns get more room than the numbers. A [header] row wraps
+ * instead of cutting a label short, so the M or R after "Azimuth" shows on a narrow phone or a large font.
+ */
 @Composable
-private fun TableRow(cells: List<String>, modifier: Modifier = Modifier, bold: Boolean = false) {
-    Row(modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
+private fun TableRow(
+    cells: List<String>,
+    modifier: Modifier = Modifier,
+    bold: Boolean = false,
+    header: Boolean = false,
+) {
+    Row(
+        modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.Bottom,
+    ) {
         cells.forEachIndexed { i, cell ->
             Text(
                 cell,
                 style = MaterialTheme.typography.bodySmall,
-                fontWeight = if (bold) FontWeight.SemiBold else null,
-                maxLines = 1,
+                fontWeight = if (bold || header) FontWeight.SemiBold else null,
+                maxLines = if (header) Int.MAX_VALUE else 1,
                 overflow = TextOverflow.Ellipsis,
                 textAlign = if (i < NAME_COLUMNS) TextAlign.Start else TextAlign.End,
                 modifier = Modifier.weight(COLUMN_WEIGHTS.getOrElse(i) { 1f }).padding(horizontal = 2.dp),
@@ -197,5 +208,9 @@ private fun kindLabel(kind: StationKind): String = when (kind) {
 
 private const val NAME_COLUMNS = 2
 
-/** From, To, Length, Azimuth, Slope, Δh, Path. */
-private val COLUMN_WEIGHTS = floatArrayOf(1.5f, 1.5f, 1f, 1f, 0.8f, 0.9f, 1.1f)
+/**
+ * From, To, Length, Azimuth, Slope, Δh, Path. Azimuth cells are short ("047°"), but at 384 dp the column
+ * still fits the word "Azimuth" in the header, with the M or R on a second line when it wraps. Length and
+ * Slope fit their header on one line there too.
+ */
+private val COLUMN_WEIGHTS = floatArrayOf(1.3f, 1.3f, 1.05f, 1.3f, 0.9f, 0.85f, 1.1f)

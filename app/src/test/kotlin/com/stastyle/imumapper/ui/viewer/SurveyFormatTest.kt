@@ -192,6 +192,13 @@ class SurveyFormatTest {
         assertEquals(listOf("Total", "", "136.4", "", "", "+2.0", "150.1"), SurveyFormat.totalsRow(totals))
     }
 
+    /** The azimuth cells carry no suffix and a narrow header can wrap, so the title always says which north. */
+    @Test
+    fun legsTitleSaysWhichNorthTheAzimuthsAreFrom() {
+        assertEquals("Legs · azimuths from magnetic north (M)", SurveyFormat.legsTitle(magnetic = true))
+        assertEquals("Legs · azimuths from relative north (R)", SurveyFormat.legsTitle(magnetic = false))
+    }
+
     @Test
     fun typedDegreesTakeACommaAndRefuseAnythingNotFinite() {
         assertEquals(45.0, SurveyFormat.parseDegrees("45"))

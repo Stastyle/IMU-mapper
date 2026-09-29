@@ -108,6 +108,10 @@ object SurveyFormat {
     fun shareText(tripName: String, runId: Int, raw: Boolean, north: NorthSolution): String =
         "$tripName · Run $runId${if (raw) " (raw path)" else ""}, ${SurveyCsv.correctionText(north)}"
 
+    /** The Legs sheet's title: which north the azimuths are from, readable however narrow the header. */
+    fun legsTitle(magnetic: Boolean): String =
+        "Legs · azimuths from ${if (magnetic) "magnetic" else "relative"} north (${suffix(magnetic)})"
+
     /** The header carries the suffix so every azimuth cell stays short. */
     fun tableHeader(magnetic: Boolean): List<String> =
         listOf("From", "To", "Length", "Azimuth ${suffix(magnetic)}", "Slope", "Δh", "Path")
