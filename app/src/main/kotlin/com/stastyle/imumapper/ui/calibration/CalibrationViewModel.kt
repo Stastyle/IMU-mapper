@@ -346,6 +346,20 @@ class CalibrationViewModel(
     }
 
     /**
+     * Back while a flow's sensors run. Leaving the tab would cancel the flow, which is why the tab bar
+     * hides then, so the flow keeps running and the snackbar says how it ends. The compass step never
+     * gets here: its dialog takes Back as Cancel.
+     */
+    fun backWhileRunning() {
+        val kind = _ui.value.activeFlow ?: return
+        val text = when (kind) {
+            FlowKind.STILL -> "Hold still until the measurement ends"
+            else -> "Tap Stop to end the walk first"
+        }
+        _ui.update { it.copy(message = text) }
+    }
+
+    /**
      * Aborts whatever runs (Cancel in the compass dialog, screen left, app stopped). A compass step goes
      * back to Idle, since nothing was recorded yet; a recording is marked interrupted. Safe to call when
      * nothing runs.

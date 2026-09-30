@@ -1,5 +1,6 @@
 package com.stastyle.imumapper.ui.calibration
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -59,7 +60,8 @@ import com.stastyle.imumapper.ui.record.CompassDialog
  *
  * As the Calibrate tab it has no back arrow ([onBack] null), shows the large tab header and hosts the tab
  * bar in [bottomBar]. The bar is hidden while a flow's sensors run, because leaving the screen cancels the
- * flow. The header names the saved carry position and stride once they have loaded.
+ * flow; for the same reason Assisted tuning's Open is disabled then, and Back keeps the flow and says how
+ * it ends. The header names the saved carry position and stride once they have loaded.
  */
 @Composable
 fun CalibrationScreen(
@@ -102,6 +104,8 @@ fun CalibrationScreen(
         view.keepScreenOn = ui.sensorsRunning
         onDispose { view.keepScreenOn = false }
     }
+    // Back would leave the tab, and with it the flow, the same way the hidden tab bar would.
+    BackHandler(enabled = ui.sensorsRunning) { vm.backWhileRunning() }
     LaunchedEffect(ui.message) {
         val text = ui.message
         if (text != null) {
@@ -136,7 +140,7 @@ fun CalibrationScreen(
             HeadingOffsetCard(ui, vm)
             SquareTestCard(ui, vm)
             VioCard(ui, vm)
-            TuningCard(onOpenTuning)
+            TuningCard(onOpenTuning, enabled = !ui.sensorsRunning)
         }
     }
 
@@ -153,8 +157,9 @@ fun CalibrationScreen(
     }
 }
 
+/** [enabled] is false while a flow's sensors run: opening Tuning stops this screen, which cancels the flow. */
 @Composable
-private fun TuningCard(onOpen: () -> Unit) {
+private fun TuningCard(onOpen: () -> Unit, enabled: Boolean) {
     CalibrationCard(title = "Assisted tuning", icon = Icons.Filled.AutoFixHigh) {
         Text(
             "For the thresholds no guided flow measures (step detection, magnetometer gate, smoothing): " +
@@ -162,7 +167,7 @@ private fun TuningCard(onOpen: () -> Unit) {
                 "propose values, then check the proposal on the same walk before saving it.",
             style = MaterialTheme.typography.bodyMedium,
         )
-        BrandButton(onClick = onOpen) { Text("Open") }
+        BrandButton(onClick = onOpen, enabled = enabled) { Text("Open") }
     }
 }
 
