@@ -1,17 +1,25 @@
 package com.stastyle.imumapper.ui.calibration
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
+import androidx.compose.material.icons.filled.CropSquare
+import androidx.compose.material.icons.filled.Explore
+import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -19,16 +27,65 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.unit.dp
 import com.stastyle.imumapper.pipeline.core.Vec3
+import com.stastyle.imumapper.render.PathProgress
+import com.stastyle.imumapper.render.SceneColors
+import com.stastyle.imumapper.ui.common.BrandButton
+import com.stastyle.imumapper.ui.common.GlassCard
+import com.stastyle.imumapper.ui.common.GridScaleChip
+import com.stastyle.imumapper.ui.common.SectionHeader
+import com.stastyle.imumapper.ui.theme.imuColors
+import kotlin.math.floor
+import kotlin.math.roundToInt
+
+/**
+ * A card of the calibration screens: a heading with its icon over [content], padded like every other
+ * card of the redesign. [action] sits at the end of the heading.
+ */
+@Composable
+fun CalibrationCard(
+    title: String,
+    icon: ImageVector?,
+    modifier: Modifier = Modifier,
+    action: (@Composable () -> Unit)? = null,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    GlassCard(modifier = modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            SectionHeader(title = title, icon = icon, action = action)
+            content()
+        }
+    }
+}
+
+/** The heading icon of each guided flow. */
+private fun FlowKind.icon(): ImageVector = when (this) {
+    FlowKind.STILL -> Icons.Filled.Timer
+    FlowKind.STRIDE -> Icons.AutoMirrored.Filled.DirectionsWalk
+    FlowKind.HEADING -> Icons.Filled.Explore
+    FlowKind.SQUARE -> Icons.Filled.CropSquare
+}
 
 /**
  * One guided flow: instructions and Start, then a countdown or elapsed time, then the result with
@@ -48,45 +105,42 @@ fun FlowCard(
     setup: @Composable ColumnScope.() -> Unit = {},
     result: @Composable ColumnScope.(FlowResult) -> Unit,
 ) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(kind.title, style = MaterialTheme.typography.titleMedium)
-            when (phase) {
-                is FlowPhase.Idle -> {
-                    Text(instructions, style = MaterialTheme.typography.bodyMedium)
-                    setup()
-                    Button(onClick = onStart, enabled = enabled) { Text("Start") }
+    CalibrationCard(title = kind.title, icon = kind.icon()) {
+        when (phase) {
+            is FlowPhase.Idle -> {
+                Text(instructions, style = MaterialTheme.typography.bodyMedium)
+                setup()
+                BrandButton(onClick = onStart, enabled = enabled) { Text("Start") }
+            }
+            // The compass dialog covers the screen meanwhile; this shows behind it.
+            is FlowPhase.Compass -> Text("Waiting for the compass to find north…")
+            is FlowPhase.Running -> RunningBody(kind, phase, onStop)
+            is FlowPhase.Computing -> {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                    Text("Computing…")
                 }
-                // The compass dialog covers the screen meanwhile; this shows behind it.
-                is FlowPhase.Compass -> Text("Waiting for the compass to find north…")
-                is FlowPhase.Running -> RunningBody(kind, phase, onStop)
-                is FlowPhase.Computing -> {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        CircularProgressIndicator(modifier = Modifier.size(24.dp))
-                        Text("Computing…")
-                    }
+            }
+            is FlowPhase.Done -> {
+                result(phase.result)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    BrandButton(onClick = onSave) { Text(saveLabel) }
+                    OutlinedButton(onClick = onDiscard) { Text("Discard") }
                 }
-                is FlowPhase.Done -> {
-                    result(phase.result)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = onSave) { Text(saveLabel) }
-                        OutlinedButton(onClick = onDiscard) { Text("Discard") }
-                    }
-                }
-                is FlowPhase.Failed -> {
-                    Text(
-                        phase.message,
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    setup()
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = onStart, enabled = enabled) { Text("Try again") }
-                        TextButton(onClick = onDiscard) { Text("Dismiss") }
-                    }
+            }
+            is FlowPhase.Failed -> {
+                Text(
+                    phase.message,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                setup()
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    BrandButton(onClick = onStart, enabled = enabled) { Text("Try again") }
+                    TextButton(onClick = onDiscard) { Text("Dismiss") }
                 }
             }
         }
@@ -112,21 +166,35 @@ private fun RunningBody(kind: FlowKind, phase: FlowPhase.Running, onStop: () -> 
             },
             style = MaterialTheme.typography.bodyMedium,
         )
-        Button(onClick = onStop) { Text("Stop") }
+        BrandButton(onClick = onStop) { Text("Stop") }
     }
 }
 
-/** Label / value line used by every result body. */
+/**
+ * Label / value line used by every result body, read by TalkBack as one item. The value is laid out
+ * left to right with even digit widths, so signs and columns of numbers stay put on any phone.
+ */
 @Composable
 fun ValueRow(label: String, value: String, highlight: Boolean = false) {
-    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(label, style = MaterialTheme.typography.bodyMedium)
-        Text(
-            value,
-            style = MaterialTheme.typography.bodyMedium,
-            fontFamily = FontFamily.Monospace,
-            fontWeight = if (highlight) FontWeight.Bold else FontWeight.Normal,
-        )
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .semantics(mergeDescendants = true) {},
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        // The rest of the row, the value at its end: a long value wraps there instead of hiding the label.
+        Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.TopEnd) {
+            Text(
+                value,
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    textDirection = TextDirection.Ltr,
+                    fontFeatureSettings = "tnum",
+                ),
+                color = MaterialTheme.colorScheme.onSurface,
+                fontWeight = if (highlight) FontWeight.Bold else FontWeight.Normal,
+            )
+        }
     }
 }
 
@@ -153,15 +221,9 @@ fun StrideResult(r: FlowResult.Stride) {
     val k = r.weinbergK
     if (k != null) {
         ValueRow("Weinberg k", Fmt.num(k, 3), highlight = true)
-        Text(
-            "Saving stores both; the pipeline uses the Weinberg model when k is above zero.",
-            style = MaterialTheme.typography.bodySmall,
-        )
+        Hint("Saving stores both; the pipeline uses the Weinberg model when k is above zero.")
     } else {
-        Text(
-            "Weinberg k could not be fitted (no usable acceleration swing); it stays as it is.",
-            style = MaterialTheme.typography.bodySmall,
-        )
+        Hint("Weinberg k could not be fitted (no usable acceleration swing); it stays as it is.")
     }
 }
 
@@ -171,12 +233,11 @@ fun HeadingResult(r: FlowResult.Heading) {
     ValueRow("New heading offset", Fmt.degrees(r.offsetRad), highlight = true)
     ValueRow("Measured on axis", Fmt.axis(r.axis))
     ValueRow("Walked", Fmt.metres(r.walkedM) + " · ${r.steps} steps")
-    Text(
+    Hint(
         "The offset is the angle between where the phone points and where you walk, for the pose the phone " +
             "was in when the walk started. It is applied to every recording, so every recording must start in " +
             "that pose. It is right only if you walked toward magnetic north: it turns the walk you just made " +
             "into north on the map. With the phone held in front of you it should be near 0°.",
-        style = MaterialTheme.typography.bodySmall,
     )
 }
 
@@ -185,47 +246,106 @@ fun SquareResult(r: FlowResult.Square) {
     ValueRow("Closure error", Fmt.metres(r.closureM), highlight = true)
     ValueRow("Of distance walked", Fmt.percent(r.closurePct), highlight = true)
     ValueRow("Distance · steps", Fmt.metres(r.distanceM) + " · ${r.steps}")
-    PathPreview(points = r.points, modifier = Modifier.fillMaxWidth().height(160.dp))
-    Text(
-        "This is the baseline number to improve. Saving keeps it as a note with the calibration.",
-        style = MaterialTheme.typography.bodySmall,
-    )
+    PathPreview(points = r.points, modifier = Modifier.fillMaxWidth().height(180.dp))
+    Hint("This is the baseline number to improve. Saving keeps it as a note with the calibration.")
 }
 
-/** Tiny top-down view of a path: north up, start marked green, end marked red. */
+/** A quiet explanatory line under a result. */
+@Composable
+fun Hint(text: String) {
+    Text(text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+}
+
+/**
+ * Small top-down view of a path, like the trip viewer's: north up and never mirrored, coloured from
+ * blue to red by the distance walked (the viewer's Progress colours), the start marked green and the
+ * end red, over a grid whose spacing the chip names: 1 m for the square test, wider when the canvas
+ * shows more ground ([CalibrationMath.previewGridSpacing]).
+ */
 @Composable
 fun PathPreview(points: List<Vec3>, modifier: Modifier = Modifier) {
-    val lineColor = MaterialTheme.colorScheme.primary
-    val gridColor = MaterialTheme.colorScheme.outlineVariant
-    Canvas(modifier = modifier) {
-        val bounds = CalibrationMath.planBounds(points) ?: return@Canvas
-        val t = CalibrationMath.fitPlan(bounds, size.width.toDouble(), size.height.toDouble(), 12.dp.toPx().toDouble())
-        // One-metre grid so the scale is readable without axes.
-        val step = 1.0
-        var gx = Math.floor(bounds.minX) - step
-        while (gx <= bounds.maxX + step) {
-            val x = t.x(gx)
-            drawLine(gridColor, Offset(x, 0f), Offset(x, size.height), strokeWidth = 1f)
-            gx += step
+    val colors = MaterialTheme.imuColors
+    val shape = MaterialTheme.shapes.small
+    val fractions = remember(points) { PathProgress.fractions(points) }
+    val runs = remember(fractions) { CalibrationMath.progressRuns(fractions) }
+    val bounds = remember(points) { CalibrationMath.planBounds(points) }
+    val density = LocalDensity.current
+    val paddingPx = with(density) { PREVIEW_PADDING.toPx().toDouble() }
+    val minGapPx = with(density) { PREVIEW_MIN_GRID_GAP.toPx().toDouble() }
+    BoxWithConstraints(
+        modifier = modifier
+            .clip(shape)
+            .background(colors.canvasBackground)
+            .border(1.dp, colors.cardBorder, shape),
+    ) {
+        // Measured here rather than in the Canvas, so the chip can name the spacing the Canvas draws.
+        val widthPx = constraints.maxWidth.toDouble()
+        val heightPx = constraints.maxHeight.toDouble()
+        val sized = constraints.hasBoundedWidth && constraints.hasBoundedHeight
+        val plan = remember(bounds, widthPx, heightPx, paddingPx) {
+            if (bounds == null || !sized) null else CalibrationMath.fitPlan(bounds, widthPx, heightPx, paddingPx)
         }
-        var gy = Math.floor(bounds.minY) - step
-        while (gy <= bounds.maxY + step) {
-            val y = t.y(gy)
-            drawLine(gridColor, Offset(0f, y), Offset(size.width, y), strokeWidth = 1f)
-            gy += step
+        val gridM = remember(plan, minGapPx) {
+            plan?.let { CalibrationMath.previewGridSpacing(it, widthPx, heightPx, minGapPx) }
         }
-        val path = Path()
-        for (i in points.indices) {
-            val p = points[i]
-            if (i == 0) path.moveTo(t.x(p.x), t.y(p.y)) else path.lineTo(t.x(p.x), t.y(p.y))
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val t = plan ?: return@Canvas
+            if (gridM != null) drawPlanGrid(t, gridM)
+            val stroke = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+            for (r in runs.indices) {
+                val from = runs[r]
+                val to = if (r + 1 < runs.size) runs[r + 1] else points.size - 1
+                if (to <= from) continue
+                val path = Path()
+                path.moveTo(t.x(points[from].x), t.y(points[from].y))
+                for (i in from + 1..to) path.lineTo(t.x(points[i].x), t.y(points[i].y))
+                drawPath(path, Color(PathProgress.color(fractions[from])), style = stroke)
+            }
+            val first = points[0]
+            val last = points[points.size - 1]
+            val marker = 5.dp.toPx()
+            drawCircle(Color(SceneColors.START), radius = marker, center = Offset(t.x(first.x), t.y(first.y)))
+            drawCircle(Color(SceneColors.END), radius = marker, center = Offset(t.x(last.x), t.y(last.y)))
         }
-        drawPath(path, lineColor, style = Stroke(width = 3f))
-        val first = points[0]
-        val last = points[points.size - 1]
-        drawCircle(Color(0xFF2E7D32), radius = 6f, center = Offset(t.x(first.x), t.y(first.y)))
-        drawCircle(Color(0xFFC62828), radius = 6f, center = Offset(t.x(last.x), t.y(last.y)))
+        if (gridM != null) {
+            // Absolute, like the viewer's canvas overlays: the drawn map never mirrors, so neither does its chip.
+            GridScaleChip(
+                text = "${gridM.roundToInt()} m grid",
+                modifier = Modifier
+                    .align(AbsoluteAlignment.BottomLeft)
+                    .padding(8.dp),
+            )
+        }
     }
 }
+
+/**
+ * Grid lines at whole multiples of [spacing] metres over the whole canvas, not only the path's extent,
+ * so the scale reads everywhere; every fifth line is stronger, as on the viewer's floor grid.
+ */
+private fun DrawScope.drawPlanGrid(t: CalibrationMath.PlanTransform, spacing: Double) {
+    val minor = Color(SceneColors.GRID_MINOR)
+    val major = Color(SceneColors.GRID_MAJOR)
+    // Line k lies at k * spacing metres from the trip's origin.
+    val west = floor(-t.offsetX / t.scale / spacing).toInt()
+    val east = floor((size.width - t.offsetX) / t.scale / spacing).toInt()
+    for (k in west..east) {
+        val x = t.x(k * spacing)
+        drawLine(if (k % 5 == 0) major else minor, Offset(x, 0f), Offset(x, size.height), strokeWidth = 1f)
+    }
+    val south = floor((t.offsetY - size.height) / t.scale / spacing).toInt()
+    val north = floor(t.offsetY / t.scale / spacing).toInt()
+    for (k in south..north) {
+        val y = t.y(k * spacing)
+        drawLine(if (k % 5 == 0) major else minor, Offset(0f, y), Offset(size.width, y), strokeWidth = 1f)
+    }
+}
+
+/** Space between the preview's edge and the path, so the end markers are never cut. */
+private val PREVIEW_PADDING = 16.dp
+
+/** Grid lines closer than this would merge into a fill; the preview then draws none. */
+private val PREVIEW_MIN_GRID_GAP = 4.dp
 
 @Composable
 private fun ErrorLine(text: String) {

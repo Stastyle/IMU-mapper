@@ -1,6 +1,7 @@
 package com.stastyle.imumapper.ui.calibration
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -11,24 +12,20 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.CompareArrows
 import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
+import androidx.compose.material.icons.filled.AutoFixHigh
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -41,6 +38,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -48,6 +46,10 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.stastyle.imumapper.data.db.TripEntity
+import com.stastyle.imumapper.ui.common.AppScaffold
+import com.stastyle.imumapper.ui.common.AppTopBar
+import com.stastyle.imumapper.ui.common.BrandButton
+import com.stastyle.imumapper.ui.common.ScreenHeader
 import com.stastyle.imumapper.ui.common.appContainer
 import com.stastyle.imumapper.ui.common.findActivity
 import com.stastyle.imumapper.ui.record.CompassDialog
@@ -55,10 +57,10 @@ import com.stastyle.imumapper.ui.record.CompassDialog
 /**
  * Calibration flows: still bias, stride walk, heading offset, square test, ARCore vs PDR, assisted tuning.
  *
- * As the Calibrate tab it has no back arrow ([onBack] null) and hosts the tab bar in [bottomBar]. The bar
- * is hidden while a flow's sensors run, because leaving the screen cancels the flow.
+ * As the Calibrate tab it has no back arrow ([onBack] null), shows the large tab header and hosts the tab
+ * bar in [bottomBar]. The bar is hidden while a flow's sensors run, because leaving the screen cancels the
+ * flow. The header names the saved carry position and stride once they have loaded.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CalibrationScreen(
     onBack: (() -> Unit)?,
@@ -108,18 +110,14 @@ fun CalibrationScreen(
         }
     }
 
-    Scaffold(
+    val subtitle = if (ui.calibrationLoaded) Fmt.headerLine(ui.config, ui.carry) else "Loading the saved calibration…"
+    AppScaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("Calibration") },
-                navigationIcon = {
-                    if (onBack != null) {
-                        IconButton(onClick = onBack) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                        }
-                    }
-                },
-            )
+            if (onBack == null) {
+                ScreenHeader("Calibration", subtitle = subtitle)
+            } else {
+                AppTopBar("Calibration", subtitle = subtitle, onBack = onBack)
+            }
         },
         bottomBar = { if (!ui.sensorsRunning) bottomBar() },
         snackbarHost = { SnackbarHost(snackbar) },
@@ -129,7 +127,7 @@ fun CalibrationScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .verticalScroll(rememberScrollState())
-                .padding(16.dp),
+                .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             CurrentConfigCard(ui)
@@ -157,34 +155,29 @@ fun CalibrationScreen(
 
 @Composable
 private fun TuningCard(onOpen: () -> Unit) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Assisted tuning", style = MaterialTheme.typography.titleMedium)
-            Text(
-                "For the thresholds no guided flow measures (step detection, magnetometer gate, smoothing): " +
-                    "record a walk you can describe, let a chat model read the pipeline's numbers for it and " +
-                    "propose values, then check the proposal on the same walk before saving it.",
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            Button(onClick = onOpen) { Text("Open") }
-        }
+    CalibrationCard(title = "Assisted tuning", icon = Icons.Filled.AutoFixHigh) {
+        Text(
+            "For the thresholds no guided flow measures (step detection, magnetometer gate, smoothing): " +
+                "record a walk you can describe, let a chat model read the pipeline's numbers for it and " +
+                "propose values, then check the proposal on the same walk before saving it.",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        BrandButton(onClick = onOpen) { Text("Open") }
     }
 }
 
 @Composable
 private fun CurrentConfigCard(ui: CalibrationUiState) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("Current calibration", style = MaterialTheme.typography.titleMedium)
+    CalibrationCard(title = "Current calibration", icon = Icons.Filled.Tune) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             for ((label, value) in Fmt.configSummary(ui.config)) ValueRow(label, value)
             ValueRow("Carry position", Fmt.carry(ui.carry))
-            Text(
-                "Values apply to every new recording and re-processing. The carry position is chosen on the " +
-                    "recording screen. The heading offset belongs to the pose the phone is in when a recording " +
-                    "starts, so calibrate it in that pose and start every recording in it.",
-                style = MaterialTheme.typography.bodySmall,
-            )
         }
+        Hint(
+            "Values apply to every new recording and re-processing. The carry position is chosen on the " +
+                "recording screen. The heading offset belongs to the pose the phone is in when a recording " +
+                "starts, so calibrate it in that pose and start every recording in it.",
+        )
     }
 }
 
@@ -270,72 +263,80 @@ private fun SquareTestCard(ui: CalibrationUiState, vm: CalibrationViewModel) {
 
 @Composable
 private fun VioCard(ui: CalibrationUiState, vm: CalibrationViewModel) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("ARCore vs PDR", style = MaterialTheme.typography.titleMedium)
-            Text(
-                "Pick a trip recorded in a camera mode. Both the ARCore path and the step-based path are " +
-                    "computed from the same log and compared.",
-                style = MaterialTheme.typography.bodyMedium,
+    CalibrationCard(title = "ARCore vs PDR", icon = Icons.AutoMirrored.Filled.CompareArrows) {
+        Text(
+            "Pick a trip recorded in a camera mode. Both the ARCore path and the step-based path are " +
+                "computed from the same log and compared.",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        if (ui.vioTrips.isEmpty()) {
+            Hint("No Flashlight or Illuminated trips recorded yet.")
+        } else {
+            TripPicker(
+                trips = ui.vioTrips,
+                selectedId = ui.vioTripId,
+                enabled = ui.vioPhase !is VioPhase.Running,
+                onSelect = vm::selectVioTrip,
             )
-            if (ui.vioTrips.isEmpty()) {
-                Text("No Flashlight or Illuminated trips recorded yet.", style = MaterialTheme.typography.bodySmall)
-            } else {
-                TripPicker(
-                    trips = ui.vioTrips,
-                    selectedId = ui.vioTripId,
-                    enabled = ui.vioPhase !is VioPhase.Running,
-                    onSelect = vm::selectVioTrip,
-                )
-            }
-            when (val phase = ui.vioPhase) {
-                is VioPhase.Idle -> Unit
-                is VioPhase.Running -> {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        CircularProgressIndicator(modifier = Modifier.size(24.dp))
-                        Text("Running both processors…")
-                    }
-                }
-                is VioPhase.Done -> VioComparisonBody(phase.result)
-                is VioPhase.Failed -> Text(phase.message, color = MaterialTheme.colorScheme.error)
-            }
-            Button(
-                onClick = vm::runVioComparison,
-                enabled = ui.vioTripId != null && ui.vioPhase !is VioPhase.Running,
-            ) { Text("Compare") }
         }
+        when (val phase = ui.vioPhase) {
+            is VioPhase.Idle -> Unit
+            is VioPhase.Running -> {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                    Text("Running both processors…")
+                }
+            }
+            is VioPhase.Done -> VioComparisonBody(phase.result)
+            is VioPhase.Failed -> Text(phase.message, color = MaterialTheme.colorScheme.error)
+        }
+        BrandButton(
+            onClick = vm::runVioComparison,
+            enabled = ui.vioTripId != null && ui.vioPhase !is VioPhase.Running,
+        ) { Text("Compare") }
     }
 }
 
-/** Button that opens a dropdown of trips; kept plain so it needs no experimental Material API. */
+/**
+ * Button that opens a dropdown of trips; kept plain so it needs no experimental Material API. The menu
+ * and the button share a Box, so the menu opens at the button wherever the caller puts the picker.
+ */
 @Composable
 fun TripPicker(trips: List<TripEntity>, selectedId: Long?, enabled: Boolean, onSelect: (Long) -> Unit) {
     var open by remember { mutableStateOf(false) }
     val selected = trips.firstOrNull { it.id == selectedId }
-    OutlinedButton(onClick = { open = true }, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
-        Text(selected?.name ?: "Choose a trip", modifier = Modifier.weight(1f))
-        Icon(Icons.Filled.ArrowDropDown, contentDescription = null)
-    }
-    DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-        for (trip in trips) {
-            DropdownMenuItem(
-                text = {
-                    Column {
-                        Text(trip.name)
-                        Text(
-                            Fmt.tripLine(trip),
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
-                },
-                onClick = {
-                    open = false
-                    onSelect(trip.id)
-                },
+    Box(modifier = Modifier.fillMaxWidth()) {
+        OutlinedButton(onClick = { open = true }, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
+            Text(
+                selected?.name ?: "Choose a trip",
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
             )
+            Icon(Icons.Filled.ArrowDropDown, contentDescription = null)
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            for (trip in trips) {
+                DropdownMenuItem(
+                    text = {
+                        Column {
+                            Text(trip.name)
+                            Text(
+                                Fmt.tripLine(trip),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    },
+                    onClick = {
+                        open = false
+                        onSelect(trip.id)
+                    },
+                )
+            }
         }
     }
 }
