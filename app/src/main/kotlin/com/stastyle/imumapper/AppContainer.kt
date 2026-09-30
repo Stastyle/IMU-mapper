@@ -9,6 +9,7 @@ import com.stastyle.imumapper.data.TripExporter
 import com.stastyle.imumapper.data.TripFiles
 import com.stastyle.imumapper.data.TripImporter
 import com.stastyle.imumapper.data.TripRepository
+import com.stastyle.imumapper.data.TripThumbnails
 import com.stastyle.imumapper.data.db.AppDatabase
 import com.stastyle.imumapper.pipeline.DefaultProcessor
 import com.stastyle.imumapper.pipeline.core.Processor
@@ -56,6 +57,9 @@ class AppContainer(context: Context) {
     val tripImporter: TripImporter by lazy { TripImporter(appContext, tripRepository, tripFiles) }
 
     val surveyStore: SurveyStore by lazy { SurveyStore(tripFiles) }
+
+    /** One per process, so a thumbnail made on the Trips tab survives leaving the tab and coming back. */
+    val tripThumbnails: TripThumbnails by lazy { TripThumbnails(tripFiles, tripRepository, json) }
 
     val updateManager: UpdateManager by lazy { UpdateManager.get(appContext) }
 }

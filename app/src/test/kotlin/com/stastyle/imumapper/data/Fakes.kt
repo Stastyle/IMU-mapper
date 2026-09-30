@@ -2,6 +2,7 @@ package com.stastyle.imumapper.data
 
 import com.stastyle.imumapper.data.db.PathResultEntity
 import com.stastyle.imumapper.data.db.TripEntity
+import com.stastyle.imumapper.data.db.TripRow
 import com.stastyle.imumapper.data.db.TripStatus
 import com.stastyle.imumapper.pipeline.core.AccelSample
 import com.stastyle.imumapper.pipeline.core.AccelUncalSample
@@ -23,6 +24,7 @@ import com.stastyle.imumapper.pipeline.log.LogWriter
 import com.stastyle.imumapper.pipeline.log.RawLog
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import java.io.File
 import java.util.Collections
@@ -38,6 +40,14 @@ class FakeTripRepository(private val files: TripFiles) : TripRepository {
 
     override fun observeTrips(): Flow<List<TripEntity>> =
         trips.map { it.values.sortedByDescending { t -> t.startedAtEpochMs } }
+
+    /** The Room query's LEFT JOIN: each trip with its latest run's stats and label, or nulls without that run. */
+    override fun observeTripRows(): Flow<List<TripRow>> = combine(observeTrips(), results) { all, runs ->
+        all.map { trip ->
+            val latest = runs.firstOrNull { it.tripId == trip.id && it.runId == trip.latestRunId }
+            TripRow(trip, latest?.statsJson, latest?.label)
+        }
+    }
 
     override fun observeTrip(tripId: Long): Flow<TripEntity?> = trips.map { it[tripId] }
 

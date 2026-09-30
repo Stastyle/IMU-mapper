@@ -2,16 +2,41 @@ package com.stastyle.imumapper.data.db
 
 import androidx.room.Dao
 import androidx.room.Delete
+import androidx.room.Embedded
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
+/**
+ * A trip with the stats and label of its latest run, as the trip list shows it. A query result, not a table: it must
+ * never become an `@Entity`, because a new table changes the schema and needs a Migration. [statsJson] and [runLabel]
+ * are null when the trip has no run yet, or when its latest run's row is missing.
+ */
+data class TripRow(
+    @Embedded val trip: TripEntity,
+    /** `PathStats` of the latest run as JSON, as [PathResultEntity.statsJson] stores it. */
+    val statsJson: String?,
+    /** [PathResultEntity.label] of the latest run. */
+    val runLabel: String?,
+)
+
 @Dao
 interface TripDao {
     @Query("SELECT * FROM trips ORDER BY startedAtEpochMs DESC")
     fun observeAll(): Flow<List<TripEntity>>
+
+    /**
+     * Every trip, newest first, joined to its latest run. The join matches on [TripEntity.latestRunId], so the card's
+     * numbers come from the same run the viewer opens, and a trip without a run keeps its row with nulls.
+     */
+    @Query(
+        "SELECT trips.*, path_results.statsJson AS statsJson, path_results.label AS runLabel FROM trips " +
+            "LEFT JOIN path_results ON path_results.tripId = trips.id AND path_results.runId = trips.latestRunId " +
+            "ORDER BY startedAtEpochMs DESC",
+    )
+    fun observeTripRows(): Flow<List<TripRow>>
 
     @Query("SELECT * FROM trips WHERE id = :id")
     fun observe(id: Long): Flow<TripEntity?>

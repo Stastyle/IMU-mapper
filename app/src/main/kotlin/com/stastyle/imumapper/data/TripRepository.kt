@@ -4,13 +4,17 @@ import com.stastyle.imumapper.data.db.PathResultDao
 import com.stastyle.imumapper.data.db.PathResultEntity
 import com.stastyle.imumapper.data.db.TripDao
 import com.stastyle.imumapper.data.db.TripEntity
+import com.stastyle.imumapper.data.db.TripRow
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
 
 interface TripRepository {
+    /** Newest first. The trip list uses [observeTripRows] instead, which also carries each latest run's stats. */
     fun observeTrips(): Flow<List<TripEntity>>
+    /** Newest first, each trip with the stats and label of its latest run (nulls without one). */
+    fun observeTripRows(): Flow<List<TripRow>>
     fun observeTrip(tripId: Long): Flow<TripEntity?>
     suspend fun getTrip(tripId: Long): TripEntity?
     /** Inserts and returns the new id. Creates the trip directory. */
@@ -45,6 +49,8 @@ class RoomTripRepository(
 ) : TripRepository {
 
     override fun observeTrips(): Flow<List<TripEntity>> = trips.observeAll()
+
+    override fun observeTripRows(): Flow<List<TripRow>> = trips.observeTripRows()
 
     override fun observeTrip(tripId: Long): Flow<TripEntity?> = trips.observe(tripId)
 
