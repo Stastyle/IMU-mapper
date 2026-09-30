@@ -11,6 +11,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.ExperimentalTextApi
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
@@ -167,7 +168,8 @@ object PathRenderer {
 
     /**
      * "Start" and "End" beside their markers, or one "Start / End" when the two nearly coincide on screen. Found in
-     * the scene's markers, so the labels go wherever the markers go (markers switched off, Survey mode).
+     * the scene's markers, so the labels go wherever the markers go (markers switched off, Survey mode). Each label
+     * sits right of its marker unless it would cover the other marker or label; see [endLabelPlacement].
      */
     private fun DrawScope.drawEndLabels(projected: ProjectedScene, textMeasurer: TextMeasurer, selectedMarker: Int) {
         val markers = projected.scene.markers
@@ -181,39 +183,69 @@ object PathRenderer {
                 else -> Unit
             }
         }
+        if (start < 0 && end < 0) return
         val s = projected.markerScreen
-        val merged = start >= 0 && end >= 0 &&
-            mergeEndLabels(s[start * 2], s[start * 2 + 1], s[end * 2], s[end * 2 + 1], END_LABEL_MERGE_DP.dp.toPx())
-        if (merged) {
-            // Right of whichever marker is further right and level with their middle, so the text clears both.
-            val clearance = max(endLabelClearance(start, selectedMarker), endLabelClearance(end, selectedMarker))
-            val x = max(s[start * 2], s[end * 2])
-            val y = (s[start * 2 + 1] + s[end * 2 + 1]) / 2f
-            drawEndLabel(textMeasurer, "Start / End", x, y, clearance)
+        // Measured without a width limit, so the layouts are reused across frames and never wrap at the canvas edge.
+        // Measured before placing, because whether a label reaches the other marker depends on its width in sp.
+        val startText = textMeasurer.measure("Start", endLabelStyle)
+        val endText = textMeasurer.measure("End", endLabelStyle)
+        if (start < 0 || end < 0) {
+            if (start >= 0) {
+                drawEndLabel(startText, s[start * 2], s[start * 2 + 1], endLabelClearance(start, selectedMarker))
+            }
+            if (end >= 0) drawEndLabel(endText, s[end * 2], s[end * 2 + 1], endLabelClearance(end, selectedMarker))
             return
         }
-        if (start >= 0) {
-            val clearance = endLabelClearance(start, selectedMarker)
-            drawEndLabel(textMeasurer, "Start", s[start * 2], s[start * 2 + 1], clearance)
+        val startX = s[start * 2]
+        val startY = s[start * 2 + 1]
+        val endX = s[end * 2]
+        val endY = s[end * 2 + 1]
+        val startClear = endLabelClearance(start, selectedMarker)
+        val endClear = endLabelClearance(end, selectedMarker)
+        val startW = startText.size.width.toFloat()
+        val endW = endText.size.width.toFloat()
+        val placement = endLabelPlacement(
+            startX = startX,
+            startY = startY,
+            startReach = endMarkerReach(start, selectedMarker),
+            startClear = startClear,
+            startW = startW,
+            endX = endX,
+            endY = endY,
+            endReach = endMarkerReach(end, selectedMarker),
+            endClear = endClear,
+            endW = endW,
+            labelH = max(startText.size.height, endText.size.height).toFloat(),
+            mergePx = END_LABEL_MERGE_DP.dp.toPx(),
+        )
+        if (placement == EndLabelPlacement.MERGED) {
+            // Right of whichever marker is further right and level with their middle, so the text clears both.
+            val merged = textMeasurer.measure("Start / End", endLabelStyle)
+            drawEndLabel(merged, max(startX, endX), (startY + endY) / 2f, max(startClear, endClear))
+            return
         }
-        if (end >= 0) {
-            val clearance = endLabelClearance(end, selectedMarker)
-            drawEndLabel(textMeasurer, "End", s[end * 2], s[end * 2 + 1], clearance)
-        }
+        val startDx = if (placement == EndLabelPlacement.START_LEFT) -(startClear + startW) else startClear
+        val endDx = if (placement == EndLabelPlacement.END_LEFT) -(endClear + endW) else endClear
+        drawEndLabel(startText, startX, startY, startDx)
+        drawEndLabel(endText, endX, endY, endDx)
+    }
+
+    /** Pixels from a marker's centre to the edge of the marker, or of its selection ring when it is selected. */
+    private fun DrawScope.endMarkerReach(marker: Int, selectedMarker: Int): Float {
+        val radiusDp = if (marker == selectedMarker) SELECTED_RADIUS_DP + SELECTION_RING_GAP_DP else MARKER_RADIUS_DP
+        return radiusDp.dp.toPx()
     }
 
     /** Pixels from a marker's centre to where its label may start: past the marker and any selection ring. */
-    private fun DrawScope.endLabelClearance(marker: Int, selectedMarker: Int): Float {
-        val radiusDp = if (marker == selectedMarker) SELECTED_RADIUS_DP + SELECTION_RING_GAP_DP else MARKER_RADIUS_DP
-        return (radiusDp + END_LABEL_GAP_DP).dp.toPx()
-    }
+    private fun DrawScope.endLabelClearance(marker: Int, selectedMarker: Int): Float =
+        endMarkerReach(marker, selectedMarker) + END_LABEL_GAP_DP.dp.toPx()
 
-    /** Draws [text] to the right of the marker at ([x], [y]), centred on it vertically. */
-    private fun DrawScope.drawEndLabel(textMeasurer: TextMeasurer, text: String, x: Float, y: Float, clearance: Float) {
-        // Measured without a width limit, so the layout is reused across frames and never wraps at the canvas edge.
-        val layout = textMeasurer.measure(text, endLabelStyle)
-        val origin = labelOrigin(x, y, size.width, size.height, dx = clearance, dy = -layout.size.height / 2f)
-            ?: return
+    /**
+     * Draws [layout] with its left edge [dx] from the marker at ([x], [y]), centred on it vertically. A negative [dx]
+     * puts the text left of the marker.
+     */
+    private fun DrawScope.drawEndLabel(layout: TextLayoutResult, x: Float, y: Float, dx: Float) {
+        val origin = labelOrigin(x, y, size.width, size.height, dx = dx, dy = -layout.size.height / 2f) ?: return
         drawText(layout, topLeft = origin)
     }
 
@@ -252,6 +284,91 @@ object PathRenderer {
         val dx = endX - startX
         val dy = endY - startY
         return dx * dx + dy * dy <= thresholdPx * thresholdPx
+    }
+
+    /** Where [endLabelPlacement] puts the Start and End labels. */
+    enum class EndLabelPlacement {
+        /** Each label right of its own marker. */
+        RIGHT,
+
+        /** "Start" left of its marker, "End" right of its own. */
+        START_LEFT,
+
+        /** "End" left of its marker, "Start" right of its own. */
+        END_LEFT,
+
+        /** One "Start / End" label right of both markers. */
+        MERGED,
+    }
+
+    /**
+     * Where the Start and End labels go, all in pixels. Markers within [mergePx] share one label, as at the ends of
+     * every closed loop. Past that, a nearly closed loop can still leave "Start" printed across the End dot and into
+     * the "End" label (or the mirror), so a label that would cover the other marker or label moves to the left of its
+     * own marker. Labels extend rightwards, so it is the left marker's label that reaches across the other one, and
+     * that is the one moved. When the pair still collides, which takes a selection ring and a large font squeezing
+     * the labels from both sides, the two merge after all.
+     *
+     * The reaches are the markers' radii, including the selection ring when selected; the clearances are where each
+     * label starts right of its marker (see [endLabelCollides]). A NaN coordinate never collides, so the labels stay
+     * right and [labelOrigin] drops the one that cannot be placed.
+     */
+    fun endLabelPlacement(
+        startX: Float,
+        startY: Float,
+        startReach: Float,
+        startClear: Float,
+        startW: Float,
+        endX: Float,
+        endY: Float,
+        endReach: Float,
+        endClear: Float,
+        endW: Float,
+        labelH: Float,
+        mergePx: Float,
+    ): EndLabelPlacement {
+        if (mergeEndLabels(startX, startY, endX, endY, mergePx)) return EndLabelPlacement.MERGED
+        fun clear(startDx: Float, endDx: Float): Boolean =
+            !endLabelCollides(startX, startY, startDx, startW, labelH, endX, endY, endReach, endDx, endW) &&
+                !endLabelCollides(endX, endY, endDx, endW, labelH, startX, startY, startReach, startDx, startW)
+        if (clear(startClear, endClear)) return EndLabelPlacement.RIGHT
+        return if (startX <= endX) {
+            if (clear(-(startClear + startW), endClear)) EndLabelPlacement.START_LEFT else EndLabelPlacement.MERGED
+        } else {
+            if (clear(startClear, -(endClear + endW))) EndLabelPlacement.END_LEFT else EndLabelPlacement.MERGED
+        }
+    }
+
+    /**
+     * Whether one end label covers the other marker or the other marker's label, all in pixels. Both labels are
+     * [labelH] tall and centred on their marker's y. A label's left edge sits [selfDx] (or [otherDx]) from its
+     * marker's x: the clearance when it is right of the marker, minus clearance and width when it is left of it. The
+     * other marker counts as a square [otherReach] from its centre each way, its radius or its selection ring's.
+     * Edges that only touch do not collide, and the test is written as positive conditions so a NaN coordinate never
+     * collides.
+     */
+    fun endLabelCollides(
+        selfX: Float,
+        selfY: Float,
+        selfDx: Float,
+        selfW: Float,
+        labelH: Float,
+        otherX: Float,
+        otherY: Float,
+        otherReach: Float,
+        otherDx: Float,
+        otherW: Float,
+    ): Boolean {
+        val left = selfX + selfDx
+        val right = left + selfW
+        val top = selfY - labelH / 2f
+        val bottom = selfY + labelH / 2f
+        val coversMarker = left < otherX + otherReach && right > otherX - otherReach &&
+            top < otherY + otherReach && bottom > otherY - otherReach
+        val otherLeft = otherX + otherDx
+        val coversLabel = left < otherLeft + otherW && right > otherLeft &&
+            top < otherY + labelH / 2f && bottom > otherY - labelH / 2f
+        return coversMarker || coversLabel
     }
 
     /** Marker index under the touch within [HIT_RADIUS_DP] (scaled by [density]), or -1. */

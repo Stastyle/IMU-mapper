@@ -323,7 +323,8 @@ Scene look (A2): canvas background `#0A1424` (still dark: survey order numbers a
 blue-tinted grid; a soft glow under the main path's lines, drawn by `PathRenderer` from a
 path-line range on `SceneModel` (no extra line primitives; overlay runs get no glow); "Start" and
 "End" labels next to those markers through `labelOrigin`, merged into "Start / End" when within
-24 px (drawn from `scene.markers`, so they vanish with the markers and in Survey mode). The north
+24 dp, and a label that would cover the other marker or its label moves to the other side of its own
+marker (drawn from `scene.markers`, so they vanish with the markers and in Survey mode). The north
 arrow and the axis triad stay.
 
 Path tab below the canvas (scrolls; the canvas does not):
@@ -622,4 +623,6 @@ on purpose:
 - Calibration preview: the grid spacing follows the ground shown (1 m for the square test, wider on
   long tuning walks), and the chip names it.
 - Components: `StatGrid` also balances rows (4 tiles become 2 × 2, 5 become 3 + 2); battery text is
-  "92 %", like the app's other percentages; the Start / End label merge distance is 24 dp.
+  "92 %", like the app's other percentages; the Start and End labels merge within 24 dp, and past
+  that a label that would cover the other marker or its label moves to the other side of its marker
+  (and merges after all when that side is blocked too).
