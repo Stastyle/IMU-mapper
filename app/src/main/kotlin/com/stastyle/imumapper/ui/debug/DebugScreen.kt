@@ -13,23 +13,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -39,6 +32,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
@@ -50,11 +46,22 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.stastyle.imumapper.capture.SensorKind
 import com.stastyle.imumapper.capture.SensorStats
 import com.stastyle.imumapper.capture.formatRate
+import com.stastyle.imumapper.ui.calibration.CalibrationCard
+import com.stastyle.imumapper.ui.calibration.Hint
 import com.stastyle.imumapper.ui.calibration.TripPicker
+import com.stastyle.imumapper.ui.common.AppScaffold
+import com.stastyle.imumapper.ui.common.AppTopBar
+import com.stastyle.imumapper.ui.common.BrandButton
+import com.stastyle.imumapper.ui.common.CardTone
+import com.stastyle.imumapper.ui.common.GlassCard
+import com.stastyle.imumapper.ui.common.StatusPill
+import com.stastyle.imumapper.ui.common.StatusTone
 import com.stastyle.imumapper.ui.common.appContainer
 
-/** Live sensor plots, raw-log summary, stored runs and re-processing. [tripId] selects a trip, if any. */
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * Live sensor plots, raw-log summary, stored runs and re-processing. [tripId] selects a trip, if any. The
+ * top bar names the trip the cards below are about.
+ */
 @Composable
 fun DebugScreen(tripId: Long?, onBack: () -> Unit) {
     val context = LocalContext.current
@@ -98,17 +105,9 @@ fun DebugScreen(tripId: Long?, onBack: () -> Unit) {
         }
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Debug") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                },
-            )
-        },
+    val tripName: String? = ui.trip?.name
+    AppScaffold(
+        topBar = { AppTopBar("Debug", subtitle = tripName, onBack = onBack) },
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
         Column(
@@ -116,7 +115,7 @@ fun DebugScreen(tripId: Long?, onBack: () -> Unit) {
                 .fillMaxSize()
                 .padding(padding)
                 .verticalScroll(rememberScrollState())
-                .padding(16.dp),
+                .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             val crash = ui.crashReport
@@ -124,7 +123,7 @@ fun DebugScreen(tripId: Long?, onBack: () -> Unit) {
             LiveCard(ui, onToggle = vm::setLiveEnabled)
             if (!vm.fixedTrip) {
                 if (ui.trips.isEmpty()) {
-                    Text("No recorded trips yet.", style = MaterialTheme.typography.bodyMedium)
+                    Hint("No recorded trips yet.")
                 } else {
                     TripPicker(
                         trips = ui.trips,
@@ -151,17 +150,25 @@ fun DebugScreen(tripId: Long?, onBack: () -> Unit) {
     }
 }
 
-/** The last uncaught exception, kept by [com.stastyle.imumapper.debug.CrashLog], with Copy and Share for a bug report. */
+/**
+ * The last uncaught exception, kept by [com.stastyle.imumapper.debug.CrashLog], with Copy and Share for a
+ * bug report.
+ */
 @Composable
 private fun CrashCard(report: String, onClear: () -> Unit) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
-    ) {
+    GlassCard(modifier = Modifier.fillMaxWidth(), tone = CardTone.Error) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Last crash", style = MaterialTheme.typography.titleMedium)
+            // Drawn in the card's own light red rather than SectionHeader's accent, which would clash with it.
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(Icons.Filled.BugReport, contentDescription = null)
+                Text(
+                    "Last crash",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.semantics { heading() },
+                )
+            }
             Text(
                 report.lineSequence().take(CRASH_PREVIEW_LINES).joinToString("\n"),
                 style = MaterialTheme.typography.bodySmall,
@@ -172,7 +179,7 @@ private fun CrashCard(report: String, onClear: () -> Unit) {
                 style = MaterialTheme.typography.bodySmall,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { clipboard.setText(AnnotatedString(report)) }) { Text("Copy") }
+                BrandButton(onClick = { clipboard.setText(AnnotatedString(report)) }) { Text("Copy") }
                 OutlinedButton(onClick = { shareText(context, report) }) { Text("Share") }
                 TextButton(onClick = onClear) { Text("Clear") }
             }
@@ -189,44 +196,45 @@ private const val CRASH_PREVIEW_LINES = 6
 
 @Composable
 private fun LiveCard(ui: DebugUiState, onToggle: (Boolean) -> Unit) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Text("Live sensors", style = MaterialTheme.typography.titleMedium)
-                Switch(checked = ui.liveEnabled, onCheckedChange = onToggle)
-            }
-            if (!ui.liveRunning) {
-                Text(
-                    "Turn on to plot the last ten seconds of the accelerometer, the vertical acceleration " +
-                        "(game rotation vector, ENU), the heading and the pressure, without recording anything.",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            } else {
-                RateChips(ui.stats)
-                val c = ui.charts
-                LineChart("Accel magnitude", "m/s²", c.accelMag)
-                LineChart("Vertical accel (steps marked: " + c.stepsSeen + ")", "m/s²", c.vertical)
-                LineChart(
-                    "Heading (game; fused thin)",
-                    "°",
-                    c.headingGame,
-                    decimals = 0,
-                    fixedMin = -180f,
-                    fixedMax = 180f,
-                    secondary = c.headingFused,
-                )
-                LineChart("Pressure", "hPa", c.pressure, decimals = 2)
-                val writeError = ui.stats.writeError
-                if (writeError != null) Text(writeError, color = MaterialTheme.colorScheme.error)
-            }
+    CalibrationCard(
+        title = "Live sensors",
+        icon = Icons.Filled.Sensors,
+        action = {
+            Switch(
+                checked = ui.liveEnabled,
+                onCheckedChange = onToggle,
+                // The heading beside it is a separate node, so the switch names itself.
+                modifier = Modifier.semantics { contentDescription = "Live sensors" },
+            )
+        },
+    ) {
+        if (!ui.liveRunning) {
+            Hint(
+                "Turn on to plot the last ten seconds of the accelerometer, the vertical acceleration " +
+                    "(game rotation vector, ENU), the heading and the pressure, without recording anything.",
+            )
+        } else {
+            RateChips(ui.stats)
+            val c = ui.charts
+            LineChart("Accel magnitude", "m/s²", c.accelMag)
+            LineChart("Vertical accel (steps marked: " + c.stepsSeen + ")", "m/s²", c.vertical)
+            LineChart(
+                "Heading (game; fused thin)",
+                "°",
+                c.headingGame,
+                decimals = 0,
+                fixedMin = -180f,
+                fixedMax = 180f,
+                secondary = c.headingFused,
+            )
+            LineChart("Pressure", "hPa", c.pressure, decimals = 2)
+            val writeError = ui.stats.writeError
+            if (writeError != null) Text(writeError, color = MaterialTheme.colorScheme.error)
         }
     }
 }
 
+/** Each available sensor's rate as a read-only pill; a stalled one is amber. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun RateChips(stats: SensorStats) {
@@ -239,7 +247,7 @@ private fun RateChips(stats: SensorStats) {
             } else {
                 kind.label + " " + formatRate(h.rateHz) + (if (h.stalled) " (stalled)" else "")
             }
-            AssistChip(onClick = {}, label = { Text(text, style = MaterialTheme.typography.labelSmall) })
+            StatusPill(text, if (h.stalled) StatusTone.Warning else StatusTone.Neutral)
         }
     }
 }
