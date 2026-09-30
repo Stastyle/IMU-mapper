@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -290,8 +291,12 @@ private fun LazyListScope.tripListItems(
     cachedThumbnail: (tripId: Long, runId: Int) -> PathThumbnail?,
     loadThumbnail: suspend (tripId: Long, runId: Int) -> PathThumbnail?,
 ) {
-    // The banner renders nothing unless there is an update to act on.
-    item(key = KEY_BANNER, contentType = KEY_BANNER) { banner() }
+    // The banner renders nothing unless there is an update to act on. The item keeps a 1 dp floor: a lazy list
+    // counts a zero-height first item as scrolled past and anchors on the next one, so a banner that appears after
+    // the list (the update check answers later) would open above the top of the list, out of sight.
+    item(key = KEY_BANNER, contentType = KEY_BANNER) {
+        Box(Modifier.heightIn(min = 1.dp)) { banner() }
+    }
     if (content.totalCount == 0) {
         item(key = KEY_ONBOARDING, contentType = KEY_ONBOARDING) {
             OnboardingCard(
