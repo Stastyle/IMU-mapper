@@ -8,6 +8,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -22,7 +23,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -56,6 +56,8 @@ import androidx.compose.ui.window.DialogProperties
 import com.stastyle.imumapper.capture.CompassLock
 import com.stastyle.imumapper.capture.CompassReading
 import com.stastyle.imumapper.capture.CompassStatus
+import com.stastyle.imumapper.ui.common.BrandButton
+import com.stastyle.imumapper.ui.theme.imuColors
 import java.util.Locale
 import kotlin.math.cos
 import kotlin.math.roundToInt
@@ -88,10 +90,11 @@ fun CompassDialog(
         // A stray tap beside the dialog must not throw away the wait; Back and Cancel are explicit.
         properties = DialogProperties(dismissOnBackPress = true, dismissOnClickOutside = false),
     ) {
+        // The dialog colour and the card border of the navy theme; the dial's own colours come from the scheme.
         Surface(
             shape = MaterialTheme.shapes.extraLarge,
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            tonalElevation = 6.dp,
+            border = BorderStroke(1.dp, MaterialTheme.imuColors.cardBorder),
         ) {
             // Scrolls so Start and Cancel stay reachable when the window is short (split screen).
             Column(
@@ -133,7 +136,7 @@ fun CompassDialog(
                     textAlign = TextAlign.Center,
                 )
                 AnimatedVisibility(visible = locked) {
-                    Button(onClick = onStart, modifier = Modifier.fillMaxWidth().height(56.dp)) {
+                    BrandButton(onClick = onStart, modifier = Modifier.fillMaxWidth().height(56.dp)) {
                         Text(startLabel, style = MaterialTheme.typography.titleMedium)
                     }
                 }

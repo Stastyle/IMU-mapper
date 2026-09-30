@@ -20,10 +20,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FlashOff
 import androidx.compose.material.icons.filled.FlashOn
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -60,7 +57,10 @@ import com.stastyle.imumapper.capture.arcore.rotationDegrees
 import com.stastyle.imumapper.capture.modeLabel
 import com.stastyle.imumapper.pipeline.core.TrackingState
 import com.stastyle.imumapper.pipeline.core.TripMode
+import com.stastyle.imumapper.ui.common.BrandButton
+import com.stastyle.imumapper.ui.common.RoundIconButton
 import com.stastyle.imumapper.ui.common.findActivity
+import com.stastyle.imumapper.ui.theme.imuColors
 
 /**
  * Camera half of the recording screen for the ARCore modes: the live camera preview with the tracking
@@ -140,7 +140,8 @@ fun ArSection(mode: TripMode, controller: RecordingController, modifier: Modifie
     // order, so open/resume/pause never interleave. Order matters: the view is paused before the
     // session so the GL thread cannot call update() on a paused session.
     DisposableEffect(active, recording?.tripId, retry) {
-        if (active && recording != null) {
+        // active includes recording != null, which the compiler carries into this branch.
+        if (active) {
             val opened = manager.open(mode, recording.photosDir, rotationDegrees(displayRotation(context)))
             if (opened && manager.resume()) glView.onResume()
         } else if (recording == null) {
@@ -202,15 +203,12 @@ private fun ArOverlay(mode: TripMode, state: ArSessionState, onToggleTorch: () -
         ) {
             TrackingChip(state)
             if (state.torchSupported) {
-                Surface(color = Color.Black.copy(alpha = 0.5f), shape = RoundedCornerShape(24.dp)) {
-                    IconButton(onClick = onToggleTorch) {
-                        Icon(
-                            imageVector = if (state.torchOn) Icons.Filled.FlashOn else Icons.Filled.FlashOff,
-                            contentDescription = if (state.torchOn) "Torch on" else "Torch off",
-                            tint = if (state.torchOn) Color(0xFFFFD54F) else Color.White,
-                        )
-                    }
-                }
+                RoundIconButton(
+                    onClick = onToggleTorch,
+                    icon = if (state.torchOn) Icons.Filled.FlashOn else Icons.Filled.FlashOff,
+                    contentDescription = if (state.torchOn) "Turn the torch off" else "Turn the torch on",
+                    contentColor = if (state.torchOn) MaterialTheme.imuColors.warning else Color.White,
+                )
             } else if (mode == TripMode.FLASHLIGHT) {
                 Label("No torch on this camera")
             }
@@ -235,12 +233,12 @@ private fun TrackingChip(state: ArSessionState) {
         }
         state.tracking == TrackingState.TRACKING -> {
             text = "TRACKING"
-            color = Color(0xFF81C784)
+            color = MaterialTheme.imuColors.success
         }
         else -> {
             val detail = state.trackingDetail
             text = if (detail.isEmpty()) "PAUSED" else "PAUSED · $detail"
-            color = Color(0xFFFFB74D)
+            color = MaterialTheme.imuColors.warning
         }
     }
     Surface(color = Color.Black.copy(alpha = 0.5f), shape = RoundedCornerShape(8.dp)) {
@@ -288,7 +286,7 @@ private fun CenterMessage(
             textAlign = TextAlign.Center,
         )
         if (actionLabel != null && onAction != null) {
-            Button(onClick = onAction, modifier = Modifier.padding(top = 12.dp)) { Text(actionLabel) }
+            BrandButton(onClick = onAction, modifier = Modifier.padding(top = 12.dp)) { Text(actionLabel) }
         }
     }
 }
