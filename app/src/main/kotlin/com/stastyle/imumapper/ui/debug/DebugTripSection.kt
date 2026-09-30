@@ -143,14 +143,17 @@ private fun RunRow(run: RunInfo, expanded: Boolean, onToggle: () -> Unit, onLoad
             .padding(vertical = 6.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
-        // The run's label (what made it: Re-process, PDR only, a tuning round) and the pipeline that made it.
         FlowRow(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Text("Run " + e.runId, style = MaterialTheme.typography.labelLarge)
-            if (e.label.isNotBlank()) StatusPill(e.label, StatusTone.Info)
             StatusPill("pipeline v" + e.pipelineVersion, StatusTone.Neutral)
+        }
+        // What made the run (Re-process, PDR only, a tuning round) is a wrapping line, not a one-line pill: a
+        // tuning round names every value it changed, far more than fits across a phone.
+        if (e.label.isNotBlank()) {
+            Text(e.label, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
         }
         Text(
             dateText(e.createdAtEpochMs),

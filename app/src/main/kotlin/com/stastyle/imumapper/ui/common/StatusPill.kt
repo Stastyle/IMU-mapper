@@ -23,6 +23,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.stastyle.imumapper.ui.theme.imuColors
 
@@ -34,6 +35,9 @@ enum class StatusTone { Info, Success, Warning, Error, Neutral }
  * a light text colour that reads at 4.5:1 or better; never bright text on its own container. With
  * [onClick] it becomes a button with a 48 dp touch target around the pill, labelled for TalkBack by
  * [onClickLabel] ("Show error"). [leading] goes before the text, such as a decorative dot.
+ *
+ * The text stays on one line and ends in an ellipsis when it does not fit, so free-form text of any
+ * length (a run label, an error) belongs in a wrapping Text instead.
  */
 @Composable
 fun StatusPill(
@@ -104,7 +108,10 @@ private fun PillBody(
             // labelMedium is 12 sp; the pill never goes below 11 sp.
             style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
             color = content,
+            // One line, since the round ends do not suit a second; a text too wide for its row shows that it
+            // was cut, rather than end at a word as if it were whole.
             maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
