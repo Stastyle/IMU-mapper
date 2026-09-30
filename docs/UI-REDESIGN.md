@@ -37,7 +37,7 @@ Rules the redesign keeps (`CLAUDE.md`, `.claude/rules/app.md`, `docs/CONVENTIONS
 
 | # | Question | Decision | Why |
 |---|---|---|---|
-| D1 | Colour scheme | One fixed dark brand scheme, dynamic colour removed, dark-only | Dynamic colour replaces any palette on Android 12+, so without this nothing changes on the S26. The mockup is dark; a dark screen suits caves. |
+| D1 | Colour scheme | One fixed dark brand scheme, dynamic colour removed, dark-only (a light scheme and a System / Light / Dark setting were added later, section 15) | Dynamic colour replaces any palette on Android 12+, so without this nothing changes on the S26. The mockup is dark; a dark screen suits caves. |
 | D2 | Bottom tabs | **Trips / Record / Calibrate / Settings** | "Maps" has nothing honest behind it: each trip has its own origin and possibly relative north, so trips cannot share a map. Calibration is the first thing a new user needs. |
 | D3 | Record tab | A top-level **New trip** page: mode cards, device card, **Continue**. Continue pushes the recording screen, whose setup step ("Ready to record") holds the carry chips, the start instructions and **Start recording**. While a recording runs the page only offers **Return to recording**. | The mode picks the route; the carry is chosen in one place (the setup step already loads and saves it), so nothing has to be saved and awaited before navigating. |
 | D4 | Bar hosting | Each top-level screen gets a `bottomBar` slot for its own scaffold | No double insets; the snackbar stays above the bar; the bar moves with its screen. |
@@ -682,3 +682,15 @@ canvas palette and everything that draws a map, a thumbnail or a chart (`render/
 `ui/viewer/ViewerCanvas.kt`, `ui/viewer/ViewerScreen.kt` scene plumbing, `ui/viewer/ElevationChart.kt`,
 `ui/triplist/TripCard.kt`, `ui/calibration/CalibrationCards.kt`). Both read the theme through
 `MaterialTheme.imuColors.isLight`.
+
+As built (light theme): the values in the tables above hold except where a contrast test asked for
+more. Light `secondary` is `#0269A4` (it is the selected tab label and the locked compass letter),
+light `tertiary` and `warning` are `#A64D08`, and the light north arrow is `#AD5008`. The light
+survey stretch highlight stays a translucent amber band under the path (about 1.6:1), because it
+marks a stretch rather than drawing a line. Three fills drawn over the canvas became tokens
+(`buttonFill`, `chipFill`, `panelFill`), with dark values equal to what the components drew before.
+The system bars use `SystemBarStyle.light` or `.dark` from the resolved theme rather than `.auto`,
+because `.auto` adds a scrim behind three-button navigation and decides from the phone, not the app
+setting. The camera overlay is wrapped in `ImuMapperTheme(dark = true)`. On API 30, where the
+platform night mode for one app does not exist, the first frame follows the phone until the setting
+has been read.

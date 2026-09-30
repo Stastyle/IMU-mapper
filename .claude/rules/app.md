@@ -54,12 +54,20 @@ paths:
   `dropUnlessResumed`, because two record entries would both adopt the recording and both process
   it. The recording screen and the Record tab open the **running** recording's mode
   (`recordRouteFor`), never a default, or ARCore would write into a Pocket log.
+- **Two themes:** every colour comes from `ui/theme/ThemePalette.kt` (the UI, both schemes) or
+  `render/CanvasPalette.kt` (maps, thumbnails, the elevation chart, the calibration preview), never
+  a literal in a screen. A new colour pair needs a value in both, and `ThemePaletteContrastTest` /
+  `CanvasPaletteTest` must still pass. The camera overlay stays dark in both themes
+  (`ImuMapperTheme(dark = true)` around it). The setting is `UpdatePreferences.themeMode`; on API
+  31+ it is also handed to `UiModeManager.setApplicationNightMode`, so `values-night` and the splash
+  follow it from cold start.
 - **Look:** screens use the shared components in `ui/common` (`AppScaffold`, `ScreenHeader`,
   `AppTopBar`, `GlassCard`, `StatTile`/`StatGrid`, `StatusPill`, `BrandButton`, `BrandFilterChip`,
-  `RoundIconButton`, `SegmentedTabs`) and the colour tokens in `ui/theme` (`MaterialTheme.colorScheme`
-  and `MaterialTheme.imuColors`), not colour literals. `primary` and `error` are text colours; a
-  white-on-blue fill uses `imuColors.brandFill`. Distances, durations, heights and clocks go through
-  `ui/common/UnitFormat.kt`, so the cards, the viewer and the recording screen agree.
+  `RoundIconButton`, `SegmentedTabs`) and the colour tokens in `ui/theme`
+  (`MaterialTheme.colorScheme` and `MaterialTheme.imuColors`), not colour literals. `primary` and
+  `error` are text colours; a white-on-blue fill uses `imuColors.brandFill`. Distances, durations,
+  heights and clocks go through `ui/common/UnitFormat.kt`, so the cards, the viewer and the
+  recording screen agree.
 - **Right-to-left phones:** the theme's text styles take their direction from their own text and
   align to the layout's start, as Android views do. A number-only text (a value, a signed range)
   sets `TextDirection.Ltr`; a Text that must line up with the screen rather than its words uses
@@ -67,14 +75,16 @@ paths:
   `LocalLayoutDirection provides Ltr`, and place canvas buttons with `AbsoluteAlignment`.
 - **Pure render and UI logic** uses no Compose or Android types, so it stays unit-testable. Colours
   there are ARGB `Int`s. The files: `render/PathScene.kt`, `render/OrbitCamera.kt`,
-  `render/SurveyLayer.kt`, `render/ProjectedSurvey.kt`, `render/PathProgress.kt` (the colour ramp by
-  distance walked, shared by the viewer, the elevation chart, the thumbnails and the calibration
-  preview), `render/PathProfile.kt`, `render/PathThumbnail.kt`, `ui/calibration/CalibrationMath.kt`,
-  `ui/common/UnitFormat.kt`, `ui/common/BatteryFormat.kt`, `ui/common/StatColumns.kt`,
-  `ui/nav/RecordRoute.kt`, `ui/nav/TabBadges.kt`, `ui/record/RecordStatus.kt`,
-  `ui/settings/UpdatePill.kt`, `ui/triplist/TripListItem.kt`, `ui/triplist/TripListQuery.kt`,
-  `ui/triplist/RecordingMode.kt`, `ui/viewer/ViewerText.kt` and `ui/viewer/SurveyFormat.kt`.
-  `render/PathRenderer.kt` and `render/SurveyRenderer.kt` are the Compose drawing layer.
+  `render/SurveyLayer.kt`, `render/ProjectedSurvey.kt`, `render/CanvasPalette.kt`,
+  `render/PathProgress.kt` (the colour ramp by distance walked, shared by the viewer, the elevation
+  chart, the thumbnails and the calibration preview), `render/PathProfile.kt`,
+  `render/PathThumbnail.kt`, `ui/calibration/CalibrationMath.kt`, `ui/common/UnitFormat.kt`,
+  `ui/common/BatteryFormat.kt`, `ui/common/StatColumns.kt`, `ui/theme/ThemePalette.kt`,
+  `ui/theme/ThemeMode.kt`, `ui/nav/RecordRoute.kt`, `ui/nav/TabBadges.kt`,
+  `ui/record/RecordStatus.kt`, `ui/settings/UpdatePill.kt`, `ui/triplist/TripListItem.kt`,
+  `ui/triplist/TripListQuery.kt`, `ui/triplist/RecordingMode.kt`, `ui/viewer/ViewerText.kt` and
+  `ui/viewer/SurveyFormat.kt`. `render/PathRenderer.kt` and `render/SurveyRenderer.kt` are the
+  Compose drawing layer.
 
 ## Updater and release
 

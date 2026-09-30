@@ -23,9 +23,12 @@ such as caves.
   is detected on its own and does not turn the path; "re-orient" is only for turning the phone in
   your hand without tilting it, and you tap it as you do so.
   While the app is on screen, a volume key marks a waypoint.
-- **A dark navy app with four tabs:** Trips, Record, Calibrate and Settings. The Record tab picks the
-  capture mode and shows the battery; the next step picks where the phone is carried and starts the
-  recording. While a trip records, the tab shows a dot and offers a way back to the recording.
+- **Four tabs:** Trips, Record, Calibrate and Settings, in a dark navy look or a light one
+  (**Settings → Appearance**: System, Light or Dark; System follows the phone). In the light look
+  the maps keep their meaning on a pale canvas, with the same colour order in darker tones. The
+  Record tab picks the capture mode and shows the battery; the next step picks where the phone is
+  carried and starts the recording. While a trip records, the tab shows a dot and offers a way back
+  to the recording.
 - **Recording screen.** A status line ("Sensors OK", "Paused", or which sensor has stopped
   delivering), the battery, tiles for the IMU, the step detector, the heading and the magnetometer's
   accuracy, the active time, the steps and marks, and an estimated distance (steps × the saved
@@ -44,11 +47,11 @@ such as caves.
 
   North is magnetic north, read from the compass as the recording starts, unless the "North from
   compass" setting is off; then it is wherever the gyro started. The path is coloured by distance
-  walked, blue at the start to red at the end, or by time, altitude or source. Markers and photos can
-  be tapped. You can switch to the path before loop closure and smoothing, or overlay an earlier
+  walked, blue at the start to red at the end, or by time, altitude or source. Markers and photos
+  can be tapped. You can switch to the path before loop closure and smoothing, or overlay an earlier
   processing run.
-- **Survey mode (beta).** The ruler button on the viewer's map turns the trip into a north-up plan of
-  stations: the start, the end, the marks made while walking, and every turn of the path, found
+- **Survey mode (beta).** The ruler button on the viewer's map turns the trip into a north-up plan
+  of stations: the start, the end, the marks made while walking, and every turn of the path, found
   automatically. Tap a stretch or a chain of stations to read its length, azimuth and slope, add or
   move stations, and export the legs as a CSV. North can be corrected with a bearing from a hand
   compass ("this stretch is 045°") or by hand, and the whole map turns about the start without

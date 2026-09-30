@@ -36,8 +36,10 @@ optionally ARCore, and shows the route as a 3D line, for mapping places without 
   - `process/TripProcessor`.
   - `render/`: pure scene, camera and survey-layer code (`PathScene`, `OrbitCamera`, `SurveyLayer`,
     `ProjectedSurvey`), the colour ramp, elevation profile and thumbnail helpers (`PathProgress`,
-    `PathProfile`, `PathThumbnail`), and the Compose drawing in `PathRenderer` and `SurveyRenderer`.
-  - `ui/theme/` (the dark navy colour scheme and extra tokens), `ui/common/` (shared components and
+    `PathProfile`, `PathThumbnail`), the dark and light map colours (`CanvasPalette`), and the
+    Compose drawing in `PathRenderer` and `SurveyRenderer`.
+  - `ui/theme/` (the dark and light colour schemes from `ThemePalette`, their extra tokens, and the
+    System / Light / Dark setting `ThemeMode`), `ui/common/` (shared components and
     the unit formatters), `ui/nav/` (routes, the graph and the bottom tabs), `ui/<screen>/`,
     `update/` (the GitHub Releases updater) and `debug/CrashLog`. `docs/UI-REDESIGN.md` records the
     design decisions behind the current look.
