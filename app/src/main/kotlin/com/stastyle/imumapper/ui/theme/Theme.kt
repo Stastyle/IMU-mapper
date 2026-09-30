@@ -11,6 +11,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -63,10 +64,30 @@ private val DarkColorScheme = darkColorScheme(
 
 private val BaseTypography = Typography()
 
-private val AppTypography = BaseTypography.copy(
-    headlineMedium = BaseTypography.headlineMedium.copy(fontWeight = FontWeight.Bold),
-    titleLarge = BaseTypography.titleLarge.copy(fontWeight = FontWeight.SemiBold),
-    titleMedium = BaseTypography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+/**
+ * Every style takes its paragraph direction from its own text. By default Compose follows the layout
+ * direction, so on a Hebrew phone an English line such as "3.8 % of distance" or "Search trips…" is laid
+ * out right to left and its numbers and punctuation move. Hebrew trip names still read right to left.
+ * Number-only texts have no letters to go by, so their styles set `TextDirection.Ltr` themselves.
+ */
+private fun TextStyle.contentDirected(): TextStyle = copy(textDirection = TextDirection.Content)
+
+private val AppTypography = Typography(
+    displayLarge = BaseTypography.displayLarge.contentDirected(),
+    displayMedium = BaseTypography.displayMedium.contentDirected(),
+    displaySmall = BaseTypography.displaySmall.contentDirected(),
+    headlineLarge = BaseTypography.headlineLarge.contentDirected(),
+    headlineMedium = BaseTypography.headlineMedium.copy(fontWeight = FontWeight.Bold).contentDirected(),
+    headlineSmall = BaseTypography.headlineSmall.contentDirected(),
+    titleLarge = BaseTypography.titleLarge.copy(fontWeight = FontWeight.SemiBold).contentDirected(),
+    titleMedium = BaseTypography.titleMedium.copy(fontWeight = FontWeight.SemiBold).contentDirected(),
+    titleSmall = BaseTypography.titleSmall.contentDirected(),
+    bodyLarge = BaseTypography.bodyLarge.contentDirected(),
+    bodyMedium = BaseTypography.bodyMedium.contentDirected(),
+    bodySmall = BaseTypography.bodySmall.contentDirected(),
+    labelLarge = BaseTypography.labelLarge.contentDirected(),
+    labelMedium = BaseTypography.labelMedium.contentDirected(),
+    labelSmall = BaseTypography.labelSmall.contentDirected(),
 )
 
 /** The letter-spaced line under a screen title ("INDOOR PATH TRACKING"); M3 has no slot for it. */

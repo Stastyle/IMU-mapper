@@ -64,7 +64,10 @@ private object StatStyles {
     val label: TextStyle @Composable get() = MaterialTheme.typography.labelMedium
     val value: TextStyle
         @Composable get() = MaterialTheme.typography.titleMedium.copy(textDirection = TextDirection.Ltr)
-    val detail: TextStyle @Composable get() = MaterialTheme.typography.bodySmall
+    // A detail is often signs and digits only ("-0.7 … +5.0"), which has no letters to take a direction
+    // from; ContentOrLtr keeps it in reading order on Hebrew phones.
+    val detail: TextStyle
+        @Composable get() = MaterialTheme.typography.bodySmall.copy(textDirection = TextDirection.ContentOrLtr)
 }
 
 /**
