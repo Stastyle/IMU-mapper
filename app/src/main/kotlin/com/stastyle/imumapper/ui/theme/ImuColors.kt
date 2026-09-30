@@ -38,7 +38,10 @@ data class ImuColors(
     val stopRed: Color,
     /** Text and icons on [stopRed] (5.0:1). */
     val onStopRed: Color,
-    /** Behind the path canvas, the trip thumbnails and the calibration preview. */
+    /**
+     * The map canvas colour, equal to `CanvasPalette.background` for the same theme. The canvases draw from the
+     * palette; this copy lets the theme's contrast test check the buttons, chips and text laid over the map.
+     */
     val canvasBackground: Color,
     /**
      * Text and the spinner over the camera preview, on a half-`scrim` chip or on the black camera

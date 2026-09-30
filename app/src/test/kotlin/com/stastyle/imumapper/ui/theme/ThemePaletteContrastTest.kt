@@ -1,5 +1,6 @@
 package com.stastyle.imumapper.ui.theme
 
+import com.stastyle.imumapper.render.CanvasPalette
 import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlin.test.Test
@@ -15,6 +16,13 @@ import kotlin.test.fail
 class ThemePaletteContrastTest {
 
     private val palettes = mapOf("dark" to ThemePalettes.Dark, "light" to ThemePalettes.Light)
+
+    /** The overlays are checked against [ThemePalette.canvasBackground], so it must be the colour the maps draw. */
+    @Test
+    fun canvasBackgroundIsTheMapPalettesBackground() {
+        assertEquals(CanvasPalette.Dark.background, ThemePalettes.Dark.canvasBackground)
+        assertEquals(CanvasPalette.Light.background, ThemePalettes.Light.canvasBackground)
+    }
 
     @Test
     fun textRolesReadOnEveryBackground() = check { p ->
