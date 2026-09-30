@@ -12,7 +12,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-/** When the Record and Settings tabs carry their dots. */
+/** When the Record and Settings tabs carry their dots, and what TalkBack says for them. */
 class TabBadgesTest {
 
     private val release = ReleaseInfo(
@@ -40,9 +40,10 @@ class TabBadgesTest {
             annotationCount = 0,
             photosDir = File("photos"),
         )
-        assertTrue(recordingBadge(recording))
-        assertTrue(recordingBadge(RecordingState.Stopping))
-        assertFalse(recordingBadge(RecordingState.Idle))
+        assertEquals("Recording in progress", recordingBadge(recording))
+        // Still a dot, but the trip has ended and cannot be returned to, so TalkBack must not call it running.
+        assertEquals("Saving the last trip", recordingBadge(RecordingState.Stopping))
+        assertNull(recordingBadge(RecordingState.Idle))
     }
 
     @Test
@@ -62,21 +63,24 @@ class TabBadgesTest {
 
     @Test
     fun eachDotIsSpokenOnItsOwnTab() {
-        assertEquals("Recording in progress", tabBadgeDescription(Routes.NEW_TRIP, true, updateAvailable = false))
-        assertEquals("Update available", tabBadgeDescription(Routes.SETTINGS, false, updateAvailable = true))
+        val running = "Recording in progress"
+        val saving = "Saving the last trip"
+        assertEquals(running, tabBadgeDescription(Routes.NEW_TRIP, running, updateAvailable = false))
+        assertEquals(saving, tabBadgeDescription(Routes.NEW_TRIP, saving, updateAvailable = false))
+        assertEquals("Update available", tabBadgeDescription(Routes.SETTINGS, null, updateAvailable = true))
         // Both at once: each tab speaks only its own dot.
-        assertEquals("Recording in progress", tabBadgeDescription(Routes.NEW_TRIP, true, updateAvailable = true))
-        assertEquals("Update available", tabBadgeDescription(Routes.SETTINGS, true, updateAvailable = true))
+        assertEquals(running, tabBadgeDescription(Routes.NEW_TRIP, running, updateAvailable = true))
+        assertEquals("Update available", tabBadgeDescription(Routes.SETTINGS, running, updateAvailable = true))
     }
 
     @Test
     fun noDotNoStateDescription() {
         for (route in listOf(Routes.TRIPS, Routes.NEW_TRIP, Routes.CALIBRATION, Routes.SETTINGS)) {
-            assertNull(tabBadgeDescription(route, recordingActive = false, updateAvailable = false))
+            assertNull(tabBadgeDescription(route, recording = null, updateAvailable = false))
         }
         // Trips and Calibrate never carry a dot, whatever else is going on.
         for (route in listOf(Routes.TRIPS, Routes.CALIBRATION)) {
-            assertNull(tabBadgeDescription(route, recordingActive = true, updateAvailable = true))
+            assertNull(tabBadgeDescription(route, recording = "Recording in progress", updateAvailable = true))
         }
     }
 }

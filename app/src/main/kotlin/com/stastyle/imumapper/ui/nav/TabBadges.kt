@@ -4,12 +4,14 @@ import com.stastyle.imumapper.capture.RecordingState
 import com.stastyle.imumapper.update.UpdateState
 
 /**
- * Whether the Record tab carries its dot: while a recording runs, and while it is being saved, since
- * a new trip cannot start until then.
+ * What the Record tab's dot says, null when it has none. The dot shows while a recording runs, and while
+ * it is being saved, since a new trip cannot start until then; TalkBack tells the two apart, because a
+ * trip being saved has ended and cannot be returned to.
  */
-fun recordingBadge(state: RecordingState): Boolean = when (state) {
-    is RecordingState.Recording, RecordingState.Stopping -> true
-    RecordingState.Idle -> false
+fun recordingBadge(state: RecordingState): String? = when (state) {
+    is RecordingState.Recording -> "Recording in progress"
+    RecordingState.Stopping -> "Saving the last trip"
+    RecordingState.Idle -> null
 }
 
 /**
@@ -25,11 +27,11 @@ fun updateBadge(state: UpdateState): Boolean = when (state) {
 
 /**
  * What TalkBack says for the dot on the tab of [route], as the item's state description; null when
- * the tab has no dot. The dot itself is decorative, so this is the only way a TalkBack user learns
- * that a recording runs or an update waits.
+ * the tab has no dot. [recording] is [recordingBadge]'s text. The dot itself is decorative, so this is
+ * the only way a TalkBack user learns that a recording runs or an update waits.
  */
-fun tabBadgeDescription(route: String, recordingActive: Boolean, updateAvailable: Boolean): String? = when {
-    route == Routes.NEW_TRIP && recordingActive -> "Recording in progress"
+fun tabBadgeDescription(route: String, recording: String?, updateAvailable: Boolean): String? = when {
+    route == Routes.NEW_TRIP && recording != null -> recording
     route == Routes.SETTINGS && updateAvailable -> "Update available"
     else -> null
 }

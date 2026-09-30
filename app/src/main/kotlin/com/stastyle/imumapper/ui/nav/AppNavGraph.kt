@@ -53,7 +53,7 @@ fun AppNavGraph() {
         val update by updates.state.collectAsStateWithLifecycle()
         AppBottomBar(
             currentRoute = route,
-            recordingActive = recordingBadge(recording),
+            recording = recordingBadge(recording),
             updateAvailable = updateBadge(update),
             onSelect = nav::navigateToTab,
         )

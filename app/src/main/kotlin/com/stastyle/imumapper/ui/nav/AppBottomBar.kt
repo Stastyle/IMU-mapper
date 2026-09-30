@@ -39,14 +39,14 @@ private val TABS = listOf(
  * bottomBar slot, so the snackbar and the floating button sit above it and no insets are applied twice;
  * pushed screens have none.
  *
- * [currentRoute] is the tab shown as selected. The Record tab carries a dot while [recordingActive],
- * and Settings while [updateAvailable]; the dot is decorative and TalkBack reads the item's state
- * description ([tabBadgeDescription]) instead.
+ * [currentRoute] is the tab shown as selected. The Record tab carries a dot while [recording] (the
+ * [recordingBadge] text) is not null, and Settings while [updateAvailable]; the dot is decorative and
+ * TalkBack reads the item's state description ([tabBadgeDescription]) instead.
  */
 @Composable
 fun AppBottomBar(
     currentRoute: String?,
-    recordingActive: Boolean,
+    recording: String?,
     updateAvailable: Boolean,
     onSelect: (route: String) -> Unit,
     modifier: Modifier = Modifier,
@@ -63,7 +63,7 @@ fun AppBottomBar(
         containerColor = colors.surfaceContainerLow.copy(alpha = BAR_ALPHA),
     ) {
         for (tab in TABS) {
-            val badgeState = tabBadgeDescription(tab.route, recordingActive, updateAvailable)
+            val badgeState = tabBadgeDescription(tab.route, recording, updateAvailable)
             NavigationBarItem(
                 selected = tab.route == currentRoute,
                 onClick = { onSelect(tab.route) },
