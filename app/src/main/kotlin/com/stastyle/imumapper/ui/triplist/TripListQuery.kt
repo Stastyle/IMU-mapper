@@ -72,4 +72,20 @@ data class TripListQuery(
 
     private fun longestFirst(value: (TripListItem) -> Double?): Comparator<TripListItem> =
         compareBy(nullsLast(reverseOrder<Double>()), value)
+
+    companion object {
+        /**
+         * The query saved as its text and the [TripFilter] and [TripSort] names; a null is a value never saved. A name
+         * this version does not know (renamed or removed since it was saved) falls back to the default, instead of
+         * failing the screen.
+         */
+        fun restore(text: String?, filterName: String?, sortName: String?): TripListQuery {
+            val default = TripListQuery()
+            return TripListQuery(
+                text = text ?: default.text,
+                filter = TripFilter.entries.firstOrNull { it.name == filterName } ?: default.filter,
+                sort = TripSort.entries.firstOrNull { it.name == sortName } ?: default.sort,
+            )
+        }
+    }
 }

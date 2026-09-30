@@ -79,6 +79,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.createSavedStateHandle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.stastyle.imumapper.capture.RecordingController
 import com.stastyle.imumapper.data.db.TripEntity
@@ -122,6 +123,7 @@ fun TripListScreen(
             importer = container.tripImporter,
             thumbnails = container.tripThumbnails,
             json = container.json,
+            savedState = createSavedStateHandle(),
         )
     }
     val content by vm.content.collectAsStateWithLifecycle()
@@ -134,7 +136,8 @@ fun TripListScreen(
     val cachedThumbnail = remember(vm) { vm::cachedThumbnail }
     val loadThumbnail = remember(vm) { vm::thumbnail }
     // The field's own state, updated in the same frame as the keystroke; a text field fed back from a StateFlow
-    // arrives a frame late and can drop fast typing. The ViewModel follows it for the filtering.
+    // arrives a frame late and can drop fast typing. The ViewModel follows it for the filtering, and seeds it, so a
+    // search restored after process death shows in the field.
     var searchText by remember { mutableStateOf(vm.query.value.text) }
     // With no trips the search and filters are not shown, so a query left from before the last delete would
     // otherwise hide the next trip recorded or imported. The sort order stays.

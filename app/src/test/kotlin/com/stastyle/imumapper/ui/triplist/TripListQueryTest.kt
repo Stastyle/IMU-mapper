@@ -131,4 +131,36 @@ class TripListQueryTest {
         assertEquals(listOf(3L, 1L, 5L), query.ids(items))
         assertEquals(listOf(2L, 3L, 1L), query.copy(filter = TripFilter.PROCESSED).ids(items))
     }
+
+    @Test
+    fun everyQueryRestoresFromTheNamesItIsSavedAs() {
+        for (filter in TripFilter.entries) {
+            for (sort in TripSort.entries) {
+                val query = TripListQuery(text = " Cave loop ", filter = filter, sort = sort)
+                assertEquals(query, TripListQuery.restore(query.text, query.filter.name, query.sort.name))
+            }
+        }
+    }
+
+    @Test
+    fun nothingSavedRestoresTheDefault() {
+        assertEquals(TripListQuery(), TripListQuery.restore(text = null, filterName = null, sortName = null))
+    }
+
+    @Test
+    fun anUnknownFilterOrSortNameFallsBackToItsDefaultAndKeepsTheRest() {
+        assertEquals(
+            TripListQuery(text = "cave", sort = TripSort.NAME),
+            TripListQuery.restore(text = "cave", filterName = "CAMERA", sortName = "NAME"),
+        )
+        assertEquals(
+            TripListQuery(text = "cave", filter = TripFilter.POCKET),
+            TripListQuery.restore(text = "cave", filterName = "POCKET", sortName = "LONGEST"),
+        )
+        assertEquals(
+            TripListQuery(),
+            TripListQuery.restore(text = null, filterName = "pocket", sortName = ""),
+            "names match exactly, as they were saved",
+        )
+    }
 }

@@ -2,6 +2,7 @@ package com.stastyle.imumapper.ui.triplist
 
 import android.content.Intent
 import android.net.Uri
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.stastyle.imumapper.data.TripExporter
@@ -21,6 +22,7 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.updateAndGet
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 
@@ -50,10 +52,21 @@ class TripListViewModel(
     private val importer: TripImporter,
     private val thumbnails: TripThumbnails,
     json: Json,
+    /**
+     * Keeps the search, filter and sort across process death. The list's scroll position survives it, and an index
+     * restored into a different, unfiltered list would open part-way down the wrong trips.
+     */
+    private val savedState: SavedStateHandle = SavedStateHandle(),
     computeDispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) : ViewModel() {
 
-    private val _query = MutableStateFlow(TripListQuery())
+    private val _query = MutableStateFlow(
+        TripListQuery.restore(
+            text = savedState[KEY_TEXT],
+            filterName = savedState[KEY_FILTER],
+            sortName = savedState[KEY_SORT],
+        ),
+    )
     val query: StateFlow<TripListQuery> = _query.asStateFlow()
 
     /**
@@ -71,20 +84,28 @@ class TripListViewModel(
     val ui: StateFlow<TripListUiState> = _ui.asStateFlow()
 
     fun setSearchText(text: String) {
-        _query.update { it.copy(text = text) }
+        setQuery { it.copy(text = text) }
     }
 
     fun setFilter(filter: TripFilter) {
-        _query.update { it.copy(filter = filter) }
+        setQuery { it.copy(filter = filter) }
     }
 
     fun setSort(sort: TripSort) {
-        _query.update { it.copy(sort = sort) }
+        setQuery { it.copy(sort = sort) }
     }
 
     /** Shows every trip again; the sort order stays. */
     fun clearFilters() {
-        _query.update { it.copy(text = "", filter = TripFilter.ALL) }
+        setQuery { it.copy(text = "", filter = TripFilter.ALL) }
+    }
+
+    /** The only writer of the query, so [savedState] always holds what the list shows. Enums are saved by name. */
+    private fun setQuery(transform: (TripListQuery) -> TripListQuery) {
+        val query = _query.updateAndGet(transform)
+        savedState[KEY_TEXT] = query.text
+        savedState[KEY_FILTER] = query.filter.name
+        savedState[KEY_SORT] = query.sort.name
     }
 
     /** A thumbnail already in memory, for a card's first frame. */
@@ -168,5 +189,10 @@ class TripListViewModel(
 
     private companion object {
         const val STOP_TIMEOUT_MS = 5_000L
+
+        // Saved-state keys; renaming one drops the saved value once, which only resets the query.
+        const val KEY_TEXT = "query.text"
+        const val KEY_FILTER = "query.filter"
+        const val KEY_SORT = "query.sort"
     }
 }
