@@ -1,6 +1,6 @@
 package com.stastyle.imumapper.ui.viewer
 
-import android.content.Intent
+import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
@@ -58,6 +58,14 @@ data class SurveyMessage(val text: String, val undoable: Boolean)
 
 /** A written CSV waiting for the share sheet; the screen builds the Intent (SurveyShare), keeping this JVM-testable. */
 data class SurveyCsvShare(val file: File, val subject: String, val text: String)
+
+/**
+ * The written trip ZIP's share sheet, waiting for the screen to open it. The screen builds it around
+ * TripExporter's Intent; the view model only holds it, so its tests pass a fake and never touch an Intent.
+ */
+fun interface ShareRequest {
+    fun launch(context: Context)
+}
 
 /** Everything the survey panel, sheets and layer need, rebuilt after each change. */
 data class SurveyUi(
@@ -121,7 +129,7 @@ data class ViewerUiState(
     /** A whole-trip ZIP is being written for Share; further taps are ignored until it is done. */
     val busy: Boolean = false,
     /** One-shot: the share sheet for the written ZIP; the screen starts it, then calls consumeShare. */
-    val pendingShare: Intent? = null,
+    val pendingShare: ShareRequest? = null,
     /** One-shot snackbar text that is not a survey edit's (a failed export); the screen calls dismissMessage. */
     val message: String? = null,
 ) {
@@ -166,10 +174,10 @@ class ViewerViewModel(
     /** Tests pass Dispatchers.Unconfined so file work finishes inside the call. */
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     /**
-     * Writes the whole-trip ZIP and returns the share sheet's intent (TripExporter, which needs a Context, so it
+     * Writes the whole-trip ZIP and returns what opens its share sheet (TripExporter, which needs a Context, so it
      * comes in as a function); null hides Share and Export ZIP.
      */
-    private val shareTrip: (suspend (tripId: Long) -> Intent)? = null,
+    private val shareTrip: (suspend (tripId: Long) -> ShareRequest)? = null,
 ) : ViewModel() {
 
     private val _ui = MutableStateFlow(ViewerUiState(canShare = shareTrip != null))
@@ -489,7 +497,7 @@ class ViewerViewModel(
                 outcome.exceptionOrNull()?.let { e -> if (e is CancellationException) throw e }
                 _ui.update { state ->
                     outcome.fold(
-                        onSuccess = { intent -> state.copy(pendingShare = intent) },
+                        onSuccess = { request -> state.copy(pendingShare = request) },
                         onFailure = { e -> state.copy(message = "Export failed: ${describe(e)}") },
                     )
                 }

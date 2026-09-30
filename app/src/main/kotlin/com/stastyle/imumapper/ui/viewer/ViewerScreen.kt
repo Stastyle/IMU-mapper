@@ -102,7 +102,10 @@ fun ViewerScreen(
             container.tripFiles,
             container.tripProcessor,
             surveys = container.surveyStore,
-            shareTrip = { id -> container.tripExporter.export(id).shareIntent },
+            shareTrip = { id ->
+                val intent = container.tripExporter.export(id).shareIntent
+                ShareRequest { ctx -> ctx.startActivity(intent) }
+            },
         )
     }
     val ui by vm.ui.collectAsStateWithLifecycle()
@@ -189,8 +192,8 @@ fun ViewerScreen(
         vm.consumeCsvShare()
     }
     LaunchedEffect(ui.pendingShare) {
-        val intent = ui.pendingShare ?: return@LaunchedEffect
-        runCatching { context.startActivity(intent) }
+        val request = ui.pendingShare ?: return@LaunchedEffect
+        runCatching { request.launch(context) }
         vm.consumeShare()
     }
 

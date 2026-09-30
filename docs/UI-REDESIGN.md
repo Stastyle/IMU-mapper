@@ -350,9 +350,11 @@ when recording stopped. Buttons: Survey mode, Export ZIP (same as Share), Debug.
 
 ViewModel:
 
-- Optional last constructor parameter `shareTrip: (suspend (tripId: Long) -> Intent)? = null`
-  (TripExporter is final and needs a Context). ViewerScreen passes
-  `{ container.tripExporter.export(it).shareIntent }`. `share()` ignores taps while busy, sets
+- Optional last constructor parameter `shareTrip: (suspend (tripId: Long) -> ShareRequest)? = null`
+  (TripExporter is final and needs a Context). `ShareRequest` is a pure
+  `fun interface { fun launch(context: Context) }`, so the tests never build an Intent. ViewerScreen
+  passes a lambda that exports and returns `ShareRequest { ctx -> ctx.startActivity(intent) }` around
+  the export's `shareIntent`. `share()` ignores taps while busy, sets
   `busy`, stores `pendingShare` or the one-shot `message`, clears `busy`; `consumeShare()`.
 - `options` default `ColorMode.PROGRESS`.
 - `setViewport` also refits when the camera is still the last fit (the canvas height changes

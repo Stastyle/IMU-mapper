@@ -1,6 +1,5 @@
 package com.stastyle.imumapper.ui.viewer
 
-import android.content.Intent
 import com.stastyle.imumapper.SurveyFixtures
 import com.stastyle.imumapper.data.FakeTripRepository
 import com.stastyle.imumapper.data.TripFiles
@@ -101,7 +100,7 @@ class ViewerViewModelTest {
     }
 
     /** The viewer with its run loaded (file work runs inside the call); no canvas has been measured yet. */
-    private fun viewer(tripId: Long, shareTrip: (suspend (Long) -> Intent)? = null): ViewerViewModel =
+    private fun viewer(tripId: Long, shareTrip: (suspend (Long) -> ShareRequest)? = null): ViewerViewModel =
         ViewerViewModel(
             tripId,
             trips,
@@ -200,9 +199,9 @@ class ViewerViewModelTest {
     // --- share ---
 
     @Test
-    fun shareIsBusyUntilTheZipIsWrittenIgnoresASecondTapAndHandsOverTheIntent() = runBlocking<Unit> {
+    fun shareIsBusyUntilTheZipIsWrittenIgnoresASecondTapAndHandsOverTheShareSheet() = runBlocking<Unit> {
         val id = processedTrip()
-        val gate = CompletableDeferred<Intent>()
+        val gate = CompletableDeferred<ShareRequest>()
         val requested = ArrayList<Long>()
         val vm = viewer(id) { tripId ->
             requested += tripId
@@ -217,10 +216,10 @@ class ViewerViewModelTest {
         vm.share()
         assertEquals(listOf(id), requested)
 
-        val intent = Intent()
-        gate.complete(intent)
+        val request = ShareRequest { }
+        gate.complete(request)
         assertFalse(vm.ui.value.busy)
-        assertSame(intent, vm.ui.value.pendingShare)
+        assertSame(request, vm.ui.value.pendingShare)
         assertNull(vm.ui.value.message)
 
         vm.consumeShare()
@@ -251,7 +250,7 @@ class ViewerViewModelTest {
         val requested = ArrayList<Long>()
         val recording = viewer(trip(TripStatus.RECORDING)) { tripId ->
             requested += tripId
-            Intent()
+            ShareRequest { }
         }
         assertTrue(recording.ui.value.canShare)
         assertFalse(recording.ui.value.shareEnabled)
