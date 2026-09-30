@@ -23,12 +23,31 @@ such as caves.
   is detected on its own and does not turn the path; "re-orient" is only for turning the phone in
   your hand without tilting it, and you tap it as you do so.
   While the app is on screen, a volume key marks a waypoint.
-- **3D viewer.** Orbit, zoom and pan, with a floor grid and a north arrow. North is magnetic north,
-  read from the compass as the recording starts, unless the "North from compass" setting is off;
-  then it is wherever the gyro started. The path can be coloured by time, altitude or source.
-  Markers and photos can be tapped. You can switch to the path before loop closure and smoothing,
-  or overlay an earlier processing run.
-- **Survey mode (beta).** The ruler icon in the viewer turns the trip into a north-up plan of
+- **A dark navy app with four tabs:** Trips, Record, Calibrate and Settings. The Record tab picks the
+  capture mode and shows the battery; the next step picks where the phone is carried and starts the
+  recording. While a trip records, the tab shows a dot and offers a way back to the recording.
+- **Recording screen.** A status line ("Sensors OK", "Paused", or which sensor has stopped
+  delivering), the battery, tiles for the IMU, the step detector, the heading and the magnetometer's
+  accuracy, the active time, the steps and marks, and an estimated distance (steps × the saved
+  stride; the real one is computed when you stop). Pause, Stop and the waypoint flag stay at the
+  bottom with the other marks.
+- **Trips tab.** Each trip is a card with a thumbnail of its path, its status, and the duration,
+  distance and steps of its latest processing run. Search by name, filter by mode or by whether a
+  trip has been processed, and sort by date, name, distance or duration.
+- **Trip viewer** in four tabs:
+  - **Path:** the 3D path above a trip summary (distance, duration, steps, height range, loop
+    closure error, share of VIO points) and an elevation profile.
+  - **3D:** the same path at full height. Orbit, zoom and pan, with a floor grid and a north arrow.
+  - **Graph:** the elevation profile with the lowest and highest point, the net change and the
+    total climb and descent (rises and drops of 0.5 m or more).
+  - **Details:** the processing runs, the raw-path switch and the trip's facts.
+
+  North is magnetic north, read from the compass as the recording starts, unless the "North from
+  compass" setting is off; then it is wherever the gyro started. The path is coloured by distance
+  walked, blue at the start to red at the end, or by time, altitude or source. Markers and photos can
+  be tapped. You can switch to the path before loop closure and smoothing, or overlay an earlier
+  processing run.
+- **Survey mode (beta).** The ruler button on the viewer's map turns the trip into a north-up plan of
   stations: the start, the end, the marks made while walking, and every turn of the path, found
   automatically. Tap a stretch or a chain of stations to read its length, azimuth and slope, add or
   move stations, and export the legs as a CSV. North can be corrected with a bearing from a hand
@@ -36,14 +55,17 @@ such as caves.
   re-processing. The survey is kept in `survey.json` next to the trip and travels in its ZIP.
 - **Re-processing.** Raw logs are kept, and every processing run is stored as a new version, so an
   old trip can be run again with a better algorithm or calibration.
-- **Calibration.** Guided flows measure still bias, stride (Weinberg `k`) and heading offset, run a
-  square closure test, and compare ARCore with dead reckoning. **Assisted tuning** builds a prompt
-  about a walk you describe, which you give to a chat model. The app checks the model's proposed
-  settings and scores them before you can save them.
-- **Debug screen.** Live sensor plots, a raw-log summary, a config editor that re-processes the
-  trip, and the last crash report with Copy and Share.
-- **Export and import.** A trip (raw log, every run, photos, survey) is exported as a ZIP from the trip
-  list, and a ZIP or a bare `.imul` log can be imported.
+- **Calibration** (the Calibrate tab). Guided flows measure still bias, stride (Weinberg `k`) and
+  heading offset, run a square closure test, and compare ARCore with dead reckoning. **Assisted
+  tuning** (in Calibrate and Settings → Tools) builds a prompt about a walk you describe, which you
+  give to a chat model. The app checks the model's proposed settings and scores them before you can
+  save them.
+- **Debug screen** (from the Trips menu, Settings → Tools, or a trip's viewer). Live sensor plots, a
+  raw-log summary, a config editor that re-processes the trip, and the last crash report with Copy
+  and Share.
+- **Export and import.** A trip (raw log, every run, photos, survey) is exported as a ZIP from its
+  card's menu on the Trips tab or with Share in the viewer, and a ZIP or a bare `.imul` log can be
+  imported from the Trips menu.
 - **Self-update** from GitHub Releases.
 
 ## Install
@@ -52,7 +74,7 @@ Download `imu-mapper-vX.Y.Z.apk` from the
 [latest release](https://github.com/Stastyle/IMU-mapper/releases/latest) and open it on the phone.
 Android asks you to allow installs from that source once. After that the app finds new releases
 itself, either from **Settings → Check for updates** or from a check at app start (at most once a
-day, shown as a banner on the trip list). To update:
+day, shown as a banner on the Trips tab and a dot on the Settings tab). To update:
 1. Tap **Update** to download the release. The app verifies its sha256.
 2. Tap **Install** to hand it to the system installer, and confirm there.
 

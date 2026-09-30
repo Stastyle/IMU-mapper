@@ -595,3 +595,29 @@ one run; honest status precedence and step-detector handling on the recording sc
 tab's climb and descent use a dead band; thumbnails never recreate deleted trip folders; the
 share action is testable without Android classes; an accessibility contract for the custom
 components.
+
+## 14. As built
+
+Implemented in work items A1 to F, each built and tested on its own branch, then reviewed by a
+second agent before merging, then reviewed again as a whole. Differences from the text above, kept
+on purpose:
+
+- Text direction: every theme text style takes its direction from its own text and aligns to the
+  layout's start, as Android's views do (`Theme.kt`); `layoutTextAlign()` gives screen-aligned
+  columns. Without this, English lines were reordered on Hebrew phones.
+- New trip page: the recording card is a title plus a status line (mode · clock · Paused), and the
+  device card names the phone's maker and model next to the battery.
+- Recording: in Pocket mode the stats card's large clock replaces the Time tile. The IMU and Heading
+  tiles read "Waiting" during the first 2 s of active time, and the 2 s grace also covers the
+  accelerometer and gyroscope, so a start never flashes a red fault. The saved carry no longer
+  overwrites a running recording's carry or a chip the user has just picked.
+- Viewer: in Survey mode the subtitle leaves out the date; Top view, Side view and Fit to path from
+  the overflow switch to the Path tab first; Closure without a closed loop reads "—" with "no loop
+  closed"; the Vertical detail shows signed numbers without a unit; the error line sits where each
+  tab has room (under the tabs on Graph and Details, under the canvas on Path, over it on 3D).
+- Trips: the stats row uses the shared `StatGrid` (icon and label, value below); the sort labels
+  say their direction ("Distance (longest)").
+- Calibration preview: the grid spacing follows the ground shown (1 m for the square test, wider on
+  long tuning walks), and the chip names it.
+- Components: `StatGrid` also balances rows (4 tiles become 2 × 2, 5 become 3 + 2); battery text is
+  "92 %", like the app's other percentages; the Start / End label merge distance is 24 dp.

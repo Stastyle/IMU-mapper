@@ -35,8 +35,12 @@ optionally ARCore, and shows the route as a 3D line, for mapping places without 
     default, so follow the `survey.json` rules in `.claude/rules/pipeline.md`.
   - `process/TripProcessor`.
   - `render/`: pure scene, camera and survey-layer code (`PathScene`, `OrbitCamera`, `SurveyLayer`,
-    `ProjectedSurvey`) and the Compose drawing in `PathRenderer` and `SurveyRenderer`.
-  - `ui/<screen>/`, `update/` (the GitHub Releases updater) and `debug/CrashLog`.
+    `ProjectedSurvey`), the colour ramp, elevation profile and thumbnail helpers (`PathProgress`,
+    `PathProfile`, `PathThumbnail`), and the Compose drawing in `PathRenderer` and `SurveyRenderer`.
+  - `ui/theme/` (the dark navy colour scheme and extra tokens), `ui/common/` (shared components and
+    the unit formatters), `ui/nav/` (routes, the graph and the bottom tabs), `ui/<screen>/`,
+    `update/` (the GitHub Releases updater) and `debug/CrashLog`. `docs/UI-REDESIGN.md` records the
+    design decisions behind the current look.
 - `tools/replay.py`: a Python port of the PDR pipeline for offline experiments.
 - `.github/workflows/`: `ci.yml` (tests) and `release.yml` (signed APK to GitHub Releases).
 
@@ -131,7 +135,7 @@ if a release is wanted after one of those. So:
   started there (Re-process, PDR only, VIO only), uses 4.0 whatever the calibration holds.
 - `docs/PLAN.md` names classes that do not exist (`LogCodec`, `VioFuser`, `ProcessTrip`,
   `ArCoreSession`), calls `release.yml` manual-only, and puts ZIP export on the Debug screen. Export
-  is on the trip list.
+  is on the trip cards' menu and the viewer's Share.
 
 ## Git
 
