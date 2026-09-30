@@ -40,6 +40,7 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextDirection
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -129,11 +130,19 @@ private fun RecordingCard(recording: RecordingState.Recording, onReturn: () -> U
                         style = MaterialTheme.typography.titleMedium,
                         modifier = Modifier.semantics { heading() },
                     )
-                    // Separate texts, so the clock keeps its left-to-right order on a right-to-left phone.
+                    // Separate texts, so the clock keeps its left-to-right order on a right-to-left phone. At a
+                    // large font the mode name gives way (the icon still shows it), never the clock or "Paused".
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         val quiet = MaterialTheme.colorScheme.onSurfaceVariant
                         val body = MaterialTheme.typography.bodyMedium
-                        Text(TripFormat.modeLabel(recording.mode), style = body, color = quiet)
+                        Text(
+                            TripFormat.modeLabel(recording.mode),
+                            style = body,
+                            color = quiet,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
                         Separator(body)
                         Text(
                             formatClock(recording.elapsedNs),
