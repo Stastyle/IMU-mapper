@@ -4,6 +4,7 @@ import com.stastyle.imumapper.pipeline.core.PathPoint
 import com.stastyle.imumapper.render.PathThumbnail
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -150,8 +151,19 @@ class TripThumbnails internal constructor(
             return
         }
         // The trip may have been deleted after the decode, with this file landing in its folder while the folder was
-        // being removed. Its row goes before its files, so a missing row means the sidecar must go too.
-        if (trips.getTrip(key.tripId) == null) target.delete()
+        // being removed. Its row goes before its files, so a missing row means the sidecar must go too, and the folder
+        // with it once empty (delete() leaves a folder that still holds anything). The deletion also removes the card,
+        // which cancels the caller, so the check must not be skipped then; a check that fails counts as a missing row,
+        // since a lost sidecar is only made again.
+        val rowExists = try {
+            withContext(NonCancellable) { trips.getTrip(key.tripId) != null }
+        } catch (e: Exception) {
+            false
+        }
+        if (!rowExists) {
+            target.delete()
+            target.parentFile?.delete()
+        }
     }
 
     private fun tripFolder(tripId: Long): File = File(files.root, tripId.toString())

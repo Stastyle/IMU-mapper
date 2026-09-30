@@ -8,6 +8,10 @@ import com.stastyle.imumapper.pipeline.core.TripMode
 import com.stastyle.imumapper.pipeline.core.Vec3
 import com.stastyle.imumapper.render.PathThumbnail
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
@@ -198,6 +202,31 @@ class TripThumbnailsTest {
         assertNotNull(cache.get(id, 1))
         assertFalse(cache.sidecarFile(id, 1).exists())
         assertFalse(File(tripFolder(id), cache.sidecarFile(id, 1).name + ".tmp").exists())
+    }
+
+    @Test
+    fun aCancelledCallerStillClearsUpAfterADeletedTrip() = runBlocking {
+        val id = tripWithRun()
+        var rowGone = false
+        // Like Room's suspending queries, this getTrip throws once its caller is cancelled.
+        val room = object : TripRepository by trips {
+            override suspend fun getTrip(tripId: Long): TripEntity? {
+                currentCoroutineContext().ensureActive()
+                return if (rowGone) null else trips.getTrip(tripId)
+            }
+        }
+        lateinit var card: Job
+        val cache = TripThumbnails(files, room, json, Dispatchers.Unconfined) {
+            // The delete removed the row, which took the card off the screen, and is emptying the folder.
+            rowGone = true
+            File(tripFolder(id), TripFiles.RESULTS_DIR_NAME).deleteRecursively()
+            card.cancel()
+        }
+        card = launch { cache.get(id, 1) }
+        card.join()
+        assertTrue(card.isCancelled)
+        assertFalse(cache.sidecarFile(id, 1).exists())
+        assertFalse(tripFolder(id).exists(), "the folder the delete emptied is not left behind")
     }
 
     @Test
