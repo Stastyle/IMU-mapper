@@ -368,6 +368,21 @@ class PathSceneTest {
     }
 
     @Test
+    fun aSelectedMarkerIsFoundAgainAfterAThemeChange() {
+        val r = result(n = 20)
+        val dark = PathScene.build(r)
+        val light = PathScene.build(r, SceneOptions(palette = CanvasPalette.Light))
+        // The marker the viewer kept from the dark scene differs from the light scene's copy in colour, so plain
+        // equality would drop the selection and its card.
+        assertEquals(-1, light.markers.indexOf(dark.markers[1]))
+        for (i in dark.markers.indices) assertEquals(i, light.indexOfMarker(dark.markers[i]), "marker $i")
+        assertEquals(1, dark.indexOfMarker(dark.markers[1]))
+        // Only the colour is ignored: a marker that is not in the scene is still not found.
+        assertEquals(-1, light.indexOfMarker(dark.markers[1].copy(detail = "right fork")))
+        assertEquals(-1, light.indexOfMarker(dark.markers[2].copy(position = Vec3(9.0, 9.0, 9.0))))
+    }
+
+    @Test
     fun packOrdersByDepthThenIndex() {
         assertTrue(ProjectedScene.pack(1.5f, 7) < ProjectedScene.pack(2.0f, 3))
         assertTrue(ProjectedScene.pack(2.0f, 3) < ProjectedScene.pack(2.0f, 4))

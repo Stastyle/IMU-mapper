@@ -194,7 +194,7 @@ class CanvasPalette private constructor(
             stretch = argb(200, 255, 235, 59),
             cursor = argb(255, 255, 64, 129),
             surveyLabel = argb(230, 255, 255, 255),
-            // Dark on every station fill, all of which are light.
+            // Dark on every station fill, each light enough for 4.5:1 under it.
             stationOrder = rgb(0x0A1424),
         )
 
@@ -271,7 +271,7 @@ class CanvasPalette private constructor(
             stretch = argb(166, 0xF5, 0x9E, 0x0B),
             cursor = rgb(0xC2185B),
             surveyLabel = rgb(0x0F172A),
-            // White on every station fill, all of which are dark enough to reach 3:1 on the canvas.
+            // White on every station fill, each dark enough for 4.5:1 under it.
             stationOrder = rgb(WHITE),
         )
     }

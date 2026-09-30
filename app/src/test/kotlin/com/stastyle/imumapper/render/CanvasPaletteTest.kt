@@ -119,11 +119,24 @@ class CanvasPaletteTest {
                 assertContrast(4.5, p.stationOrder, p.forStation(k), "${name(p)} chain number on $k")
             }
         }
-        // Light draws the axis letters in the axis colours, over a halo; they are text there, so 4.5:1.
+        // The axis and north letters are drawn in the axis colours, so those are text colours too.
         val light = CanvasPalette.Light
         for (axis in listOf(light.axisEast, light.axisNorth, light.axisUp, light.northArrow)) {
             assertContrast(4.5, axis, light.background, "Light axis letter %08X".format(axis))
         }
+        val dark = CanvasPalette.Dark
+        for (axis in listOf(dark.axisNorth, dark.axisUp, dark.northArrow)) {
+            assertContrast(4.5, axis, dark.background, "Dark axis letter %08X".format(axis))
+        }
+    }
+
+    @Test
+    fun darksEastLetterIsItsOneShortfall() {
+        // Dark's red E is 4.4:1 on the navy, just short of text contrast. It is today's look, which the light theme
+        // must not change, and a bold one-letter label at the end of its own red axis line.
+        val dark = CanvasPalette.Dark
+        assertContrast(4.3, dark.axisEast, dark.background, "Dark E")
+        assertTrue(contrast(dark.axisEast, dark.background) < 4.5, "the exception above is no longer needed")
     }
 
     @Test

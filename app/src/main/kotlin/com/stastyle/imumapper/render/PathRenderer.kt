@@ -242,10 +242,11 @@ object PathRenderer {
     }
 
     /**
-     * An opaque stroke in [color], wider than the line, under each visible segment of the main path: on a light
-     * canvas it lifts the path off the grid and keeps it whole where it crosses the axes or an overlaid run. All of
-     * them go down before any line, as the glow does, so where the path crosses itself both stretches stay unbroken.
-     * Round caps close the joints; the casing is opaque, so overlapping caps cannot stack into a darker band.
+     * An opaque stroke in [color], wider than the line, under each visible segment of the main path: a white edge
+     * that sets the path off from the light canvas and hides the point cloud right under it. All of them go down
+     * before any line, as the glow does, so where the path crosses itself both stretches stay unbroken; the grid, the
+     * axes and an overlaid run are still drawn in depth order with the path, so they cross the casing as they cross
+     * the glow. Round caps close the joints; the casing is opaque, so overlapping caps cannot stack into a darker band.
      */
     private fun DrawScope.drawCasing(projected: ProjectedScene, color: Color) {
         val scene = projected.scene

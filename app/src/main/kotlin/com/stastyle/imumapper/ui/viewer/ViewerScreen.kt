@@ -58,7 +58,6 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.stastyle.imumapper.data.SurveyShare
 import com.stastyle.imumapper.render.CameraPreset
 import com.stastyle.imumapper.render.PathScene
-import com.stastyle.imumapper.render.SceneMarker
 import com.stastyle.imumapper.render.SceneModel
 import com.stastyle.imumapper.render.SurveyHit
 import com.stastyle.imumapper.render.canvasPalette
@@ -147,11 +146,7 @@ fun ViewerScreen(
         result?.let { PathScene.build(it, options, overlay) }
     }
     val selectedMarker = ui.selectedMarker
-    val selectedIndex = if (scene == null || selectedMarker == null) {
-        -1
-    } else {
-        scene.markers.indexOfFirst { sameMarker(it, selectedMarker) }
-    }
+    val selectedIndex = if (scene == null || selectedMarker == null) -1 else scene.indexOfMarker(selectedMarker)
     // The scene's copy, so the card's swatch has the colour of the theme in use.
     val shownMarker = scene?.markers?.getOrNull(selectedIndex)?.takeIf { !ui.surveyMode }
     // The gesture callbacks are created once; the tap handler reads the scene through a state holder
@@ -508,12 +503,6 @@ fun ViewerScreen(
         }
     }
 }
-
-/**
- * Whether [a] and [b] are the same marker of the path. Not `==`: a marker's colour comes from the theme's canvas
- * palette, so after a theme change the marker the view model holds differs from the rebuilt scene's in colour alone.
- */
-private fun sameMarker(a: SceneMarker, b: SceneMarker): Boolean = a == b.copy(color = a.color)
 
 /**
  * The trip's name over the date, the run and "raw". Outside Survey mode: Share (when an exporter is wired) and

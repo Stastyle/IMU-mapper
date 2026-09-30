@@ -68,12 +68,20 @@ class SceneModel(
     val labels: List<SceneLabel>,
     /**
      * Lines [pathLineStart] until [pathLineEnd] are the main path's segments, the only ones the renderer draws a glow
-     * under: the grid, the axes and an overlaid run lie outside the range. Empty when the path has no segment.
+     * or a casing under: the grid, the axes and an overlaid run lie outside the range. Empty when the path has no
+     * segment.
      */
     val pathLineStart: Int = 0,
     val pathLineEnd: Int = 0,
 ) {
     fun isPathLine(line: Int): Boolean = line >= pathLineStart && line < pathLineEnd
+
+    /**
+     * Where [marker] is in [markers], or -1, matching every field but the colour. The colour comes from the canvas
+     * palette, so after a theme change a marker kept from the old scene differs from the rebuilt scene's copy in
+     * colour alone, and `indexOf` would lose the selection.
+     */
+    fun indexOfMarker(marker: SceneMarker): Int = markers.indexOfFirst { it == marker.copy(color = it.color) }
 }
 
 /** ARGB colour helpers; Compose's Color is not available in pure Kotlin. */
