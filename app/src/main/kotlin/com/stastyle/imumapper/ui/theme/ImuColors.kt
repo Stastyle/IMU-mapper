@@ -43,6 +43,8 @@ data class ImuColors(
      * `onSurface` would turn dark under a light theme and vanish on the scrim.
      */
     val onCameraOverlay: Color,
+    /** True for the light scheme; screens that draw their own canvas pick the matching `CanvasPalette` with it. */
+    val isLight: Boolean = false,
 )
 
 internal val DarkImuColors = ImuColors(

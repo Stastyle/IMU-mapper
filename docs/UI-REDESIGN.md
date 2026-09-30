@@ -628,3 +628,57 @@ on purpose:
   "92 %", like the app's other percentages; the Start and End labels merge within 24 dp, and past
   that a label that would cover the other marker or its label moves to the other side of its marker
   (and merges after all when that side is blocked too).
+
+## 15. Light theme
+
+The redesign first shipped dark-only (D1). This section adds a light theme with the same brand, and
+a setting to choose.
+
+Decisions:
+
+| # | Question | Decision | Why |
+|---|---|---|---|
+| L1 | Which theme | Settings → Appearance: System (default), Light, Dark | System matches what the app did before the redesign, when it followed the phone. |
+| L2 | Where the choice lives | `UpdatePreferences` (DataStore) key `theme_mode`, stored by enum name, unknown names read as System | The app's only DataStore already keeps the Settings defaults. |
+| L3 | Applying it | `ImuMapperTheme(dark)` from `MainActivity`, which collects the setting. On API 31+ also `UiModeManager.setApplicationNightMode`, so the window background, the splash and `values-night` resources match from cold start; on API 30 Compose alone follows the setting | Without the platform night mode, a phone in light mode with the app set to Dark would flash a light window at every start. |
+| L4 | Maps and charts in light mode | Not a dark box: a light canvas (`#EEF2F7`, very light grey-blue, a hairline border against the white cards) with its own palette. Same hue order as dark, in darker tones, so "blue is the start, red is the end" means the same in both themes | The dark palette on a light background falls far below 3:1 (yellow 1.4:1, cyan 1.6:1, green 1.7:1), and a grey canvas is worse (yellow 1.1:1). |
+| L5 | Glow in light mode | A white casing under the path (a wider white stroke first), the cartographic technique for light maps; the glow stays in dark mode | A glow on a light background reads as a smudge. |
+| L6 | Camera preview overlay | Stays dark in both themes | The camera image does not follow the theme. |
+
+Light colour scheme (all 36 roles, checked like 4.1: `primary` and `error` are text colours and must
+reach 4.5:1 on white and on the page background; `outline` reaches 3:1):
+
+| Role | Light |
+|---|---|
+| background / onBackground | `#F5F7FA` / `#0F1B2D` |
+| surface / onSurface | `#FFFFFF` / `#0F1B2D` |
+| surfaceVariant / onSurfaceVariant | `#E6ECF3` / `#4A5B72` |
+| surfaceContainerLowest / Low / (default) / High / Highest | `#FFFFFF` / `#F7F9FC` / `#F1F4F9` / `#EBEFF5` / `#E4E9F0` |
+| primary / onPrimary / primaryContainer / onPrimaryContainer | `#1565C0` / `#FFFFFF` / `#D6E6FA` / `#0B2F5C` |
+| secondary / onSecondary / secondaryContainer / onSecondaryContainer | `#0277BD` / `#FFFFFF` / `#DCEBFA` / `#0B2F5C` |
+| tertiary / onTertiary / tertiaryContainer / onTertiaryContainer | `#B45309` / `#FFFFFF` / `#FDECD3` / `#5A2E02` |
+| error / onError / errorContainer / onErrorContainer | `#C62828` / `#FFFFFF` / `#FDE3E3` / `#6B1010` |
+| outline / outlineVariant | `#6B7C93` / `#D5DEEA` |
+| inverseSurface / inverseOnSurface / inversePrimary | `#1B2838` / `#EEF2F7` / `#90CAF9` |
+
+Extended (light): page gradient `#EEF3FA` → `#F8FAFD`; `cardFill` white at 92 %; `cardBorder
+#D5DEEA`; `cardBorderStrong #1976D2`; `brandFill #1976D2` / white; `success #047857` on
+`successContainer #D1FAE5`; `warning #B45309`; `stopRed #D32F2F` / white; `canvasBackground
+#EEF2F7`; `onCameraOverlay` white; `isLight = true`. Values may be adjusted where a contrast test
+shows a pair short of its target.
+
+Canvas palette (`render/CanvasPalette.kt`, pure ARGB, `Dark` = today's colours, `Light` new): every
+colour the scene, the survey layer, the thumbnails, the elevation chart and the calibration preview
+draw comes from it. Light progress stops `#1D4ED8`, `#0891B2`, `#059669`, `#A16207`, `#EA580C`,
+`#DC2626` (3.2 to 6.0:1 on `#EEF2F7`); the time, altitude, source, annotation, axis and north-arrow
+colours get darker variants too; grid lines slate at low alpha; labels dark (`#0F172A`) with a white
+halo; marker rings white with a thin dark outline; survey chords dark on a white underlay, and order
+numbers on station dots readable on the dot. A JVM test checks every line and marker colour, and
+the progress ramp sampled every 5 %, at 3:1 or more against the palette's background, and label text
+at 4.5:1, in both palettes.
+
+Work split: T1 theme, setting and the light audit of every screen outside the canvas files; T2 the
+canvas palette and everything that draws a map, a thumbnail or a chart (`render/*`,
+`ui/viewer/ViewerCanvas.kt`, `ui/viewer/ViewerScreen.kt` scene plumbing, `ui/viewer/ElevationChart.kt`,
+`ui/triplist/TripCard.kt`, `ui/calibration/CalibrationCards.kt`). Both read the theme through
+`MaterialTheme.imuColors.isLight`.
