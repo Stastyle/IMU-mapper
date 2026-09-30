@@ -3,6 +3,7 @@ package com.stastyle.imumapper.ui.viewer
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -65,8 +66,13 @@ internal fun CanvasTopButtons(
 }
 
 /**
- * The bottom-right column: the 3D/2D switch, named for where it goes (a top-down camera offers "3D"), the
+ * The bottom-right group: the 3D/2D switch, named for where it goes (a top-down camera offers "3D"), the
  * View options behind Layers, and the switch between the Path tab's short canvas and the 3D tab's tall one.
+ *
+ * A column over the 3D tab's tall canvas. [horizontal] lays it out as a row, for the Path tab: a column there
+ * needs 156 dp under the top-right one's 104 dp, more than the short canvas has with a larger Screen zoom or
+ * 3-button navigation, and the overlapping 3D/2D button took taps meant for Survey mode. The row keeps its
+ * order in a right-to-left language, like the canvas it sits on.
  */
 @Composable
 internal fun CanvasBottomButtons(
@@ -75,29 +81,47 @@ internal fun CanvasBottomButtons(
     camera: OrbitCamera,
     fullHeight: Boolean,
     onFullHeight: (Boolean) -> Unit,
+    horizontal: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        val topDown = camera.isTopDown
-        RoundIconButton(
-            onClick = { vm.applyPreset(if (topDown) CameraPreset.THREE_D else CameraPreset.TOP) },
-            text = if (topDown) "3D" else "2D",
-            contentDescription = if (topDown) "Switch to 3D view" else "Switch to top view",
-        )
-        ViewOptionsButton(ui, vm)
-        if (fullHeight) {
-            RoundIconButton(
-                onClick = { onFullHeight(false) },
-                icon = Icons.Filled.FullscreenExit,
-                contentDescription = "Exit full height",
-            )
-        } else {
-            RoundIconButton(
-                onClick = { onFullHeight(true) },
-                icon = Icons.Filled.Fullscreen,
-                contentDescription = "Full height",
-            )
+    if (horizontal) {
+        Row(modifier = modifier, horizontalArrangement = Arrangement.Absolute.spacedBy(4.dp)) {
+            BottomButtons(ui, vm, camera, fullHeight, onFullHeight)
         }
+    } else {
+        Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            BottomButtons(ui, vm, camera, fullHeight, onFullHeight)
+        }
+    }
+}
+
+@Composable
+private fun BottomButtons(
+    ui: ViewerUiState,
+    vm: ViewerViewModel,
+    camera: OrbitCamera,
+    fullHeight: Boolean,
+    onFullHeight: (Boolean) -> Unit,
+) {
+    val topDown = camera.isTopDown
+    RoundIconButton(
+        onClick = { vm.applyPreset(if (topDown) CameraPreset.THREE_D else CameraPreset.TOP) },
+        text = if (topDown) "3D" else "2D",
+        contentDescription = if (topDown) "Switch to 3D view" else "Switch to top view",
+    )
+    ViewOptionsButton(ui, vm)
+    if (fullHeight) {
+        RoundIconButton(
+            onClick = { onFullHeight(false) },
+            icon = Icons.Filled.FullscreenExit,
+            contentDescription = "Exit full height",
+        )
+    } else {
+        RoundIconButton(
+            onClick = { onFullHeight(true) },
+            icon = Icons.Filled.Fullscreen,
+            contentDescription = "Full height",
+        )
     }
 }
 

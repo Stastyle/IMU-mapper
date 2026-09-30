@@ -73,6 +73,12 @@ private const val PATH_CANVAS_WEIGHT = 0.42f
 
 /** Room the bottom-right buttons need beside a card over the 3D canvas, so they stay tappable. */
 private val OverlayEndClearance = 64.dp
+
+/**
+ * Room the Path tab's row of bottom-right buttons takes from the grid chip: three 48 dp targets 4 dp apart, 4 dp
+ * from the edge, and a gap. A 360 dp wide screen still leaves the chip about 150 dp.
+ */
+private val PathRowClearance = 164.dp
 private val CanvasShape = RoundedCornerShape(20.dp)
 
 /**
@@ -278,6 +284,7 @@ fun ViewerScreen(
                                 onFullHeight = { full ->
                                     tabIndex = if (full) ViewerTab.THREE_D.ordinal else ViewerTab.PATH.ordinal
                                 },
+                                horizontal = shownTab == ViewerTab.PATH,
                                 modifier = Modifier.align(AbsoluteAlignment.BottomRight).padding(4.dp),
                             )
                         }
@@ -334,9 +341,12 @@ fun ViewerScreen(
                                 )
                             }
                         }
+                        // The Path tab: the chip ends before the row of bottom buttons, however large the text.
                         scene != null && gridChip != null -> GridScaleChip(
                             gridChip,
-                            Modifier.align(AbsoluteAlignment.BottomLeft).absolutePadding(left = 12.dp, bottom = 16.dp),
+                            Modifier
+                                .align(AbsoluteAlignment.BottomLeft)
+                                .absolutePadding(left = 12.dp, right = PathRowClearance, bottom = 16.dp),
                         )
                     }
                 }
