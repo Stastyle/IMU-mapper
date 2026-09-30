@@ -4,7 +4,6 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -40,10 +39,12 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDirection
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import com.stastyle.imumapper.pipeline.core.Vec3
 import com.stastyle.imumapper.render.PathProgress
@@ -54,6 +55,7 @@ import com.stastyle.imumapper.ui.common.GridScaleChip
 import com.stastyle.imumapper.ui.common.SectionHeader
 import com.stastyle.imumapper.ui.theme.imuColors
 import kotlin.math.floor
+import kotlin.math.max
 import kotlin.math.roundToInt
 
 /**
@@ -172,19 +174,15 @@ private fun RunningBody(kind: FlowKind, phase: FlowPhase.Running, onStop: () -> 
 
 /**
  * Label / value line used by every result body, read by TalkBack as one item. The value is laid out
- * left to right with even digit widths, so signs and columns of numbers stay put on any phone.
+ * left to right with even digit widths, so signs and columns of numbers stay put on any phone. The label
+ * sits at the start and the value at the end; when they do not fit on one line the widths follow
+ * [CalibrationMath.valueRowValueWidth], so whichever is longer wraps and neither disappears.
  */
 @Composable
 fun ValueRow(label: String, value: String, highlight: Boolean = false) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .semantics(mergeDescendants = true) {},
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        // The rest of the row, the value at its end: a long value wraps there instead of hiding the label.
-        Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.TopEnd) {
+    Layout(
+        content = {
+            Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(
                 value,
                 style = MaterialTheme.typography.bodyMedium.copy(
@@ -194,9 +192,29 @@ fun ValueRow(label: String, value: String, highlight: Boolean = false) {
                 color = MaterialTheme.colorScheme.onSurface,
                 fontWeight = if (highlight) FontWeight.Bold else FontWeight.Normal,
             )
+        },
+        modifier = Modifier
+            .fillMaxWidth()
+            .semantics(mergeDescendants = true) {},
+    ) { measurables, constraints ->
+        val (labelText, valueText) = measurables
+        val gap = VALUE_ROW_GAP.roundToPx()
+        val labelWants = labelText.maxIntrinsicWidth(Constraints.Infinity)
+        val valueWants = valueText.maxIntrinsicWidth(Constraints.Infinity)
+        val width = if (constraints.hasBoundedWidth) constraints.maxWidth else labelWants + gap + valueWants
+        val valueWidth = CalibrationMath.valueRowValueWidth(width, gap, labelWants, valueWants)
+        val valuePlaced = valueText.measure(Constraints(maxWidth = valueWidth))
+        val labelPlaced = labelText.measure(Constraints(maxWidth = max(width - gap - valuePlaced.width, 0)))
+        layout(width, max(labelPlaced.height, valuePlaced.height)) {
+            // Relative, so a right-to-left phone mirrors the row as it would a Row.
+            labelPlaced.placeRelative(0, 0)
+            valuePlaced.placeRelative(width - valuePlaced.width, 0)
         }
     }
 }
+
+/** Space kept between a [ValueRow]'s label and its value. */
+private val VALUE_ROW_GAP = 12.dp
 
 @Composable
 fun StillBiasResult(r: FlowResult.StillBias) {

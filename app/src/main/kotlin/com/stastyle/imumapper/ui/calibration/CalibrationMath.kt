@@ -276,6 +276,18 @@ object CalibrationMath {
         return starts.toIntArray()
     }
 
+    /**
+     * Width for the value of a label / value row [availablePx] wide, with [gapPx] between the two, when
+     * the label wants [labelPx] and the value [valuePx] on one line. Both get what they want when that
+     * fits. Otherwise the shorter side keeps its width and the other wraps beside it, and two long sides
+     * share the row equally, so a long label ("Closure (expected 0 m (ends at the start))") never squeezes
+     * its value to nothing and a long value (a trip's notes) never hides its label.
+     */
+    fun valueRowValueWidth(availablePx: Int, gapPx: Int, labelPx: Int, valuePx: Int): Int {
+        val room = max(availablePx - gapPx, 0)
+        return min(valuePx, max(room / 2, room - labelPx)).coerceAtLeast(0)
+    }
+
     // --- ARCore vs PDR ---
 
     data class Comparison(

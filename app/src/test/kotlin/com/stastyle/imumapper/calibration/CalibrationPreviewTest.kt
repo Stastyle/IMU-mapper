@@ -100,6 +100,41 @@ class PreviewGridTest {
     }
 }
 
+/** How a label / value row shares its width when both do not fit on one line. */
+class ValueRowWidthTest {
+
+    private fun valueWidth(label: Int, value: Int) =
+        CalibrationMath.valueRowValueWidth(availablePx = 900, gapPx = 30, labelPx = label, valuePx = value)
+
+    @Test
+    fun bothFitSoTheValueGetsWhatItWants() {
+        assertEquals(200, valueWidth(label = 300, value = 200))
+        assertEquals(570, valueWidth(label = 300, value = 570))
+    }
+
+    @Test
+    fun aLongLabelWrapsBesideAShortValue() {
+        // Tuning's "Closure (expected 0 m (ends at the start))" at a large font: the value stays whole.
+        assertEquals(180, valueWidth(label = 1_200, value = 180))
+    }
+
+    @Test
+    fun aLongValueWrapsBesideAShortLabel() {
+        // A trip's notes next to "Notes": the label keeps its width and the value takes the rest.
+        assertEquals(870 - 150, valueWidth(label = 150, value = 2_000))
+    }
+
+    @Test
+    fun twoLongSidesShareTheRow() {
+        assertEquals(435, valueWidth(label = 1_000, value = 2_000))
+    }
+
+    @Test
+    fun noRoomGivesNothingRatherThanANegativeWidth() {
+        assertEquals(0, CalibrationMath.valueRowValueWidth(availablePx = 10, gapPx = 30, labelPx = 50, valuePx = 50))
+    }
+}
+
 /** The Calibrate header's subtitle, which names only saved values. */
 class CalibrationHeaderTest {
 
