@@ -15,9 +15,14 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import com.stastyle.imumapper.ui.theme.imuColors
 
 /** One bottom-bar destination; [route] is a top-level route from [Routes]. */
 private class Tab(val route: String, val label: String, val icon: ImageVector)
@@ -36,7 +41,7 @@ private val TABS = listOf(
  *
  * [currentRoute] is the tab shown as selected. The Record tab carries a dot while [recordingActive],
  * and Settings while [updateAvailable]; the dot is decorative and TalkBack reads the item's state
- * description instead.
+ * description ([tabBadgeDescription]) instead.
  */
 @Composable
 fun AppBottomBar(
@@ -47,13 +52,18 @@ fun AppBottomBar(
     modifier: Modifier = Modifier,
 ) {
     val colors = MaterialTheme.colorScheme
-    NavigationBar(modifier = modifier, containerColor = colors.surfaceContainerLow.copy(alpha = BAR_ALPHA)) {
+    val edge = MaterialTheme.imuColors.cardBorder
+    NavigationBar(
+        // A hairline on top, drawn over the translucent fill, separates the bar from cards scrolling under it.
+        modifier = modifier.drawWithContent {
+            drawContent()
+            val stroke = 1.dp.toPx()
+            drawLine(edge, Offset(0f, stroke / 2), Offset(size.width, stroke / 2), strokeWidth = stroke)
+        },
+        containerColor = colors.surfaceContainerLow.copy(alpha = BAR_ALPHA),
+    ) {
         for (tab in TABS) {
-            val badgeState = when {
-                tab.route == Routes.NEW_TRIP && recordingActive -> "Recording in progress"
-                tab.route == Routes.SETTINGS && updateAvailable -> "Update available"
-                else -> null
-            }
+            val badgeState = tabBadgeDescription(tab.route, recordingActive, updateAvailable)
             NavigationBarItem(
                 selected = tab.route == currentRoute,
                 onClick = { onSelect(tab.route) },
@@ -63,12 +73,15 @@ fun AppBottomBar(
                         Icon(tab.icon, contentDescription = null)
                     }
                 },
-                label = { Text(tab.label) },
+                // One line: at large font scales "Calibrate" would otherwise wrap under its icon.
+                label = { Text(tab.label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 modifier = if (badgeState != null) Modifier.semantics { stateDescription = badgeState } else Modifier,
                 colors = NavigationBarItemDefaults.colors(
                     selectedIconColor = colors.secondary,
                     selectedTextColor = colors.secondary,
                     indicatorColor = colors.primaryContainer,
+                    unselectedIconColor = colors.onSurfaceVariant,
+                    unselectedTextColor = colors.onSurfaceVariant,
                 ),
             )
         }
