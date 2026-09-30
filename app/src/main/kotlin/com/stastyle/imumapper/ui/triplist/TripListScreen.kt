@@ -12,12 +12,15 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.calculateEndPadding
 import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -184,6 +187,10 @@ fun TripListScreen(
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
         val layoutDirection = LocalLayoutDirection.current
+        // The window does not resize for the keyboard, and it never pans here because the search field is at the top.
+        // So the list itself must end above the keyboard, or the last matches stay hidden under it while typing. Both
+        // paddings are measured from the bottom of the window and include the navigation bar, so the larger is enough.
+        val imeBottom = WindowInsets.ime.asPaddingValues().calculateBottomPadding()
         // Nothing until the database answers, so a list of trips never flashes the onboarding card first.
         val loaded = content ?: return@AppScaffold
         LazyColumn(
@@ -196,7 +203,7 @@ fun TripListScreen(
                     start = padding.calculateStartPadding(layoutDirection),
                     end = padding.calculateEndPadding(layoutDirection),
                 ),
-            contentPadding = PaddingValues(bottom = padding.calculateBottomPadding() + 16.dp),
+            contentPadding = PaddingValues(bottom = maxOf(padding.calculateBottomPadding(), imeBottom) + 16.dp),
         ) {
             tripListItems(
                 content = loaded,
