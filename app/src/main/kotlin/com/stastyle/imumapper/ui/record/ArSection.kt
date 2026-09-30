@@ -160,6 +160,8 @@ fun ArSection(mode: TripMode, controller: RecordingController, modifier: Modifie
         }
     }
 
+    // Black stands in for the camera image before the first frame and behind the messages that replace it;
+    // it is the camera's colour, not a themed surface, so it stays black whatever the theme.
     Box(modifier = modifier.background(Color.Black)) {
         if (ready && cameraGranted) {
             AndroidView(factory = { glView }, modifier = Modifier.fillMaxSize())
@@ -233,7 +235,8 @@ private fun TrackingChip(state: ArSessionState) {
     when {
         state.status != ArStatus.RUNNING -> {
             text = "CAMERA PAUSED"
-            color = Color(0xFFBDBDBD)
+            // Dimmed overlay text, so it reads as inactive next to the green and amber states.
+            color = MaterialTheme.imuColors.onCameraOverlay.copy(alpha = 0.75f)
         }
         state.tracking == TrackingState.TRACKING -> {
             text = "TRACKING"
@@ -245,7 +248,8 @@ private fun TrackingChip(state: ArSessionState) {
             color = MaterialTheme.imuColors.warning
         }
     }
-    Surface(color = Color.Black.copy(alpha = 0.5f), shape = RoundedCornerShape(8.dp)) {
+    // Half-dark, so the chip reads over any camera image.
+    Surface(color = MaterialTheme.colorScheme.scrim.copy(alpha = 0.5f), shape = RoundedCornerShape(8.dp)) {
         Text(
             text = text,
             color = color,
@@ -258,10 +262,10 @@ private fun TrackingChip(state: ArSessionState) {
 @Composable
 private fun Label(text: String) {
     if (text.isEmpty()) return
-    Surface(color = Color.Black.copy(alpha = 0.5f), shape = RoundedCornerShape(8.dp)) {
+    Surface(color = MaterialTheme.colorScheme.scrim.copy(alpha = 0.5f), shape = RoundedCornerShape(8.dp)) {
         Text(
             text = text,
-            color = Color.White,
+            color = MaterialTheme.imuColors.onCameraOverlay,
             style = MaterialTheme.typography.labelMedium,
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
         )
@@ -281,11 +285,14 @@ private fun CenterMessage(
         verticalArrangement = Arrangement.Center,
     ) {
         if (progress) {
-            CircularProgressIndicator(modifier = Modifier.size(28.dp).padding(bottom = 4.dp), color = Color.White)
+            CircularProgressIndicator(
+                modifier = Modifier.size(28.dp).padding(bottom = 4.dp),
+                color = MaterialTheme.imuColors.onCameraOverlay,
+            )
         }
         Text(
             text = text,
-            color = Color.White,
+            color = MaterialTheme.imuColors.onCameraOverlay,
             style = MaterialTheme.typography.bodyMedium,
             textAlign = TextAlign.Center,
         )

@@ -37,6 +37,12 @@ data class ImuColors(
     val onStopRed: Color,
     /** Behind the path canvas; dark, because survey order numbers are drawn in it. */
     val canvasBackground: Color,
+    /**
+     * Text and the spinner over the camera preview, on a half-`scrim` chip or on the black camera
+     * background. The camera image does not follow the theme, so this stays light in any scheme, where
+     * `onSurface` would turn dark under a light theme and vanish on the scrim.
+     */
+    val onCameraOverlay: Color,
 )
 
 internal val DarkImuColors = ImuColors(
@@ -54,6 +60,7 @@ internal val DarkImuColors = ImuColors(
     stopRed = Color(0xFFD32F2F),
     onStopRed = Color(0xFFFFFFFF),
     canvasBackground = Color(0xFF0A1424),
+    onCameraOverlay = Color(0xFFFFFFFF),
 )
 
 /** Provided by [ImuMapperTheme]; the default keeps previews and tests outside the theme usable. */
