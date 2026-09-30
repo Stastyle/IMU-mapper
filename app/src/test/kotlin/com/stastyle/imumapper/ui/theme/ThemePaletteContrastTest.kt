@@ -61,14 +61,30 @@ class ThemePaletteContrastTest {
     }
 
     @Test
-    fun secondaryIsTextWhereItLabels() = check { p ->
-        // The selected tab's label sits on the bottom bar (surfaceContainerLow at 92 %); the locked compass
-        // draws its "N" in secondary on a secondaryContainer face.
+    fun bottomBarLabelsRead() = check { p ->
+        // The bar is surfaceContainerLow at 92 % over the page (AppBottomBar); the selected tab's label is
+        // secondary, the others onSurfaceVariant.
         val bar = withAlpha(p.surfaceContainerLow, 0.92f)
         for ((name, page) in pageGrounds(p)) {
-            text("secondary" to p.secondary, "bottom bar over $name" to over(bar, page))
+            val ground = "bottom bar over $name" to over(bar, page)
+            text("secondary" to p.secondary, ground)
+            text("onSurfaceVariant" to p.onSurfaceVariant, ground)
         }
-        text("secondary" to p.secondary, "secondaryContainer" to p.secondaryContainer)
+    }
+
+    @Test
+    fun compassDialLettersRead() = check { p ->
+        // CompassDial: while it waits the face is surfaceContainerHighest with "N" in primary; once locked it is
+        // secondaryContainer with "N" in secondary. E, S, W and the cardinal line are onSurfaceVariant on either
+        // face, and the heading is onSurface or onSecondaryContainer.
+        val open = "surfaceContainerHighest (waiting face)" to p.surfaceContainerHighest
+        text("primary" to p.primary, open)
+        text("onSurfaceVariant" to p.onSurfaceVariant, open)
+        text("onSurface" to p.onSurface, open)
+        val locked = "secondaryContainer (locked face)" to p.secondaryContainer
+        text("secondary" to p.secondary, locked)
+        text("onSurfaceVariant" to p.onSurfaceVariant, locked)
+        text("onSecondaryContainer" to p.onSecondaryContainer, locked)
     }
 
     @Test

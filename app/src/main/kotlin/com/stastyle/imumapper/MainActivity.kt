@@ -2,6 +2,7 @@ package com.stastyle.imumapper
 
 import android.content.res.Configuration
 import android.graphics.Color
+import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
 import android.view.KeyEvent
 import androidx.activity.ComponentActivity
@@ -16,6 +17,7 @@ import com.stastyle.imumapper.capture.RecordingController
 import com.stastyle.imumapper.ui.nav.AppNavGraph
 import com.stastyle.imumapper.ui.theme.ImuMapperTheme
 import com.stastyle.imumapper.ui.theme.ThemeMode
+import com.stastyle.imumapper.ui.theme.ThemePalettes
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -26,12 +28,12 @@ class MainActivity : ComponentActivity() {
         // dark flag is the chosen one and even this first guess matches.
         val systemDark =
             (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
-        applySystemBars(dark = (themeSetting.value ?: ThemeMode.SYSTEM).isDark(systemDark))
+        applyWindowTheme(dark = (themeSetting.value ?: ThemeMode.SYSTEM).isDark(systemDark))
         setContent {
             val setting by themeSetting.collectAsStateWithLifecycle()
             val dark = (setting ?: ThemeMode.SYSTEM).isDark(isSystemInDarkTheme())
             DisposableEffect(dark) {
-                applySystemBars(dark)
+                applyWindowTheme(dark)
                 onDispose {}
             }
             ImuMapperTheme(dark = dark) {
@@ -41,18 +43,28 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Transparent bars with icons that suit the app's theme, not the phone's: with the app set to Dark on a
-     * phone in light mode the icons must stay light. `SystemBarStyle.auto` would follow the phone and, in
-     * three-button navigation, also lay the system's own scrim behind the buttons, which the dark theme has
-     * never had.
+     * Matches the window to the app's theme, not the phone's.
+     *
+     * The bars stay transparent, with icons that suit the theme: with the app set to Dark on a phone in light
+     * mode the icons must stay light. `SystemBarStyle.auto` would follow the phone and, in three-button
+     * navigation, also lay the system's own scrim behind the buttons, which the dark theme has never had.
+     *
+     * The window background shows through while one screen fades into the next. The platform takes it from
+     * `window_background` once, when the window is made. A later change of the setting reaches this activity
+     * as a configuration change it handles itself, or on API 30 not as a configuration change at all, so
+     * without this a switch from Light to Dark would flash the light background through every screen change
+     * until the next start, and on API 30 the phone's own mode would pick it.
      */
-    private fun applySystemBars(dark: Boolean) {
+    private fun applyWindowTheme(dark: Boolean) {
         val style = if (dark) {
             SystemBarStyle.dark(Color.TRANSPARENT)
         } else {
             SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT)
         }
         enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
+        // The same colours as window_background in values and values-night (WindowBackgroundTest).
+        val palette = if (dark) ThemePalettes.Dark else ThemePalettes.Light
+        window.setBackgroundDrawable(ColorDrawable(palette.background))
     }
 
     /** Volume keys mark a waypoint while recording, so a point can be logged without looking. */
