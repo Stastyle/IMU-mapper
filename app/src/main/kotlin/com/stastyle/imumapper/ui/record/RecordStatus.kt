@@ -175,8 +175,11 @@ object RecordStatus {
     }
 
     /**
-     * The orientation source: the game rotation vector, which the path's heading comes from, or the fused
-     * rotation vector as a fallback when only that one delivers.
+     * The orientation source: the game rotation vector, which the path's heading comes from. The fused
+     * rotation vector is the fallback only when the game rotation vector is absent or has delivered nothing
+     * in this recording. The pipeline uses the game vector whenever the log holds any of its samples and
+     * never switches sources mid-trip, so a game vector that delivered and then stopped is Stalled even
+     * while the fused one keeps delivering: from the stall on the path's heading is frozen, not fused.
      */
     fun headingTile(stats: SensorStats, activeNs: Long): SensorTileState {
         val game = stats.of(SensorKind.GAME_ROT)
@@ -186,6 +189,14 @@ object RecordStatus {
             // The counters restart with the recording, so the fused sensor's first sample may land a tick before
             // the game rotation vector's; that is no reason to warn about a fallback before the grace is over.
             game.available && !notDelivering(game, activeNs) -> waitingHeading()
+            // With samples already logged this can only be a stall, and the log keeps the game vector as the
+            // source, so the fused vector delivering below must not read as a working fallback.
+            game.available && game.sampleCount > 0L && notDelivering(game, activeNs) -> SensorTileState(
+                "Stalled",
+                RecordTone.Warning,
+                "game rotation",
+                "Heading: stalled, the game rotation vector stopped",
+            )
             delivering(fused) -> SensorTileState(
                 "Fallback",
                 RecordTone.Warning,

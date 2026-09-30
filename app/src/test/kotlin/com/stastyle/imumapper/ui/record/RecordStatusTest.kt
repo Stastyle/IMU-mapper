@@ -209,10 +209,12 @@ class RecordStatusTest {
     fun headingTileStates() {
         val active = 10 * s
         assertEquals("OK", RecordStatus.headingTile(stats(), active).value)
-        // Game rotation gone, fused rotation vector still delivering.
-        val fallback = RecordStatus.headingTile(stats(stalled(SensorKind.GAME_ROT)), active)
-        assertEquals("Fallback", fallback.value)
-        assertEquals(RecordTone.Warning, fallback.tone)
+        // The game rotation vector delivered and then stopped while the fused one keeps delivering: the log holds
+        // game samples, so the pipeline keeps the game vector and freezes the heading. That is no fallback.
+        val stalledGame = RecordStatus.headingTile(stats(stalled(SensorKind.GAME_ROT)), active)
+        assertEquals("Stalled", stalledGame.value)
+        assertEquals(RecordTone.Warning, stalledGame.tone)
+        assertEquals("Heading: stalled, the game rotation vector stopped", stalledGame.spoken)
         assertEquals(
             "Stalled",
             RecordStatus.headingTile(stats(stalled(SensorKind.GAME_ROT), absent(SensorKind.ROT_VEC)), active).value,
