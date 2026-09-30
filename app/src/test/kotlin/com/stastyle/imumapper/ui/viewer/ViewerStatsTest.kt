@@ -10,6 +10,7 @@ import com.stastyle.imumapper.ui.common.NO_VALUE
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -43,19 +44,29 @@ class ViewerStatsTest {
 
     @Test
     fun verticalIsTheRangeWithTheLowestAndHighestPointUnderIt() {
+        val ltr = ViewerStats.LEFT_TO_RIGHT_MARK
         assertEquals(
-            StatText("5.7 m", "-0.7 … +5.0", "5.7 m, from -0.7 m to +5.0 m"),
+            StatText("5.7 m", "$ltr-0.7 … +5.0", "5.7 m, from -0.7 m to +5.0 m"),
             ViewerStats.vertical(stats(minZ = -0.7, maxZ = 5.0)),
         )
         // A flat walk never shows "-0.0".
-        assertEquals("+0.0 … +0.0", ViewerStats.vertical(stats(minZ = -0.0, maxZ = 0.0)).detail)
+        assertEquals("$ltr+0.0 … +0.0", ViewerStats.vertical(stats(minZ = -0.0, maxZ = 0.0)).detail)
         assertEquals(StatText(NO_VALUE), ViewerStats.vertical(stats(minZ = Double.POSITIVE_INFINITY)))
+    }
+
+    @Test
+    fun theVerticalDetailStartsWithAStrongLeftToRightCharacter() {
+        // Without one, a right-to-left layout would put the highest point first ("+5.0 … -0.7").
+        val detail = assertNotNull(ViewerStats.vertical(stats(minZ = -0.7, maxZ = 5.0)).detail)
+        assertEquals(Character.DIRECTIONALITY_LEFT_TO_RIGHT, Character.getDirectionality(detail.first()))
+        assertTrue(detail.drop(1).none { Character.getDirectionality(it) == Character.DIRECTIONALITY_LEFT_TO_RIGHT })
     }
 
     @Test
     fun closureSplitsTheErrorFromItsShareOfTheDistance() {
         assertEquals(StatText("0.52 m", "1.2 % of distance"), ViewerStats.closure(stats(closureErrorM = 0.52)))
-        assertEquals(StatText(NO_VALUE, "no loop marked"), ViewerStats.closure(stats(closureErrorM = null)))
+        // Also null for a Back at start mark with loop closure off, so it does not claim no loop was marked.
+        assertEquals(StatText(NO_VALUE, "no loop closed"), ViewerStats.closure(stats(closureErrorM = null)))
         assertNull(ViewerStats.closure(stats(distanceM = 0.0, closureErrorM = 0.1)).detail)
     }
 

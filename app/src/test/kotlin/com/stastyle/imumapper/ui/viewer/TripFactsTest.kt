@@ -84,6 +84,11 @@ class TripFactsTest {
         assertEquals("850 kB", fileSize(850_000L))
         assertEquals("140.2 MB", fileSize(140_200_000L))
         assertEquals("1.25 GB", fileSize(1_250_000_000L))
+        // A size that rounds up to the next unit is written in it, never as "1000 kB" or "1000.0 MB".
+        assertEquals("999 kB", fileSize(999_499L))
+        assertEquals("1.0 MB", fileSize(999_500L))
+        assertEquals("999.9 MB", fileSize(999_949_999L))
+        assertEquals("1.00 GB", fileSize(999_950_000L))
     }
 
     @Test

@@ -76,6 +76,12 @@ private val OverlayEndClearance = 64.dp
 private val CanvasShape = RoundedCornerShape(20.dp)
 
 /**
+ * One list for every composition: the content under the top bar recomposes on each camera frame while the path
+ * is dragged, and a new list each time would make the tabs recompose with it.
+ */
+private val TAB_LABELS = ViewerTab.entries.map { it.label }
+
+/**
  * One trip's path, in tabs: Path (a short canvas over the trip summary and elevation profile), 3D (the canvas at
  * full height), Graph (the profile large with height numbers) and Details (runs, raw path, facts and actions).
  * Only one canvas is ever composed. Survey mode, for measuring between points of the walk, hides the tabs and
@@ -211,7 +217,7 @@ fun ViewerScreen(
             val tabsShown = !ui.surveyMode && scene != null
             if (tabsShown) {
                 SegmentedTabs(
-                    tabs = ViewerTab.entries.map { it.label },
+                    tabs = TAB_LABELS,
                     selected = tabIndex,
                     onSelect = { tabIndex = it },
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
@@ -318,7 +324,11 @@ fun ViewerScreen(
                                     onClose = { vm.selectMarker(null) },
                                 )
                             } else if (gridChip != null) {
-                                GridScaleChip(gridChip, Modifier.absolutePadding(left = 4.dp, bottom = 4.dp))
+                                // The column's own start is the right edge in a right-to-left language.
+                                GridScaleChip(
+                                    gridChip,
+                                    Modifier.align(AbsoluteAlignment.Left).absolutePadding(left = 4.dp, bottom = 4.dp),
+                                )
                             }
                         }
                         scene != null && gridChip != null -> GridScaleChip(

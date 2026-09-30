@@ -132,6 +132,9 @@ internal object ViewerStats {
     /** Climb and descent count legs of at least this much, so walking bob and barometer noise are not climb. */
     const val CLIMB_DEAD_BAND_M = 0.5
 
+    /** U+200E: invisible, and makes a line of bare numbers read left to right whatever the layout direction. */
+    const val LEFT_TO_RIGHT_MARK = '\u200E'
+
     fun distance(stats: PathStats): StatText = StatText(formatDistance(stats.distanceM))
 
     fun duration(stats: PathStats, diagnostics: Map<String, String>): StatText =
@@ -139,21 +142,30 @@ internal object ViewerStats {
 
     fun steps(stats: PathStats): StatText = StatText(if (stats.stepCount >= 0) stats.stepCount.toString() else NO_VALUE)
 
-    /** The height range, with the lowest and highest point relative to the start under it. */
+    /**
+     * The height range, with the lowest and highest point relative to the start under it. The detail has no
+     * letter to set its direction, so in a right-to-left language it would read "+5.0 … -0.7"; the tile draws
+     * details in the layout's direction, and a leading [LEFT_TO_RIGHT_MARK] keeps the lowest first.
+     */
     fun vertical(stats: PathStats): StatText {
         if (!stats.minZ.isFinite() || !stats.maxZ.isFinite()) return StatText(NO_VALUE)
         val range = formatDistance(stats.maxZ - stats.minZ)
         return StatText(
             value = range,
-            detail = "${SurveyFormat.signedMetres(stats.minZ)} … ${SurveyFormat.signedMetres(stats.maxZ)}",
+            detail = "$LEFT_TO_RIGHT_MARK${SurveyFormat.signedMetres(stats.minZ)} … " +
+                SurveyFormat.signedMetres(stats.maxZ),
             spoken = "$range, from ${formatHeight(stats.minZ)} to ${formatHeight(stats.maxZ)}",
         )
     }
 
-    /** The end-to-start error before loop closure, to the centimetre, and its share of the distance. */
+    /**
+     * The end-to-start error before loop closure, to the centimetre, and its share of the distance. Without one
+     * the detail says no loop was closed, not that none was marked: a Back at start mark gives no error when
+     * loop closure is off or the mark came before the path's first point.
+     */
     fun closure(stats: PathStats): StatText {
         val error = stats.closureErrorM
-        if (error == null || !error.isFinite() || error < 0.0) return StatText(NO_VALUE, "no loop marked")
+        if (error == null || !error.isFinite() || error < 0.0) return StatText(NO_VALUE, "no loop closed")
         val value = String.format(Locale.US, "%.2f m", error)
         val share = if (stats.distanceM > 0.0 && stats.distanceM.isFinite()) {
             String.format(Locale.US, "%.1f %% of distance", error / stats.distanceM * 100.0)
@@ -205,8 +217,9 @@ internal fun axisLabel(metres: Double): String {
 /** A raw log's size: "850 kB", "140.2 MB", "1.25 GB" (decimal units, as Android shows files); [NO_VALUE] for none. */
 internal fun fileSize(bytes: Long): String = when {
     bytes <= 0L -> NO_VALUE
-    bytes < 1_000_000L -> "${max(1L, (bytes / 1000.0).roundToLong())} kB"
-    bytes < 1_000_000_000L -> String.format(Locale.US, "%.1f MB", bytes / 1e6)
+    // Each unit ends where its rounding would reach 1000, so a size never reads "1000 kB" or "1000.0 MB".
+    bytes < 999_500L -> "${max(1L, (bytes / 1000.0).roundToLong())} kB"
+    bytes < 999_950_000L -> String.format(Locale.US, "%.1f MB", bytes / 1e6)
     else -> String.format(Locale.US, "%.2f GB", bytes / 1e9)
 }
 
