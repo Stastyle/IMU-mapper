@@ -20,6 +20,7 @@ import com.stastyle.imumapper.ui.nav.AppNavGraph
 import com.stastyle.imumapper.ui.theme.ImuMapperTheme
 import com.stastyle.imumapper.ui.theme.ThemeMode
 import com.stastyle.imumapper.ui.theme.ThemePalettes
+import com.stastyle.imumapper.ui.theme.applyPlatformLightness
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -61,12 +62,11 @@ class MainActivity : ComponentActivity() {
      * without this a switch from Light to Dark would flash the light background through every screen change
      * until the next start, and on API 30 the phone's own mode would pick it.
      *
-     * The platform's floating Cut/Copy/Paste toolbar takes its light or dark look from the activity theme's
-     * `isLightTheme` each time it opens, and `Theme.ImuMapper`'s parent is dark, so the overlay sets it from
-     * the app's theme. `applyStyle` changes the theme in place, so nothing is recreated, and a configuration
-     * change rebuilds the theme with the overlay still applied. Compose dialogs copy this theme when they open,
-     * so their text fields follow it too. Material3's bottom sheets do not: their window theme has a dark
-     * platform parent, which sets the attribute back.
+     * The platform's floating Cut/Copy/Paste toolbar takes its light or dark look from the window theme's
+     * `isLightTheme`, which `Theme.ImuMapper`'s dark parent leaves false, so [applyPlatformLightness] sets it
+     * from the app's theme. Compose dialogs copy this theme when they open, so their text fields follow it too.
+     * Material3's bottom sheets lay a dark dialog theme over their copy, so a sheet with a text field calls
+     * `MatchSheetWindowTheme`.
      */
     private fun applyWindowTheme(dark: Boolean) {
         val style = if (dark) {
@@ -78,9 +78,7 @@ class MainActivity : ComponentActivity() {
         // The same colours as window_background in values and values-night (WindowBackgroundTest).
         val palette = if (dark) ThemePalettes.Dark else ThemePalettes.Light
         window.setBackgroundDrawable(ColorDrawable(palette.background))
-        val platformTheme =
-            if (dark) R.style.ThemeOverlay_ImuMapper_PlatformDark else R.style.ThemeOverlay_ImuMapper_PlatformLight
-        theme.applyStyle(platformTheme, true)
+        theme.applyPlatformLightness(dark)
     }
 
     /** Volume keys mark a waypoint while recording, so a point can be logged without looking. */

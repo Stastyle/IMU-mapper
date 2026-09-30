@@ -693,4 +693,10 @@ The system bars use `SystemBarStyle.light` or `.dark` from the resolved theme ra
 because `.auto` adds a scrim behind three-button navigation and decides from the phone, not the app
 setting. The camera overlay is wrapped in `ImuMapperTheme(dark = true)`. On API 30, where the
 platform night mode for one app does not exist, the first frame follows the phone until the setting
-has been read.
+has been read. `Theme.ImuMapper` keeps its dark platform parent, so `MainActivity` lays an
+`android:isLightTheme` overlay from the resolved theme over the activity theme
+(`applyPlatformLightness`), and the platform's Cut/Copy/Paste popup follows the app on every API level.
+A Material3 bottom sheet lays a dark dialog theme over its window, so a sheet with a text field calls
+`MatchSheetWindowTheme()` first. `MainActivity` also provides `LocalConfiguration` with its night bits
+set from the resolved theme, because Material3's bottom sheets set their bar icons from
+`isSystemInDarkTheme()`, which on API 30 would follow the phone.

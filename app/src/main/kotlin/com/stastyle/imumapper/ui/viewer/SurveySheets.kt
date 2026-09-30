@@ -38,6 +38,7 @@ import com.stastyle.imumapper.pipeline.survey.LegTotals
 import com.stastyle.imumapper.pipeline.survey.Station
 import com.stastyle.imumapper.pipeline.survey.StationKind
 import com.stastyle.imumapper.pipeline.survey.TraverseLeg
+import com.stastyle.imumapper.ui.theme.MatchSheetWindowTheme
 import com.stastyle.imumapper.ui.theme.layoutTextAlign
 
 /** The traverse as a table, one row per leg; a tap on a row selects that leg on the map. */
@@ -91,6 +92,7 @@ fun StationSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
     ) {
+        MatchSheetWindowTheme()
         Column(modifier = Modifier.padding(horizontal = 24.dp)) {
             Text(station.name, style = MaterialTheme.typography.titleMedium)
             Text(
