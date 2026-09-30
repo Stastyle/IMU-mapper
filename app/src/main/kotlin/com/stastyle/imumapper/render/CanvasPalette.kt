@@ -90,7 +90,10 @@ class CanvasPalette private constructor(
     val cursor: Int,
     /** Station names. */
     val surveyLabel: Int,
-    /** A station's place in the chain, written on the station's own fill. */
+    /**
+     * A station's place in the chain, written on the station's own fill and shrunk to stay inside it
+     * ([chainNumberScale]): only the fill is its contrast, not the ring or the background.
+     */
     val stationOrder: Int,
 ) {
     fun forSource(source: PositionSource): Int = when (source) {

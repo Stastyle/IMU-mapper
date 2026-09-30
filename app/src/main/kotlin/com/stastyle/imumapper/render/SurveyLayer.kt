@@ -5,6 +5,7 @@ import com.stastyle.imumapper.pipeline.survey.PathTimeline
 import com.stastyle.imumapper.pipeline.survey.Station
 import com.stastyle.imumapper.pipeline.survey.StationKind
 import kotlin.math.abs
+import kotlin.math.hypot
 
 /**
  * A station as drawn. [order] is its 1-based place in the chain (last occurrence), 0 when not in it. Its fill comes
@@ -36,6 +37,23 @@ data class SpotText(
     /** Some station on the spot is ringed, so drawn larger, and the names start past that ring. */
     val selected: Boolean,
 )
+
+/** The digits of a line of text take about this share of its height; the rest is room above and below them. */
+private const val DIGIT_SHARE_OF_LINE = 0.75f
+
+/**
+ * The scale a chain number ([SpotText.order]) is drawn at, about the station's centre, so its ink stays inside the
+ * dot's fill, of radius [fillRadius] inside the ring. The light palette's ring is white like the number, so a stroke
+ * that reaches it vanishes: "1/12" on a closed loop, a third place or a large font would lose their outer strokes.
+ * The fill is round, so the ink's corners reach the ring first, and the half-diagonal is what is compared with
+ * [fillRadius]. [width] and [height] are the measured layout; its width includes the side bearings, which errs on
+ * the safe side. Never above 1, so a number that fits keeps its size: one and two places do at the default font size.
+ */
+fun chainNumberScale(width: Float, height: Float, fillRadius: Float): Float {
+    val reach = hypot(width / 2f, DIGIT_SHARE_OF_LINE * height / 2f)
+    // An empty label reaches 0 and keeps 1 here rather than dividing by 0.
+    return if (reach <= fillRadius) 1f else fillRadius / reach
+}
 
 /** The selection in render terms, so render does not depend on ui.viewer. */
 data class LayerSelection(

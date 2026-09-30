@@ -10,6 +10,7 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.text.ExperimentalTextApi
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
@@ -36,11 +37,13 @@ object SurveyRenderer {
     private const val CURSOR_ARM_DP = 16f
     private const val CURSOR_WIDTH_DP = 2f
     private const val STATION_RADIUS_DP = 6f
-    private const val SELECTED_RADIUS_DP = 10f
     private const val RING_DP = 1.5f
-    private const val SELECTED_RING_DP = 2.5f
     private const val OUTLINE_DP = 1f
     private const val NAME_MAX_WIDTH_DP = 160f
+
+    // Internal so the tests fit chain numbers into the dot actually drawn: every chain station is ringed.
+    internal const val SELECTED_RADIUS_DP = 10f
+    internal const val SELECTED_RING_DP = 2.5f
 
     private val nameStyle = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Medium)
 
@@ -133,7 +136,7 @@ object SurveyRenderer {
             val station = stations[i]
             val center = Offset(screen[i * 2], screen[i * 2 + 1])
             val radius = radiusOf(station.selected)
-            val ring = (if (station.selected) SELECTED_RING_DP else RING_DP).dp.toPx()
+            val ring = ringOf(station.selected)
             drawCircle(Color(palette.forStation(station.kind)), radius, center)
             drawCircle(ringColor, radius, center, style = Stroke(width = ring))
             if (outlined) {
@@ -177,8 +180,14 @@ object SurveyRenderer {
                 val w = layout.size.width.toFloat()
                 val h = layout.size.height.toFloat()
                 val origin = PathRenderer.labelOrigin(x, y, size.width, size.height, dx = -w / 2f, dy = -h / 2f)
-                // On the station's own fill, which is its contrast: no halo, which would cover the dot.
-                if (origin != null) drawText(layout, orderColor, origin, shadow = Shadow.None, drawStyle = Fill)
+                if (origin != null) {
+                    // On the station's own fill, which is its contrast: no halo, which would cover the dot. Shrunk
+                    // about the centre to stay off the ring, which the light palette draws white like the number.
+                    val fill = radiusOf(text.selected) - ringOf(text.selected) / 2f
+                    scale(chainNumberScale(w, h, fill), Offset(x, y)) {
+                        drawText(layout, orderColor, origin, shadow = Shadow.None, drawStyle = Fill)
+                    }
+                }
             }
             val radius = radiusOf(text.selected)
             val origin = PathRenderer.labelOrigin(x + radius, y, size.width, size.height) ?: continue
@@ -195,4 +204,7 @@ object SurveyRenderer {
 
     private fun DrawScope.radiusOf(selected: Boolean): Float =
         (if (selected) SELECTED_RADIUS_DP else STATION_RADIUS_DP).dp.toPx()
+
+    /** The ring's stroke width, centred on [radiusOf]. */
+    private fun DrawScope.ringOf(selected: Boolean): Float = (if (selected) SELECTED_RING_DP else RING_DP).dp.toPx()
 }
