@@ -47,8 +47,9 @@ import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import com.stastyle.imumapper.pipeline.core.Vec3
+import com.stastyle.imumapper.render.CanvasPalette
 import com.stastyle.imumapper.render.PathProgress
-import com.stastyle.imumapper.render.SceneColors
+import com.stastyle.imumapper.render.canvasPalette
 import com.stastyle.imumapper.ui.common.BrandButton
 import com.stastyle.imumapper.ui.common.GlassCard
 import com.stastyle.imumapper.ui.common.GridScaleChip
@@ -275,14 +276,15 @@ fun Hint(text: String) {
 }
 
 /**
- * Small top-down view of a path, like the trip viewer's: north up and never mirrored, coloured from
- * blue to red by the distance walked (the viewer's Progress colours), the start marked green and the
- * end red, over a grid whose spacing the chip names: 1 m for the square test, wider when the canvas
- * shows more ground ([CalibrationMath.previewGridSpacing]).
+ * Small top-down view of a path, like the trip viewer's and in its canvas colours: north up and never
+ * mirrored, coloured from blue to red by the distance walked (the viewer's Progress colours), the start
+ * marked green and the end red, over a grid whose spacing the chip names: 1 m for the square test,
+ * wider when the canvas shows more ground ([CalibrationMath.previewGridSpacing]). The border keeps a
+ * light canvas reading as a panel on a white card.
  */
 @Composable
 fun PathPreview(points: List<Vec3>, modifier: Modifier = Modifier) {
-    val colors = MaterialTheme.imuColors
+    val palette = canvasPalette()
     val shape = MaterialTheme.shapes.small
     val fractions = remember(points) { PathProgress.fractions(points) }
     val runs = remember(fractions) { CalibrationMath.progressRuns(fractions) }
@@ -293,8 +295,8 @@ fun PathPreview(points: List<Vec3>, modifier: Modifier = Modifier) {
     BoxWithConstraints(
         modifier = modifier
             .clip(shape)
-            .background(colors.canvasBackground)
-            .border(1.dp, colors.cardBorder, shape),
+            .background(Color(palette.background))
+            .border(1.dp, MaterialTheme.imuColors.cardBorder, shape),
     ) {
         // Measured here rather than in the Canvas, so the chip can name the spacing the Canvas draws.
         val widthPx = constraints.maxWidth.toDouble()
@@ -308,7 +310,7 @@ fun PathPreview(points: List<Vec3>, modifier: Modifier = Modifier) {
         }
         Canvas(modifier = Modifier.fillMaxSize()) {
             val t = plan ?: return@Canvas
-            if (gridM != null) drawPlanGrid(t, gridM)
+            if (gridM != null) drawPlanGrid(t, gridM, palette)
             val stroke = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
             for (r in runs.indices) {
                 val from = runs[r]
@@ -317,13 +319,13 @@ fun PathPreview(points: List<Vec3>, modifier: Modifier = Modifier) {
                 val path = Path()
                 path.moveTo(t.x(points[from].x), t.y(points[from].y))
                 for (i in from + 1..to) path.lineTo(t.x(points[i].x), t.y(points[i].y))
-                drawPath(path, Color(PathProgress.color(fractions[from])), style = stroke)
+                drawPath(path, Color(PathProgress.color(fractions[from], palette)), style = stroke)
             }
             val first = points[0]
             val last = points[points.size - 1]
             val marker = 5.dp.toPx()
-            drawCircle(Color(SceneColors.START), radius = marker, center = Offset(t.x(first.x), t.y(first.y)))
-            drawCircle(Color(SceneColors.END), radius = marker, center = Offset(t.x(last.x), t.y(last.y)))
+            drawCircle(Color(palette.start), radius = marker, center = Offset(t.x(first.x), t.y(first.y)))
+            drawCircle(Color(palette.end), radius = marker, center = Offset(t.x(last.x), t.y(last.y)))
         }
         if (gridM != null) {
             // Absolute, like the viewer's canvas overlays: the drawn map never mirrors, so neither does its chip.
@@ -341,9 +343,9 @@ fun PathPreview(points: List<Vec3>, modifier: Modifier = Modifier) {
  * Grid lines at whole multiples of [spacing] metres over the whole canvas, not only the path's extent,
  * so the scale reads everywhere; every fifth line is stronger, as on the viewer's floor grid.
  */
-private fun DrawScope.drawPlanGrid(t: CalibrationMath.PlanTransform, spacing: Double) {
-    val minor = Color(SceneColors.GRID_MINOR)
-    val major = Color(SceneColors.GRID_MAJOR)
+private fun DrawScope.drawPlanGrid(t: CalibrationMath.PlanTransform, spacing: Double, palette: CanvasPalette) {
+    val minor = Color(palette.gridMinor)
+    val major = Color(palette.gridMajor)
     // Line k lies at k * spacing metres from the trip's origin.
     val west = floor(-t.offsetX / t.scale / spacing).toInt()
     val east = floor((size.width - t.offsetX) / t.scale / spacing).toInt()

@@ -15,10 +15,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -33,8 +36,11 @@ import com.stastyle.imumapper.render.ElevationProfile
 import com.stastyle.imumapper.render.HeightAxis
 import com.stastyle.imumapper.render.PathProfile
 import com.stastyle.imumapper.render.PathProgress
+import com.stastyle.imumapper.render.SceneColors
+import com.stastyle.imumapper.render.canvasPalette
 import com.stastyle.imumapper.ui.common.formatDistance
 import com.stastyle.imumapper.ui.common.formatHeight
+import com.stastyle.imumapper.ui.theme.imuColors
 import kotlin.math.roundToInt
 
 /** Space above the top tick and below the bottom one, so a label centred on either still fits. */
@@ -42,25 +48,41 @@ private val PlotPadding = 8.dp
 private val LineWidth = 2.5.dp
 
 /**
+ * Where the plot has a background of its own: its corners, and the room left and right of the line so its round
+ * caps stay inside the panel. Without a background the line runs edge to edge, as it always has on the dark card.
+ */
+private val PlotCorner = 8.dp
+private val PlotInset = 6.dp
+
+/**
  * Height against distance walked, coloured by distance like the path on the canvas, around a zero line at the
  * start's height. [profile] keeps each sample's lowest and highest point, so a short peak or dip is drawn as a
  * vertical stroke instead of being averaged away. The y labels are Texts (they follow the font scale), and the
  * whole chart is laid out left to right: distance grows to the right whatever the language. TalkBack reads it
  * as one sentence.
+ *
+ * The line and the ticks take the canvas palette's colours. The light palette's ramp is tuned for the light
+ * canvas, so there the plot sits on a bordered panel of the canvas background and reads like the map; the dark
+ * palette has none and the card shows through, as before.
  */
 @Composable
 internal fun ElevationChart(profile: ElevationProfile, modifier: Modifier = Modifier, plotHeight: Dp = 120.dp) {
     val axis = remember(profile) {
         PathProfile.axis(profile.minZ.minOrNull() ?: 0.0, profile.maxZ.maxOrNull() ?: 0.0)
     }
-    val colors = remember(profile) { IntArray(profile.size) { PathProgress.color(profile.fraction(it)) } }
+    val palette = canvasPalette()
+    val colors = remember(profile, palette) {
+        IntArray(profile.size) { PathProgress.color(profile.fraction(it), palette) }
+    }
     val lowest = profile.minZ.minOrNull() ?: 0.0
     val highest = profile.maxZ.maxOrNull() ?: 0.0
     val description = "Elevation profile over ${formatDistance(profile.totalM)}, " +
         "from ${formatHeight(lowest)} to ${formatHeight(highest)} against the start"
     val labelStyle = MaterialTheme.typography.labelSmall.copy(textDirection = TextDirection.Ltr)
     val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
-    val gridColor = MaterialTheme.colorScheme.outlineVariant
+    val gridColor = Color(palette.chartGrid)
+    val hasPlotBackground = SceneColors.alpha(palette.plotBackground) != 0
+    val plotBorder = MaterialTheme.imuColors.cardBorder
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
         Column(modifier = modifier.fillMaxWidth().clearAndSetSemantics { contentDescription = description }) {
             Row(modifier = Modifier.fillMaxWidth().height(plotHeight)) {
@@ -68,22 +90,36 @@ internal fun ElevationChart(profile: ElevationProfile, modifier: Modifier = Modi
                 Spacer(Modifier.width(8.dp))
                 Canvas(modifier = Modifier.weight(1f).fillMaxHeight()) {
                     val pad = PlotPadding.toPx()
-                    val w = size.width
+                    if (hasPlotBackground) {
+                        // A panel with the hairline border the map has, so it reads as one and not as a hole.
+                        val corner = CornerRadius(PlotCorner.toPx())
+                        drawRoundRect(Color(palette.plotBackground), cornerRadius = corner)
+                        val border = 1.dp.toPx()
+                        drawRoundRect(
+                            plotBorder,
+                            topLeft = Offset(border / 2f, border / 2f),
+                            size = Size(size.width - border, size.height - border),
+                            cornerRadius = corner,
+                            style = Stroke(width = border),
+                        )
+                    }
+                    val inset = if (hasPlotBackground) PlotInset.toPx() else 0f
+                    val w = size.width - 2f * inset
                     fun y(z: Double): Float = plotY(z, axis, size.height, pad)
                     val dash = PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 4.dp.toPx()))
                     for (tick in axis.ticks) {
                         val ty = y(tick)
                         drawLine(
                             gridColor,
-                            Offset(0f, ty),
-                            Offset(w, ty),
+                            Offset(inset, ty),
+                            Offset(inset + w, ty),
                             strokeWidth = 1.dp.toPx(),
                             pathEffect = if (tick == 0.0) null else dash,
                         )
                     }
                     val n = profile.size
                     if (n == 0 || profile.totalM <= 0.0) return@Canvas
-                    fun x(i: Int): Float = (profile.distanceM[i] / profile.totalM * w).toFloat()
+                    fun x(i: Int): Float = inset + (profile.distanceM[i] / profile.totalM * w).toFloat()
                     fun mid(i: Int): Double = (profile.minZ[i] + profile.maxZ[i]) / 2.0
                     val stroke = LineWidth.toPx()
                     for (i in 1 until n) {

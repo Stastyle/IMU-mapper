@@ -54,9 +54,10 @@ import androidx.compose.ui.unit.dp
 import com.stastyle.imumapper.capture.RecordingController
 import com.stastyle.imumapper.data.db.TripStatus
 import com.stastyle.imumapper.pipeline.core.TripMode
+import com.stastyle.imumapper.render.CanvasPalette
 import com.stastyle.imumapper.render.PathProgress
 import com.stastyle.imumapper.render.PathThumbnail
-import com.stastyle.imumapper.render.SceneColors
+import com.stastyle.imumapper.render.canvasPalette
 import com.stastyle.imumapper.ui.common.GlassCard
 import com.stastyle.imumapper.ui.common.NO_VALUE
 import com.stastyle.imumapper.ui.common.StatGrid
@@ -261,24 +262,27 @@ private fun EndedUnexpectedlyLine() {
     }
 }
 
-/** The 72 dp tile: the path, the mode icon without one, or an empty tile while it loads. Decorative for TalkBack. */
+/**
+ * The 72 dp tile: the path, the mode icon without one, or an empty tile while it loads. Decorative for TalkBack. A
+ * small map in the viewer's canvas colours, bordered so a light tile still reads as a panel on a white card.
+ */
 @Composable
 private fun ThumbnailTile(mode: TripMode, load: ThumbnailLoad, modifier: Modifier = Modifier) {
     val shape = MaterialTheme.shapes.small
-    val colors = MaterialTheme.imuColors
+    val palette = canvasPalette()
     Box(
         modifier = modifier
             .size(72.dp)
             .clip(shape)
-            .background(colors.canvasBackground)
-            .border(1.dp, colors.cardBorder, shape),
+            .background(Color(palette.background))
+            .border(1.dp, MaterialTheme.imuColors.cardBorder, shape),
         contentAlignment = Alignment.Center,
     ) {
         when (load) {
             is ThumbnailLoad.Ready ->
                 // The drawn map is never mirrored, whatever the language (north up, east right).
                 CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-                    PathThumbnailCanvas(load.thumbnail, Modifier.fillMaxSize().padding(10.dp))
+                    PathThumbnailCanvas(load.thumbnail, palette, Modifier.fillMaxSize().padding(10.dp))
                 }
             ThumbnailLoad.None -> Icon(
                 TripFormat.modeIcon(mode),
@@ -292,11 +296,11 @@ private fun ThumbnailTile(mode: TripMode, load: ThumbnailLoad, modifier: Modifie
 }
 
 /**
- * The thumbnail's segments in PROGRESS colours, each coloured by its first vertex as the viewer does, with the green
- * start and red end dots on top. The unit square is fitted into the canvas, centred.
+ * The thumbnail's segments in [palette]'s PROGRESS colours, each coloured by its first vertex as the viewer does, with
+ * the green start and red end dots on top. The unit square is fitted into the canvas, centred.
  */
 @Composable
-private fun PathThumbnailCanvas(thumbnail: PathThumbnail, modifier: Modifier = Modifier) {
+private fun PathThumbnailCanvas(thumbnail: PathThumbnail, palette: CanvasPalette, modifier: Modifier = Modifier) {
     Canvas(modifier = modifier) {
         val side = min(size.width, size.height)
         val left = (size.width - side) / 2f
@@ -305,7 +309,7 @@ private fun PathThumbnailCanvas(thumbnail: PathThumbnail, modifier: Modifier = M
         val stroke = 2.5.dp.toPx()
         for (i in 0 until thumbnail.size - 1) {
             drawLine(
-                color = Color(PathProgress.color(thumbnail.progress[i].toDouble())),
+                color = Color(PathProgress.color(thumbnail.progress[i].toDouble(), palette)),
                 start = at(i),
                 end = at(i + 1),
                 strokeWidth = stroke,
@@ -313,7 +317,7 @@ private fun PathThumbnailCanvas(thumbnail: PathThumbnail, modifier: Modifier = M
             )
         }
         val dot = 3.5.dp.toPx()
-        drawCircle(Color(SceneColors.START), radius = dot, center = at(0))
-        drawCircle(Color(SceneColors.END), radius = dot, center = at(thumbnail.size - 1))
+        drawCircle(Color(palette.start), radius = dot, center = at(0))
+        drawCircle(Color(palette.end), radius = dot, center = at(thumbnail.size - 1))
     }
 }
