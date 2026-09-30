@@ -60,7 +60,9 @@ paths:
   `CanvasPaletteTest` must still pass. The camera overlay stays dark in both themes
   (`ImuMapperTheme(dark = true)` around it). The setting is `UpdatePreferences.themeMode`; on API
   31+ it is also handed to `UiModeManager.setApplicationNightMode`, so `values-night` and the splash
-  follow it from cold start.
+  follow it from cold start. A new `ModalBottomSheet` with a text field calls
+  `MatchSheetWindowTheme()` first, so its Cut/Copy/Paste popup follows the app's theme rather than
+  the platform dialog theme.
 - **Look:** screens use the shared components in `ui/common` (`AppScaffold`, `ScreenHeader`,
   `AppTopBar`, `GlassCard`, `StatTile`/`StatGrid`, `StatusPill`, `BrandButton`, `BrandFilterChip`,
   `RoundIconButton`, `SegmentedTabs`) and the colour tokens in `ui/theme`
