@@ -9,7 +9,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 
 /** What the New trip page offers. */
@@ -40,10 +39,22 @@ class NewTripViewModel(
     /** Null follows the default, so a default that loads late or changes in Settings still shows. */
     private val picked = MutableStateFlow<TripMode?>(null)
 
+    /**
+     * The latest default, null until it first loads. Collected for as long as the view model lives rather
+     * than with [ui]: [ui] stops its sources a while after the page is left, and a default read again
+     * from the start would arrive only after a thread hop, leaving the page with no mode (no card
+     * selected, Continue off) for a moment each time it comes back.
+     */
+    private val defaultMode: StateFlow<TripMode?> = defaultTripMode.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
     val ui: StateFlow<NewTripUiState> =
-        combine(recording, defaultTripMode.onStart<TripMode?> { emit(null) }, picked) { state, default, pick ->
+        combine(recording, defaultMode, picked) { state, default, pick ->
             uiState(state, pick ?: default)
-        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), uiState(recording.value, null))
+        }.stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS),
+            uiState(recording.value, defaultMode.value),
+        )
 
     fun selectMode(mode: TripMode) {
         picked.value = mode

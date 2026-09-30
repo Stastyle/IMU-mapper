@@ -5,11 +5,14 @@ import com.stastyle.imumapper.pipeline.core.CarryPosition
 import com.stastyle.imumapper.pipeline.core.TripMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
@@ -118,6 +121,31 @@ class NewTripViewModelTest {
         // A later default no longer overrides the pick.
         defaultMode.emit(TripMode.POCKET)
         assertEquals(NewTripUiState.Choose(TripMode.ILLUMINATED), vm.ui.value)
+    }
+
+    @Test
+    fun comingBackToThePageKeepsTheDefault() = runTest {
+        // DataStore hands each new collector its value only after a hop to its own thread. A source that
+        // emits a moment after every collection starts stands in for it; a replaying flow would hand the
+        // value over at once and hide a gap.
+        val slowDefault = flow {
+            delay(1)
+            emit(TripMode.FLASHLIGHT)
+        }
+        val vm = NewTripViewModel(recording, slowDefault)
+        val screen = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.ui.collect {} }
+        advanceTimeBy(2)
+        assertEquals(NewTripUiState.Choose(TripMode.FLASHLIGHT), vm.ui.value)
+
+        // The tab is left for longer than the view model keeps its sources running, then opened again.
+        screen.cancel()
+        advanceTimeBy(5_001)
+        val seen = mutableListOf<NewTripUiState>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.ui.collect { seen += it } }
+        advanceTimeBy(2)
+
+        // Never Choose(null) on the way: no card selected and Continue off, for a moment.
+        assertEquals(listOf<NewTripUiState>(NewTripUiState.Choose(TripMode.FLASHLIGHT)), seen)
     }
 
     @Test
