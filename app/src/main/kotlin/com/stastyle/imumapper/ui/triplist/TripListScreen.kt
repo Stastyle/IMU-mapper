@@ -136,6 +136,15 @@ fun TripListScreen(
     // The field's own state, updated in the same frame as the keystroke; a text field fed back from a StateFlow
     // arrives a frame late and can drop fast typing. The ViewModel follows it for the filtering.
     var searchText by remember { mutableStateOf(vm.query.value.text) }
+    // With no trips the search and filters are not shown, so a query left from before the last delete would
+    // otherwise hide the next trip recorded or imported. The sort order stays.
+    val noTrips = content?.totalCount == 0
+    LaunchedEffect(noTrips) {
+        if (noTrips) {
+            searchText = ""
+            vm.clearFilters()
+        }
+    }
 
     var sheetTrip by remember { mutableStateOf<TripEntity?>(null) }
     var renameTrip by remember { mutableStateOf<TripEntity?>(null) }
