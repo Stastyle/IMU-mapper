@@ -231,6 +231,10 @@ class RecordStatusTest {
         val gameLate = stats(silent(SensorKind.GAME_ROT))
         assertEquals("Waiting", RecordStatus.headingTile(gameLate, s / 4).value)
         assertEquals("Fallback", RecordStatus.headingTile(gameLate, 2 * s).value)
+        // A game rotation vector that never delivered is flagged stalled by the stall detector after a second, but
+        // the log holds none of its samples, so the pipeline does use the fused one: that stall is a fallback.
+        val neverDelivered = stats(silent(SensorKind.GAME_ROT).copy(stalled = true))
+        assertEquals("Fallback", RecordStatus.headingTile(neverDelivered, active).value)
         // Without a game rotation vector the fused one is the fallback at once.
         assertEquals("Fallback", RecordStatus.headingTile(stats(absent(SensorKind.GAME_ROT)), s / 4).value)
     }
