@@ -16,7 +16,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import com.stastyle.imumapper.ui.theme.imuColors
 
-/** The page background: a vertical navy gradient filling the available space. */
+/** The page background: the theme's vertical gradient (navy, or pale grey-blue) filling the available space. */
 @Composable
 fun AppBackground(modifier: Modifier = Modifier, content: @Composable BoxScope.() -> Unit) {
     val colors = MaterialTheme.imuColors

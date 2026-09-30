@@ -17,7 +17,7 @@ import com.stastyle.imumapper.ui.theme.imuColors
 
 /** The colouring of a [GlassCard]. */
 enum class CardTone {
-    /** The translucent navy card. */
+    /** The translucent card: navy glass in the dark theme, white in the light one. */
     Normal,
 
     /** A blue card for something to act on, such as the update banner. */

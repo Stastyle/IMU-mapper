@@ -123,7 +123,7 @@ fun UpdateBanner(
 private fun Actions(primary: String, onPrimary: () -> Unit, onLater: () -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         BrandButton(onClick = onPrimary) { Text(primary) }
-        // The card's own light text, which reads better on the blue card than the primary blue.
+        // The card's own text colour, which reads better on the blue card than the primary blue.
         TextButton(
             onClick = onLater,
             colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onPrimaryContainer),

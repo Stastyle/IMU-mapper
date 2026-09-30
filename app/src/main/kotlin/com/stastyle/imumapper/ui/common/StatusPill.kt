@@ -31,10 +31,11 @@ import com.stastyle.imumapper.ui.theme.imuColors
 enum class StatusTone { Info, Success, Warning, Error, Neutral }
 
 /**
- * A small status badge ("Processed", "Failed", "Up to date"). Each tone pairs a dark container with
- * a light text colour that reads at 4.5:1 or better; never bright text on its own container. With
- * [onClick] it becomes a button with a 48 dp touch target around the pill, labelled for TalkBack by
- * [onClickLabel] ("Show error"). [leading] goes before the text, such as a decorative dot.
+ * A small status badge ("Processed", "Failed", "Up to date"). Each tone pairs a container with a text
+ * colour that reads at 4.5:1 or better on it in both themes (ThemePaletteContrastTest checks them); never
+ * bright text on its own container. With [onClick] it becomes a button with a 48 dp touch target around
+ * the pill, labelled for TalkBack by [onClickLabel] ("Show error"). [leading] goes before the text, such as
+ * a decorative dot.
  *
  * The text stays on one line and ends in an ellipsis when it does not fit, so free-form text of any
  * length (a run label, an error) belongs in a wrapping Text instead.

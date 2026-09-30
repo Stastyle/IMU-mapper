@@ -92,7 +92,7 @@ fun CompassDialog(
         // A stray tap beside the dialog must not throw away the wait; Back and Cancel are explicit.
         properties = DialogProperties(dismissOnBackPress = true, dismissOnClickOutside = false),
     ) {
-        // The dialog colour and the card border of the navy theme; the dial's own colours come from the scheme.
+        // The dialog colour and the card border of the app theme; the dial's own colours come from the scheme.
         Surface(
             shape = MaterialTheme.shapes.extraLarge,
             color = MaterialTheme.colorScheme.surfaceContainerHigh,

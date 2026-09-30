@@ -60,6 +60,7 @@ import com.stastyle.imumapper.pipeline.core.TripMode
 import com.stastyle.imumapper.ui.common.BrandButton
 import com.stastyle.imumapper.ui.common.RoundIconButton
 import com.stastyle.imumapper.ui.common.findActivity
+import com.stastyle.imumapper.ui.theme.ImuMapperTheme
 import com.stastyle.imumapper.ui.theme.imuColors
 
 /**
@@ -161,36 +162,41 @@ fun ArSection(mode: TripMode, controller: RecordingController, modifier: Modifie
     }
 
     // Black stands in for the camera image before the first frame and behind the messages that replace it;
-    // it is the camera's colour, not a themed surface, so it stays black whatever the theme.
-    Box(modifier = modifier.background(Color.Black)) {
-        if (ready && cameraGranted) {
-            AndroidView(factory = { glView }, modifier = Modifier.fillMaxSize())
-        }
-        val state = availabilityState
-        when {
-            !cameraGranted -> CenterMessage("Camera permission is needed for ${modeLabel(mode)} mode.")
-            state is ArAvailability.Checking -> CenterMessage("Checking ARCore…", progress = true)
-            state is ArAvailability.NeedsInstall -> CenterMessage(
-                "${state.detail}. Camera tracking is off until it is; the IMU log still records.",
-                actionLabel = "Install ARCore",
-                onAction = { context.findActivity()?.let { availability.requestInstall(it, true) } },
-            )
-            state is ArAvailability.InstallRequested -> CenterMessage("Finishing the ARCore install", progress = true)
-            state is ArAvailability.Unsupported -> CenterMessage("${state.detail}. The IMU log still records.")
-            state is ArAvailability.Error -> CenterMessage(
-                state.message,
-                actionLabel = "Retry",
-                onAction = { availability.check() },
-            )
-            failed -> CenterMessage(
-                arState.error ?: "ARCore failed",
-                actionLabel = "Retry",
-                onAction = {
-                    manager.close()
-                    retry++
-                },
-            )
-            else -> ArOverlay(mode = mode, state = arState, onToggleTorch = { manager.setTorch(!arState.torchOn) })
+    // it is the camera's colour, not a themed surface, so it stays black whatever the theme. The chips,
+    // buttons and messages over it are the dark theme's for the same reason: in light colours the green and
+    // amber tracking states, the torch button and the white-on-scrim labels would not read over a camera image.
+    ImuMapperTheme(dark = true) {
+        Box(modifier = modifier.background(Color.Black)) {
+            if (ready && cameraGranted) {
+                AndroidView(factory = { glView }, modifier = Modifier.fillMaxSize())
+            }
+            val state = availabilityState
+            when {
+                !cameraGranted -> CenterMessage("Camera permission is needed for ${modeLabel(mode)} mode.")
+                state is ArAvailability.Checking -> CenterMessage("Checking ARCore…", progress = true)
+                state is ArAvailability.NeedsInstall -> CenterMessage(
+                    "${state.detail}. Camera tracking is off until it is; the IMU log still records.",
+                    actionLabel = "Install ARCore",
+                    onAction = { context.findActivity()?.let { availability.requestInstall(it, true) } },
+                )
+                state is ArAvailability.InstallRequested ->
+                    CenterMessage("Finishing the ARCore install", progress = true)
+                state is ArAvailability.Unsupported -> CenterMessage("${state.detail}. The IMU log still records.")
+                state is ArAvailability.Error -> CenterMessage(
+                    state.message,
+                    actionLabel = "Retry",
+                    onAction = { availability.check() },
+                )
+                failed -> CenterMessage(
+                    arState.error ?: "ARCore failed",
+                    actionLabel = "Retry",
+                    onAction = {
+                        manager.close()
+                        retry++
+                    },
+                )
+                else -> ArOverlay(mode = mode, state = arState, onToggleTorch = { manager.setTorch(!arState.torchOn) })
+            }
         }
     }
 }

@@ -36,6 +36,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.stastyle.imumapper.pipeline.survey.LegMeasure
 import com.stastyle.imumapper.ui.common.BrandButton
+import com.stastyle.imumapper.ui.theme.imuColors
 import java.time.ZoneId
 import kotlin.math.max
 
@@ -65,7 +66,7 @@ fun SurveyPanel(
     Surface(
         modifier = modifier.fillMaxWidth(),
         shape = PanelShape,
-        color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = PANEL_ALPHA),
+        color = MaterialTheme.imuColors.panelFill,
         contentColor = MaterialTheme.colorScheme.onSurface,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
     ) {
@@ -222,7 +223,8 @@ private fun LegNumbers(leg: LegMeasure, magnetic: Boolean) {
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.SemiBold,
             color = if (leg.slopeUncertain) {
-                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = UNCERTAIN_ALPHA)
+                val fade = if (MaterialTheme.imuColors.isLight) UNCERTAIN_ALPHA_LIGHT else UNCERTAIN_ALPHA
+                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = fade)
             } else {
                 Color.Unspecified
             },
@@ -268,9 +270,12 @@ private fun copyLineOf(readout: SurveyReadout?, magnetic: Boolean): String? = wh
 }
 
 private const val MIN_SCRUB_RANGE_M = 0.01
-private const val UNCERTAIN_ALPHA = 0.6f
-private val HOPS_MAX_HEIGHT = 96.dp
 
-/** Mostly opaque: the readout must stay legible over a bright path, while the plan still shows it continues. */
-private const val PANEL_ALPHA = 0.9f
+/**
+ * How far an uncertain slope fades: to about 3:1 against the panel in both themes. Dark text on white loses
+ * contrast faster with alpha than light text on navy, so the light theme fades it less.
+ */
+private const val UNCERTAIN_ALPHA = 0.6f
+private const val UNCERTAIN_ALPHA_LIGHT = 0.7f
+private val HOPS_MAX_HEIGHT = 96.dp
 private val PanelShape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)

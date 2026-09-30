@@ -104,8 +104,9 @@ fun BrandFilterChip(
 }
 
 /**
- * A translucent dark circle of [size] with a thin border and a centred [icon], for the canvas and
- * recording controls. The touch target is at least 48 dp even when the circle is smaller, and
+ * A translucent circle of [size] ([buttonFill][com.stastyle.imumapper.ui.theme.ImuColors.buttonFill]:
+ * navy glass in the dark theme, white in the light one) with a thin blue border and a centred [icon], for
+ * the canvas and recording controls. The touch target is at least 48 dp even when the circle is smaller, and
  * TalkBack reads [contentDescription] as a button.
  */
 @Composable
@@ -181,7 +182,7 @@ private fun RoundButtonFrame(
                 .size(size)
                 .clip(CircleShape)
                 .indication(interaction, ripple())
-                .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.85f))
+                .background(colors.buttonFill)
                 .border(1.dp, colors.cardBorderStrong, CircleShape),
             contentAlignment = Alignment.Center,
         ) {
@@ -199,7 +200,7 @@ fun GridScaleChip(text: String, modifier: Modifier = Modifier) {
     Box(
         modifier = modifier
             .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.8f))
+            .background(MaterialTheme.imuColors.chipFill)
             .border(1.dp, MaterialTheme.imuColors.cardBorder, CircleShape)
             .padding(horizontal = 10.dp, vertical = 4.dp),
     ) {
