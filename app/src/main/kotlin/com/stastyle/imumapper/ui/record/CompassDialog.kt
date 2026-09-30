@@ -59,6 +59,7 @@ import com.stastyle.imumapper.capture.CompassReading
 import com.stastyle.imumapper.capture.CompassStatus
 import com.stastyle.imumapper.ui.common.BrandButton
 import com.stastyle.imumapper.ui.theme.imuColors
+import com.stastyle.imumapper.ui.theme.layoutTextAlign
 import java.util.Locale
 import kotlin.math.cos
 import kotlin.math.roundToInt
@@ -155,7 +156,7 @@ fun CompassDialog(
                                     text = "North may be off by several degrees",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    textAlign = TextAlign.End,
+                                    textAlign = layoutTextAlign(end = true),
                                     modifier = Modifier.padding(end = 12.dp),
                                 )
                             }
