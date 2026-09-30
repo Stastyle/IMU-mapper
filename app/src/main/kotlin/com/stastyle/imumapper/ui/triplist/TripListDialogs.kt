@@ -33,7 +33,7 @@ import androidx.compose.ui.unit.dp
 import com.stastyle.imumapper.data.db.TripEntity
 import com.stastyle.imumapper.data.db.TripStatus
 
-/** Long-press menu for one trip. */
+/** The actions of one trip, from its card's actions button or a long press on the card. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TripActionsSheet(
@@ -115,7 +115,7 @@ fun DeleteTripDialog(trip: TripEntity, onDismiss: () -> Unit, onConfirm: () -> U
     )
 }
 
-/** Shown when the FAILED chip of a trip is tapped: the stored error and what to do about it. */
+/** Shown when the Failed pill of a trip is tapped: the stored error and what to do about it. */
 @Composable
 fun TripErrorDialog(trip: TripEntity, onDismiss: () -> Unit, onReprocess: () -> Unit) {
     AlertDialog(
