@@ -26,6 +26,7 @@ import com.stastyle.imumapper.pipeline.survey.SurveyCsv
 import com.stastyle.imumapper.pipeline.survey.SurveyDoc
 import com.stastyle.imumapper.process.TripProcessor
 import com.stastyle.imumapper.render.Bounds
+import com.stastyle.imumapper.render.CameraPreset
 import com.stastyle.imumapper.render.LayerSelection
 import com.stastyle.imumapper.render.OrbitCamera
 import com.stastyle.imumapper.render.Projector
@@ -114,14 +115,17 @@ class ViewerSurveyTest {
     }
 
     /** The viewer with the latest run loaded and a portrait viewport, so presets can frame. */
-    private fun viewer(tripId: Long): ViewerViewModel = ViewerViewModel(
+    private fun viewer(tripId: Long): ViewerViewModel = unmeasuredViewer(tripId).also { it.setViewport(1080f, 1920f) }
+
+    /** The viewer with the latest run loaded before any canvas reported its size. */
+    private fun unmeasuredViewer(tripId: Long): ViewerViewModel = ViewerViewModel(
         tripId,
         trips,
         files,
         NoProcessing(),
         surveys = SurveyStore(files),
         ioDispatcher = Dispatchers.Unconfined,
-    ).also { it.setViewport(1080f, 1920f) }
+    )
 
     private fun survey(vm: ViewerViewModel): SurveyUi = assertNotNull(vm.ui.value.survey)
 
@@ -209,6 +213,51 @@ class ViewerSurveyTest {
         vm.pan(300f, -600f)
         vm.fitToPath()
         assertPlanAbove(vm, panelTop = 1020f)
+    }
+
+    @Test
+    fun surveyModeEnteredBeforeAnyCanvasWasMeasuredEndsInTheTopView() = runBlocking<Unit> {
+        // Restored onto the Graph or Details tab, no canvas is composed until Survey mode shows one.
+        val id = processedTrip(SurveyFixtures.lWalk())
+        val vm = unmeasuredViewer(id)
+        vm.toggleSurvey()
+        assertTrue(vm.ui.value.surveyMode)
+
+        vm.setViewport(1080f, 1920f)
+        assertTrue(vm.camera.value.isTopDown)
+        assertEquals(0.0, vm.camera.value.yawRad)
+        // It is the fitted view, so the panel measured next frames the plan above it.
+        vm.setBottomInset(700f)
+        assertPlanAbove(vm, panelTop = 1220f)
+    }
+
+    @Test
+    fun aPresetAskedForBeforeAnyCanvasWasMeasuredIsTheFirstFit() = runBlocking<Unit> {
+        val id = processedTrip(SurveyFixtures.lWalk())
+        for (preset in listOf(CameraPreset.TOP, CameraPreset.SIDE)) {
+            val waited = unmeasuredViewer(id)
+            waited.applyPreset(preset)
+            waited.setViewport(1080f, 1920f)
+            val direct = viewer(id).also { it.applyPreset(preset) }
+            assertEquals(direct.camera.value, waited.camera.value, "$preset")
+        }
+        // Without one the first fit keeps the default 3D angle.
+        val plain = unmeasuredViewer(id).also { it.setViewport(1080f, 1920f) }
+        assertFalse(plain.camera.value.isTopDown)
+        assertEquals(OrbitCamera.DEFAULT_PITCH_RAD, plain.camera.value.pitchRad)
+    }
+
+    @Test
+    fun surveyModeFromThePathTabsShortCanvasIsFramedAgainAtFullHeight() = runBlocking<Unit> {
+        val id = processedTrip(SurveyFixtures.lWalk())
+        val vm = unmeasuredViewer(id)
+        vm.setViewport(1080f, 800f)
+        vm.toggleSurvey()
+        // Survey mode gives the canvas the whole height; nobody moved the top view, so it is fitted again.
+        vm.setViewport(1080f, 1920f)
+        assertTrue(vm.camera.value.isTopDown)
+        vm.setBottomInset(700f)
+        assertPlanAbove(vm, panelTop = 1220f)
     }
 
     @Test
