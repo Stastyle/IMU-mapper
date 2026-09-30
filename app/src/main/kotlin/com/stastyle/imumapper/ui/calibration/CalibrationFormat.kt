@@ -65,6 +65,16 @@ object Fmt {
         }
     }
 
+    /**
+     * The Calibrate header's subtitle: the saved carry position and the stride the next recording uses,
+     * "Carry: Hand · stride 0.70 m". With a Weinberg gain above zero every step gets its own length from
+     * its bounce, so no single stride is named.
+     */
+    fun headerLine(config: PipelineConfig, carryPosition: CarryPosition): String {
+        val stride = if (config.weinbergK > 0.0) "Weinberg stride" else "stride " + metres(config.strideLengthM)
+        return "Carry: " + carry(carryPosition) + " · " + stride
+    }
+
     /** The values the calibration flows change, one per line, for the summary card. */
     fun configSummary(c: PipelineConfig): List<Pair<String, String>> = listOf(
         "Stride length" to metres(c.strideLengthM),

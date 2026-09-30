@@ -77,6 +77,12 @@ data class OrbitCamera(
         return Vec3(-sin(yawRad) * cp, -cos(yawRad) * cp, sin(pitchRad))
     }
 
+    /**
+     * Whether the eye looks straight down, as after the TOP preset or an orbit up to the pitch clamp. A pitch a
+     * rounding error short of the clamp, which summed drag deltas can leave, looks the same and counts too.
+     */
+    val isTopDown: Boolean get() = pitchRad >= MAX_PITCH_RAD - TOP_DOWN_TOLERANCE_RAD
+
     fun eye(): Vec3 = target + eyeDirection() * distance
 
     /** Unit view direction (from the eye towards the target). */
@@ -188,6 +194,7 @@ data class OrbitCamera(
         const val MIN_DISTANCE = 0.5
         const val MAX_DISTANCE = 5000.0
         private const val FIT_MARGIN = 1.08
+        private const val TOP_DOWN_TOLERANCE_RAD = 1e-6
         /** The most of the viewport's height a bottom panel may take from a fit; the rest is the plan's. */
         const val MAX_INSET_FRACTION = 0.75
 

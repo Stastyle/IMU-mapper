@@ -42,6 +42,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -135,6 +136,11 @@ sealed interface VioPhase {
 data class CalibrationUiState(
     val config: PipelineConfig = PipelineConfig(),
     val carry: CarryPosition = CarryPosition.HAND,
+    /**
+     * True once [config] and [carry] hold the saved values rather than the defaults they start with, so
+     * the screen header never names a stride that is not the saved one.
+     */
+    val calibrationLoaded: Boolean = false,
     val phases: Map<FlowKind, FlowPhase> = FlowKind.entries.associateWith { FlowPhase.Idle },
     val strideDistanceText: String = "20",
     /** Trips recorded in a camera mode, the only ones that can hold ARCore poses. */
@@ -209,10 +215,10 @@ class CalibrationViewModel(
 
     init {
         viewModelScope.launch {
-            calibration.observeConfig().collect { c -> _ui.update { it.copy(config = c) } }
-        }
-        viewModelScope.launch {
-            calibration.observeCarryPosition().collect { c -> _ui.update { it.copy(carry = c) } }
+            // One source for both, so the header shows them together or not at all.
+            calibration.observeConfig().combine(calibration.observeCarryPosition(), ::Pair).collect { (c, carry) ->
+                _ui.update { it.copy(config = c, carry = carry, calibrationLoaded = true) }
+            }
         }
         viewModelScope.launch {
             trips.observeTrips().collect { all ->
@@ -337,6 +343,20 @@ class CalibrationViewModel(
         val s = session ?: return
         if (s.kind != kind) return
         finish(s)
+    }
+
+    /**
+     * Back while a flow's sensors run. Leaving the tab would cancel the flow, which is why the tab bar
+     * hides then, so the flow keeps running and the snackbar says how it ends. The compass step never
+     * gets here: its dialog takes Back as Cancel.
+     */
+    fun backWhileRunning() {
+        val kind = _ui.value.activeFlow ?: return
+        val text = when (kind) {
+            FlowKind.STILL -> "Hold still until the measurement ends"
+            else -> "Tap Stop to end the walk first"
+        }
+        _ui.update { it.copy(message = text) }
     }
 
     /**

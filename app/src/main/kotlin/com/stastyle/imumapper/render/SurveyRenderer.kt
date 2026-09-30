@@ -8,7 +8,9 @@ import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.text.ExperimentalTextApi
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
@@ -22,7 +24,8 @@ import androidx.compose.ui.unit.sp
 /**
  * Draws a [ProjectedSurvey] over the path scene with the same camera. The stretch goes under
  * everything so the path shows through it, the chords and the cursor over it, and the stations and
- * their names last, so a selection never hides what was selected.
+ * their names last, so a selection never hides what was selected. Colours come from the same
+ * [CanvasPalette] the scene under it was drawn with.
  */
 object SurveyRenderer {
     private const val STRETCH_WIDTH_DP = 10f
@@ -34,38 +37,32 @@ object SurveyRenderer {
     private const val CURSOR_ARM_DP = 16f
     private const val CURSOR_WIDTH_DP = 2f
     private const val STATION_RADIUS_DP = 6f
-    private const val SELECTED_RADIUS_DP = 10f
     private const val RING_DP = 1.5f
-    private const val SELECTED_RING_DP = 2.5f
+    private const val OUTLINE_DP = 1f
     private const val NAME_MAX_WIDTH_DP = 160f
 
-    private val stretchColor = Color(SurveyColors.STRETCH)
-    private val chordColor = Color(SurveyColors.CHORD)
+    // Internal so the tests fit chain numbers into the dot actually drawn: every chain station is ringed.
+    internal const val SELECTED_RADIUS_DP = 10f
+    internal const val SELECTED_RING_DP = 2.5f
 
-    /** A dark line under each dashed chord keeps it readable on the yellow stretch and the pale grid. */
-    private val chordUnderlayColor = Color(0x99000000)
-    private val cursorColor = Color(SurveyColors.CURSOR)
-    private val ringColor = Color.White
-    private val nameStyle = TextStyle(
-        color = Color(SurveyColors.LABEL),
-        fontSize = 11.sp,
-        fontWeight = FontWeight.Medium,
-        shadow = Shadow(color = Color.Black, offset = Offset(0f, 1f), blurRadius = 3f),
-    )
+    private val nameStyle = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Medium)
 
-    /** Dark on the station's own colour: every station colour is light enough for it. */
-    private val orderStyle = TextStyle(color = PathRenderer.BACKGROUND, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+    /**
+     * A station's place in the chain, on the station's own fill: dark on the dark palette's light fills, white on the
+     * light palette's dark ones (CanvasPalette.stationOrder).
+     */
+    private val orderStyle = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Bold)
 
     /** Draws stretch, chords, cursor, stations and names over the scene; call after update(). */
-    fun DrawScope.drawSurvey(projected: ProjectedSurvey, textMeasurer: TextMeasurer?) {
-        drawStretch(projected)
-        drawChords(projected)
-        drawCursor(projected)
-        drawStations(projected)
-        if (textMeasurer != null) drawStationText(projected, textMeasurer)
+    fun DrawScope.drawSurvey(projected: ProjectedSurvey, textMeasurer: TextMeasurer?, palette: CanvasPalette) {
+        drawStretch(projected, Color(palette.stretch))
+        drawChords(projected, palette)
+        drawCursor(projected, Color(palette.cursor))
+        drawStations(projected, palette)
+        if (textMeasurer != null) drawStationText(projected, textMeasurer, palette)
     }
 
-    private fun DrawScope.drawStretch(projected: ProjectedSurvey) {
+    private fun DrawScope.drawStretch(projected: ProjectedSurvey, stretchColor: Color) {
         val count = projected.layer.stretchCount
         if (count < 2) return
         val screen = projected.stretchScreen
@@ -90,9 +87,16 @@ object SurveyRenderer {
         )
     }
 
-    private fun DrawScope.drawChords(projected: ProjectedSurvey) {
+    /**
+     * Each chord is a dashed line over a wider solid one in the palette's underlay colour, dark under the dark
+     * palette's white chords and white under the light palette's dark ones, which keeps it readable across the
+     * stretch, the path and the grid.
+     */
+    private fun DrawScope.drawChords(projected: ProjectedSurvey, palette: CanvasPalette) {
         val count = projected.layer.chordCount
         if (count == 0) return
+        val chordColor = Color(palette.chord)
+        val chordUnderlayColor = Color(palette.chordUnderlay)
         val screen = projected.chordScreen
         val width = CHORD_WIDTH_DP.dp.toPx()
         val underlay = CHORD_UNDERLAY_DP.dp.toPx()
@@ -107,7 +111,7 @@ object SurveyRenderer {
         }
     }
 
-    private fun DrawScope.drawCursor(projected: ProjectedSurvey) {
+    private fun DrawScope.drawCursor(projected: ProjectedSurvey, cursorColor: Color) {
         if (!projected.cursorVisible) return
         val x = projected.cursorScreen[0]
         val y = projected.cursorScreen[1]
@@ -119,23 +123,32 @@ object SurveyRenderer {
         drawLine(cursorColor, Offset(x, y - arm), Offset(x, y + arm), strokeWidth = width)
     }
 
-    private fun DrawScope.drawStations(projected: ProjectedSurvey) {
+    /** Rings and outlines as on the scene's markers, so a station reads as the marker it stands in for. */
+    private fun DrawScope.drawStations(projected: ProjectedSurvey, palette: CanvasPalette) {
         val stations = projected.layer.stations
         val screen = projected.stationScreen
+        val ringColor = Color(palette.markerRing)
+        val outlined = SceneColors.alpha(palette.markerOutline) != 0
+        val outlineColor = Color(palette.markerOutline)
+        val outline = OUTLINE_DP.dp.toPx()
         for (i in stations.indices) {
             if (!projected.stationVisible[i]) continue
             val station = stations[i]
             val center = Offset(screen[i * 2], screen[i * 2 + 1])
             val radius = radiusOf(station.selected)
-            val ring = (if (station.selected) SELECTED_RING_DP else RING_DP).dp.toPx()
-            drawCircle(Color(station.color), radius, center)
+            val ring = ringOf(station.selected)
+            drawCircle(Color(palette.forStation(station.kind)), radius, center)
             drawCircle(ringColor, radius, center, style = Stroke(width = ring))
+            if (outlined) {
+                drawCircle(outlineColor, radius + ring / 2f + outline / 2f, center, style = Stroke(width = outline))
+            }
         }
     }
 
     /**
-     * Names go through PathRenderer.labelOrigin like the scene's labels, so drawText never gets an
-     * origin past the right or bottom edge. The chain number is measured first and drawn from that
+     * Names and chain numbers go through PathRenderer.labelOrigin like the scene's labels, so drawText
+     * never gets an origin past the right or bottom edge. Names are drawn with PathRenderer.drawCanvasText,
+     * so they get the palette's halo or shadow. The chain number is measured first and drawn from that
      * layout, which lays nothing out against the canvas edge; it is drawn only while the station's
      * centre is on the canvas, a positive test that a NaN fails as well. Text is drawn after every
      * circle so no station covers another one's name. Stations on one spot (End on Start after a
@@ -147,9 +160,16 @@ object SurveyRenderer {
      * in a fixed box a right-to-left name would be pushed to its far end, away from the station.
      */
     @OptIn(ExperimentalTextApi::class)
-    private fun DrawScope.drawStationText(projected: ProjectedSurvey, textMeasurer: TextMeasurer) {
+    private fun DrawScope.drawStationText(
+        projected: ProjectedSurvey,
+        textMeasurer: TextMeasurer,
+        palette: CanvasPalette,
+    ) {
         val stations = projected.layer.stations
         val screen = projected.stationScreen
+        val orderColor = Color(palette.stationOrder)
+        val nameColor = Color(palette.surveyLabel)
+        val nameShadow = PathRenderer.labelShadow(palette)
         for (i in stations.indices) {
             if (!projected.stationVisible[i]) continue
             val text = stations[i].text ?: continue
@@ -157,7 +177,23 @@ object SurveyRenderer {
             val y = screen[i * 2 + 1]
             if (text.order != null && x >= 0f && y >= 0f && x < size.width && y < size.height) {
                 val layout = textMeasurer.measure(text.order, orderStyle)
-                drawText(layout, topLeft = Offset(x - layout.size.width / 2f, y - layout.size.height / 2f))
+                val w = layout.size.width.toFloat()
+                val h = layout.size.height.toFloat()
+                val origin = PathRenderer.labelOrigin(x, y, size.width, size.height, dx = -w / 2f, dy = -h / 2f)
+                if (origin != null) {
+                    // On the station's own fill, which is its contrast: no halo, which would cover the dot. A number
+                    // too wide for the fill is shrunk about the centre to stay off the ring, which the light palette
+                    // draws white like the number. One that fits gets no transform at all, not even an identity
+                    // one, so it is drawn by the very same call as before the scale existed.
+                    val k = chainNumberScale(w, h, radiusOf(text.selected) - ringOf(text.selected) / 2f)
+                    if (k < 1f) {
+                        scale(k, Offset(x, y)) {
+                            drawText(layout, orderColor, origin, shadow = Shadow.None, drawStyle = Fill)
+                        }
+                    } else {
+                        drawText(layout, orderColor, origin, shadow = Shadow.None, drawStyle = Fill)
+                    }
+                }
             }
             val radius = radiusOf(text.selected)
             val origin = PathRenderer.labelOrigin(x + radius, y, size.width, size.height) ?: continue
@@ -168,10 +204,13 @@ object SurveyRenderer {
                 maxLines = 1,
                 constraints = Constraints(maxWidth = NAME_MAX_WIDTH_DP.dp.roundToPx()),
             )
-            drawText(name, topLeft = origin)
+            with(PathRenderer) { drawCanvasText(name, origin, nameColor, nameShadow, palette) }
         }
     }
 
     private fun DrawScope.radiusOf(selected: Boolean): Float =
         (if (selected) SELECTED_RADIUS_DP else STATION_RADIUS_DP).dp.toPx()
+
+    /** The ring's stroke width, centred on [radiusOf]. */
+    private fun DrawScope.ringOf(selected: Boolean): Float = (if (selected) SELECTED_RING_DP else RING_DP).dp.toPx()
 }

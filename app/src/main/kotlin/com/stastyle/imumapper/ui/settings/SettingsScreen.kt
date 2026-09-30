@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -23,25 +25,27 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoFixHigh
+import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Remove
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
+import androidx.compose.material.icons.filled.SystemUpdate
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -49,6 +53,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
@@ -63,8 +68,17 @@ import com.stastyle.imumapper.BuildConfig
 import com.stastyle.imumapper.pipeline.core.CarryPosition
 import com.stastyle.imumapper.pipeline.core.PipelineConfig
 import com.stastyle.imumapper.pipeline.core.TripMode
+import com.stastyle.imumapper.ui.common.AppScaffold
+import com.stastyle.imumapper.ui.common.AppTopBar
+import com.stastyle.imumapper.ui.common.BrandButton
+import com.stastyle.imumapper.ui.common.BrandFilterChip
+import com.stastyle.imumapper.ui.common.GlassCard
+import com.stastyle.imumapper.ui.common.ScreenHeader
+import com.stastyle.imumapper.ui.common.SectionHeader
+import com.stastyle.imumapper.ui.common.StatusPill
 import com.stastyle.imumapper.ui.common.appContainer
 import com.stastyle.imumapper.ui.debug.ConfigDraft
+import com.stastyle.imumapper.ui.theme.ThemeMode
 import com.stastyle.imumapper.update.ReleaseInfo
 import com.stastyle.imumapper.update.ReleaseNotes
 import com.stastyle.imumapper.update.UpdateManager
@@ -72,35 +86,42 @@ import com.stastyle.imumapper.update.UpdateState
 import kotlin.math.roundToInt
 
 /**
- * Carry position, default trip mode, north from compass, steps to confirm a height change, check for
- * updates, about.
+ * The theme, carry position, default trip mode, north from compass, steps to confirm a height change, check
+ * for updates, the tools (assisted tuning and Debug), about.
+ *
+ * As the Settings tab it has no back arrow ([onBack] null), shows the large tab header and hosts the tab
+ * bar in [bottomBar]; with [onBack] it is a pushed screen with a back arrow instead.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(onBack: () -> Unit) {
+fun SettingsScreen(
+    onBack: (() -> Unit)?,
+    onOpenTuning: () -> Unit = {},
+    onOpenDebug: () -> Unit = {},
+    bottomBar: @Composable () -> Unit = {},
+) {
     val context = LocalContext.current
     val container = appContainer()
     val vm: SettingsViewModel = viewModel {
         SettingsViewModel(calibration = container.calibrationRepository, updates = UpdateManager.get(context))
     }
+    val themeMode by vm.themeMode.collectAsStateWithLifecycle()
     val carryPosition by vm.carryPosition.collectAsStateWithLifecycle()
     val tripMode by vm.defaultTripMode.collectAsStateWithLifecycle()
     val northFromCompass by vm.northFromCompass.collectAsStateWithLifecycle()
     val confirmSteps by vm.baroConfirmSteps.collectAsStateWithLifecycle()
     val maxHeldM by vm.baroMaxHeldM.collectAsStateWithLifecycle()
     val updateState by vm.updateState.collectAsStateWithLifecycle()
+    val version = "IMU Mapper ${vm.installedVersion}"
 
-    Scaffold(
+    AppScaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("Settings") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                },
-            )
+            if (onBack == null) {
+                ScreenHeader("Settings", subtitle = version)
+            } else {
+                AppTopBar("Settings", subtitle = version, onBack = onBack)
+            }
         },
+        bottomBar = bottomBar,
     ) { padding ->
         Column(
             modifier = Modifier
@@ -108,8 +129,9 @@ fun SettingsScreen(onBack: () -> Unit) {
                 .padding(padding)
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            AppearanceSection(themeMode = themeMode, onThemeMode = vm::setThemeMode)
             RecordingSection(
                 carryPosition = carryPosition,
                 onCarryPosition = vm::setCarryPosition,
@@ -136,33 +158,70 @@ fun SettingsScreen(onBack: () -> Unit) {
                 onDismiss = vm::dismissUpdate,
                 onOpenUrl = { url -> openUrl(context, url) },
             )
+            ToolsSection(onOpenTuning = onOpenTuning, onOpenDebug = onOpenDebug)
             AboutSection(installedVersion = vm.installedVersion, onOpenUrl = { url -> openUrl(context, url) })
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(8.dp))
         }
     }
 }
 
+/** A settings group: a card under a heading with its icon, and an optional [action] (a pill) at its end. */
 @Composable
-private fun SectionCard(title: String, content: @Composable ColumnScope.() -> Unit) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(title, style = MaterialTheme.typography.titleMedium)
+private fun SectionCard(
+    title: String,
+    icon: ImageVector,
+    action: (@Composable () -> Unit)? = null,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    GlassCard(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            SectionHeader(title = title, icon = icon, action = action)
             content()
         }
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
+/** A setting's name above its explanation. */
 @Composable
-private fun <T> ChoiceChips(options: List<T>, selected: T, label: (T) -> String, onSelect: (T) -> Unit) {
+private fun SettingLabel(title: String, help: String, modifier: Modifier = Modifier) {
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(title, style = MaterialTheme.typography.labelLarge)
+        Text(help, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+/** One chip per option; [selected] null (a setting still loading) marks none of them. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun <T : Any> ChoiceChips(options: List<T>, selected: T?, label: (T) -> String, onSelect: (T) -> Unit) {
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         for (option in options) {
-            FilterChip(
+            BrandFilterChip(
                 selected = option == selected,
                 onClick = { onSelect(option) },
-                label = { Text(label(option)) },
+                label = label(option),
             )
         }
+    }
+}
+
+@Composable
+private fun AppearanceSection(themeMode: ThemeMode?, onThemeMode: (ThemeMode) -> Unit) {
+    SectionCard(title = "Appearance", icon = Icons.Filled.Palette) {
+        SettingLabel(
+            "Theme",
+            "System follows the phone's dark theme setting. Dark dazzles less in a cave; Light reads better in " +
+                "daylight.",
+        )
+        ChoiceChips(
+            options = ThemeMode.entries,
+            selected = themeMode,
+            label = ::themeModeLabel,
+            onSelect = onThemeMode,
+        )
     }
 }
 
@@ -175,13 +234,11 @@ private fun RecordingSection(
     northFromCompass: Boolean,
     onNorthFromCompass: (Boolean) -> Unit,
 ) {
-    SectionCard(title = "Recording") {
-        Text("Carry position", style = MaterialTheme.typography.labelLarge)
-        Text(
+    SectionCard(title = "Recording", icon = Icons.AutoMirrored.Filled.DirectionsWalk) {
+        SettingLabel(
+            "Carry position",
             "Where the phone is while you walk. The stride calibration is tied to it; the heading offset " +
                 "belongs to the pose the phone is in when a recording starts.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         ChoiceChips(
             options = CarryPosition.entries,
@@ -190,12 +247,7 @@ private fun RecordingSection(
             onSelect = onCarryPosition,
         )
         HorizontalDivider()
-        Text("Default trip mode", style = MaterialTheme.typography.labelLarge)
-        Text(
-            "Preselected when starting a new trip.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        SettingLabel("Default trip mode", "Preselected when starting a new trip.")
         ChoiceChips(
             options = TripMode.entries,
             selected = tripMode,
@@ -207,19 +259,17 @@ private fun RecordingSection(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .toggleable(value = northFromCompass, role = Role.Switch, onValueChange = onNorthFromCompass),
+                .toggleable(value = northFromCompass, role = Role.Switch, onValueChange = onNorthFromCompass)
+                .padding(vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
-                Text("North from compass", style = MaterialTheme.typography.labelLarge)
-                Text(
-                    "North on the map is taken from the compass before each recording. " +
-                        "Off keeps the path in the gyroscope's own frame, which differs per trip. " +
-                        "Also applies when trips are re-processed, since processing uses the current calibration.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+            SettingLabel(
+                "North from compass",
+                "North on the map is taken from the compass before each recording. " +
+                    "Off keeps the path in the gyroscope's own frame, which differs per trip. " +
+                    "Also applies when trips are re-processed, since processing uses the current calibration.",
+                modifier = Modifier.weight(1f).padding(end = 12.dp),
+            )
             Switch(checked = northFromCompass, onCheckedChange = null)
         }
     }
@@ -227,13 +277,8 @@ private fun RecordingSection(
 
 @Composable
 private fun ProcessingSection(confirmSteps: Int?, maxHeldM: Double?, onConfirmSteps: (Int) -> Unit) {
-    SectionCard(title = "Processing") {
-        Text("Steps to confirm a height change", style = MaterialTheme.typography.labelLarge)
-        Text(
-            confirmStepsHelp(maxHeldM),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+    SectionCard(title = "Processing", icon = Icons.Filled.Tune) {
+        SettingLabel("Steps to confirm a height change", confirmStepsHelp(maxHeldM))
         StepCountStepper(steps = confirmSteps, onSteps = onConfirmSteps)
     }
 }
@@ -334,7 +379,12 @@ private fun UpdatesSection(
     onDismiss: () -> Unit,
     onOpenUrl: (String) -> Unit,
 ) {
-    SectionCard(title = "Updates") {
+    val pill = UpdatePill.of(state, unavailableReason)
+    SectionCard(
+        title = "Updates",
+        icon = Icons.Filled.SystemUpdate,
+        action = pill?.let { p -> @Composable { StatusPill(p.label, p.tone) } },
+    ) {
         Text("Installed version: $installedVersion", style = MaterialTheme.typography.bodyMedium)
         when {
             unavailableReason != null -> Text(
@@ -368,7 +418,7 @@ private fun UpdateControls(
     onDismiss: () -> Unit,
 ) {
     when (state) {
-        UpdateState.Idle -> Button(onClick = onCheck) { Text("Check for updates") }
+        UpdateState.Idle -> BrandButton(onClick = onCheck) { Text("Check for updates") }
         UpdateState.Checking -> Row(verticalAlignment = Alignment.CenterVertically) {
             CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
             Spacer(Modifier.width(12.dp))
@@ -391,7 +441,7 @@ private fun UpdateControls(
         is UpdateState.ReadyToInstall -> {
             Text("Version ${state.release.version} is downloaded and verified.")
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = onInstall) { Text("Install") }
+                BrandButton(onClick = onInstall) { Text("Install") }
                 TextButton(onClick = onDismiss) { Text("Later") }
             }
         }
@@ -401,14 +451,14 @@ private fun UpdateControls(
                     "settings page that opened, then come back and tap Install again.",
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = onInstall) { Text("Install") }
+                BrandButton(onClick = onInstall) { Text("Install") }
                 TextButton(onClick = onDismiss) { Text("Later") }
             }
         }
         is UpdateState.Error -> {
             Text(state.message, color = MaterialTheme.colorScheme.error)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = onRetry) { Text("Retry") }
+                BrandButton(onClick = onRetry) { Text("Retry") }
                 TextButton(onClick = onDismiss) { Text("Dismiss") }
             }
         }
@@ -435,15 +485,62 @@ private fun AvailableBlock(release: ReleaseInfo, onDownload: () -> Unit, onDismi
         Text(notes, style = MaterialTheme.typography.bodyMedium)
     }
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Button(onClick = onDownload) { Text("Update") }
+        BrandButton(onClick = onDownload) { Text("Update") }
         TextButton(onClick = onDismiss) { Text("Later") }
+    }
+}
+
+@Composable
+private fun ToolsSection(onOpenTuning: () -> Unit, onOpenDebug: () -> Unit) {
+    SectionCard(title = "Tools", icon = Icons.Filled.Build) {
+        ToolRow(
+            icon = Icons.Filled.AutoFixHigh,
+            title = "Assisted tuning",
+            detail = "Let a chat model propose thresholds for a walk you describe, and check them before saving.",
+            onClick = onOpenTuning,
+        )
+        HorizontalDivider()
+        ToolRow(
+            icon = Icons.Filled.BugReport,
+            title = "Debug",
+            detail = "Live sensors, raw logs, stored runs, re-processing with an edited config, the last crash.",
+            onClick = onOpenDebug,
+        )
+    }
+}
+
+/** A whole-row button, so the target is large and TalkBack reads the title and detail together. */
+@Composable
+private fun ToolRow(icon: ImageVector, title: String, detail: String, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 56.dp)
+            .clickable(role = Role.Button, onClick = onClick),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.secondary)
+        Column(modifier = Modifier.weight(1f).padding(vertical = 6.dp)) {
+            Text(title, style = MaterialTheme.typography.labelLarge)
+            Text(
+                detail,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Icon(
+            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
 @Composable
 private fun AboutSection(installedVersion: String, onOpenUrl: (String) -> Unit) {
     val repoUrl = "https://github.com/${BuildConfig.GITHUB_REPO}"
-    SectionCard(title = "About") {
+    SectionCard(title = "About", icon = Icons.Filled.Info) {
         Text("IMU Mapper $installedVersion", style = MaterialTheme.typography.bodyMedium)
         Text(
             "Records a walk with the phone's sensors and shows the route as a 3D path.",
@@ -479,6 +576,12 @@ private fun releaseOf(state: UpdateState): ReleaseInfo? = when (state) {
 private const val MAX_CONFIRM_STEPS = 20
 
 private val DEFAULT_CONFIRM_STEPS = PipelineConfig().baroConfirmSteps
+
+private fun themeModeLabel(mode: ThemeMode): String = when (mode) {
+    ThemeMode.SYSTEM -> "System"
+    ThemeMode.LIGHT -> "Light"
+    ThemeMode.DARK -> "Dark"
+}
 
 private fun carryPositionLabel(position: CarryPosition): String = when (position) {
     CarryPosition.HAND -> "Hand"

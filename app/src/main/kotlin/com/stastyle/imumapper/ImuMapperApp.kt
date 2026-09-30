@@ -6,13 +6,27 @@ import android.util.Log
 import com.stastyle.imumapper.capture.RecordingController
 import com.stastyle.imumapper.data.HeadingOffsetReset
 import com.stastyle.imumapper.debug.CrashLog
+import com.stastyle.imumapper.ui.theme.PlatformNightMode
+import com.stastyle.imumapper.ui.theme.ThemeMode
 import com.stastyle.imumapper.update.UpdateManager
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 class ImuMapperApp : Application() {
 
     lateinit var container: AppContainer
+        private set
+
+    /**
+     * Settings → Appearance, null until the preferences file has been read. It is read here, before any
+     * activity exists, so that the first frame usually has it and `MainActivity` does not draw one theme and
+     * then switch to the other.
+     */
+    lateinit var themeMode: StateFlow<ThemeMode?>
         private set
 
     override fun onCreate() {
@@ -25,8 +39,29 @@ class ImuMapperApp : Application() {
         // in RECORDING by a killed process is closed out on every launch, whichever screen opens first.
         RecordingController.get(this)
         val updates = UpdateManager.get(this)
+        followThemeSetting(updates)
         updates.autoCheckIfDue()
         resetHeadingOffsetOnce(updates)
+    }
+
+    /** Keeps [themeMode] current and hands each stored value, the first one too, to [PlatformNightMode]. */
+    private fun followThemeSetting(updates: UpdateManager) {
+        val scope = container.applicationScope
+        themeMode = updates.preferences.themeMode.stateIn<ThemeMode?>(scope, SharingStarted.Eagerly, null)
+        scope.launch {
+            // Only stored values: the null placeholder is not a choice, and applying it would switch the night
+            // mode back to the system's for a moment at every start.
+            themeMode.filterNotNull().collect { mode ->
+                try {
+                    PlatformNightMode.apply(this@ImuMapperApp, mode)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    // A failed system call only costs the matching splash; the theme itself still follows.
+                    Log.w(TAG, "night mode not applied", e)
+                }
+            }
+        }
     }
 
     /** See [HeadingOffsetReset]: offsets saved before north came from the compass are meaningless now. */

@@ -46,7 +46,7 @@ class SurveyLayerTest {
     }
 
     @Test
-    fun stationsSitOnThePathAtTheirTimesInTheirKindsColours() {
+    fun stationsSitOnThePathAtTheirTimesWithTheirKinds() {
         val layer = build()
         assertEquals(listOf(1, 5, 2, 4, 3), layer.stations.map { it.id })
         assertEquals(listOf("Start", "S1", "Junction 1", "C1", "End"), layer.stations.map { it.name })
@@ -60,9 +60,10 @@ class SurveyLayerTest {
         for (i in expected.indices) {
             assertNear(expected[i], layer.stations[i].position, "station ${layer.stations[i].id}")
         }
+        // The renderer colours each station by its kind, from the palette of the theme in use.
         assertEquals(
-            listOf(SurveyColors.START, SurveyColors.USER, SurveyColors.MARK, SurveyColors.CORNER, SurveyColors.END),
-            layer.stations.map { it.color },
+            listOf(StationKind.START, StationKind.USER, StationKind.MARK, StationKind.CORNER, StationKind.END),
+            layer.stations.map { it.kind },
         )
         assertTrue(layer.stations.none { it.selected || it.order != 0 })
         assertEquals(0, layer.chordCount)

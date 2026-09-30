@@ -7,6 +7,7 @@ import com.stastyle.imumapper.data.CalibrationRepository
 import com.stastyle.imumapper.pipeline.core.CarryPosition
 import com.stastyle.imumapper.pipeline.core.PipelineConfig
 import com.stastyle.imumapper.pipeline.core.TripMode
+import com.stastyle.imumapper.ui.theme.ThemeMode
 import com.stastyle.imumapper.update.UpdateManager
 import com.stastyle.imumapper.update.UpdateState
 import kotlinx.coroutines.CancellationException
@@ -16,11 +17,15 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
-/** Settings state: recording defaults from the database and DataStore, updater state from the singleton. */
+/** Settings state: the theme and recording defaults from the database and DataStore, the updater from its singleton. */
 class SettingsViewModel(
     private val calibration: CalibrationRepository,
     private val updates: UpdateManager,
 ) : ViewModel() {
+
+    /** Settings → Appearance; null until it has loaded, so no chip shows as chosen before the saved one. */
+    val themeMode: StateFlow<ThemeMode?> = updates.preferences.themeMode
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), null)
 
     val carryPosition: StateFlow<CarryPosition> = calibration.observeCarryPosition()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), CarryPosition.HAND)
@@ -55,6 +60,14 @@ class SettingsViewModel(
     val updatesUnavailableReason: String? get() = updates.updatesUnavailableReason
 
     val releasesPageUrl: String get() = updates.releasesPageUrl
+
+    /** Saves the theme; the app re-themes as soon as the new value is stored (ImuMapperApp, MainActivity). */
+    fun setThemeMode(mode: ThemeMode) {
+        viewModelScope.launch {
+            runCatching { updates.preferences.setThemeMode(mode) }
+                .onFailure { Log.w(TAG, "theme save failed", it) }
+        }
+    }
 
     fun setCarryPosition(position: CarryPosition) {
         viewModelScope.launch {

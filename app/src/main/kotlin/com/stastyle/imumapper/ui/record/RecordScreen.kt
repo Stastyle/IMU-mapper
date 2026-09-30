@@ -7,40 +7,66 @@ import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Explore
+import androidx.compose.material.icons.filled.Flag
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Route
+import androidx.compose.material.icons.filled.Sensors
+import androidx.compose.material.icons.filled.SignalCellular0Bar
+import androidx.compose.material.icons.filled.SignalCellularAlt
+import androidx.compose.material.icons.filled.SignalCellularAlt1Bar
+import androidx.compose.material.icons.filled.SignalCellularAlt2Bar
+import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.filled.TipsAndUpdates
+import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -51,10 +77,21 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.res.vectorResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
@@ -62,25 +99,37 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.stastyle.imumapper.R
 import com.stastyle.imumapper.capture.RecordingController
 import com.stastyle.imumapper.capture.RecordingState
 import com.stastyle.imumapper.capture.SensorHealth
 import com.stastyle.imumapper.capture.SensorKind
 import com.stastyle.imumapper.capture.SensorStats
-import com.stastyle.imumapper.capture.formatElapsed
-import com.stastyle.imumapper.capture.formatRate
 import com.stastyle.imumapper.capture.modeLabel
 import com.stastyle.imumapper.pipeline.core.AnnotationKind
 import com.stastyle.imumapper.pipeline.core.CarryPosition
 import com.stastyle.imumapper.pipeline.core.TripMode
+import com.stastyle.imumapper.ui.common.AppScaffold
+import com.stastyle.imumapper.ui.common.AppTopBar
+import com.stastyle.imumapper.ui.common.BatteryIndicator
+import com.stastyle.imumapper.ui.common.BrandButton
+import com.stastyle.imumapper.ui.common.BrandFilterChip
+import com.stastyle.imumapper.ui.common.GlassCard
+import com.stastyle.imumapper.ui.common.RoundIconButton
+import com.stastyle.imumapper.ui.common.SectionHeader
+import com.stastyle.imumapper.ui.common.StatGrid
+import com.stastyle.imumapper.ui.common.StatTileData
 import com.stastyle.imumapper.ui.common.appContainer
 import com.stastyle.imumapper.ui.common.findActivity
+import com.stastyle.imumapper.ui.common.rememberBatteryState
+import com.stastyle.imumapper.ui.theme.imuColors
+import com.stastyle.imumapper.ui.triplist.TripFormat
 
 /**
  * Recording screen for the given [mode]. Calls [onFinished] with the new trip id once the
- * recording is stopped and saved, or [onCancelled] if nothing was recorded.
+ * recording is stopped and saved, or [onCancelled] if nothing was recorded. From the recording on,
+ * everything it shows comes from the adopted recording, not from [mode].
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RecordScreen(
     mode: TripMode,
@@ -96,6 +145,8 @@ fun RecordScreen(
     val ui by vm.ui.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     var showStopDialog by rememberSaveable { mutableStateOf(false) }
+    var showNoteDialog by rememberSaveable { mutableStateOf(false) }
+    var showLoopDialog by rememberSaveable { mutableStateOf(false) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
@@ -152,42 +203,34 @@ fun RecordScreen(
         }
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Record · ${modeLabel(mode)}") },
-                navigationIcon = {
-                    IconButton(
-                        onClick = {
-                            when (ui.phase) {
-                                RecordPhase.SETUP -> onCancelled()
-                                RecordPhase.RECORDING -> showStopDialog = true
-                                else -> Unit
-                            }
-                        },
-                    ) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                },
-            )
+    val recording = ui.recording.takeIf { ui.phase == RecordPhase.RECORDING }
+    AppScaffold(
+        topBar = { RecordTopBar(ui, onBack = { if (ui.phase == RecordPhase.SETUP) onCancelled() }) },
+        // The marks and controls are the bottom bar, so they stay put whatever scrolls above them and
+        // the snackbar confirming a mark rises above them instead of covering them.
+        bottomBar = {
+            if (recording != null) {
+                RecordControls(
+                    paused = recording.paused,
+                    onAnnotate = vm::annotate,
+                    onNote = { showNoteDialog = true },
+                    onLoop = { showLoopDialog = true },
+                    onPause = vm::pause,
+                    onResume = vm::resume,
+                    onStop = { showStopDialog = true },
+                )
+            }
         },
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
-        Column(modifier = Modifier.fillMaxSize().padding(padding)) {
+        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
             when (ui.phase) {
                 RecordPhase.SETUP, RecordPhase.COMPASS, RecordPhase.STARTING -> SetupContent(
                     ui = ui,
                     onCarry = vm::setCarry,
                     onStart = onStartClick,
                 )
-                RecordPhase.RECORDING -> RecordingContent(
-                    ui = ui,
-                    controller = controller,
-                    onAnnotate = vm::annotate,
-                    onPause = vm::pause,
-                    onResume = vm::resume,
-                    onStop = { showStopDialog = true },
-                )
+                RecordPhase.RECORDING -> if (recording != null) RecordingContent(ui, recording, controller)
                 RecordPhase.STOPPING, RecordPhase.DONE -> BusyContent("Saving and processing the trip…")
             }
         }
@@ -204,17 +247,59 @@ fun RecordScreen(
             onSkip = vm::skipCompass,
         )
     }
+    // The dialogs belong to the running recording; one stopped from the notification takes them along.
+    if (recording == null) return
     if (showStopDialog) {
         ConfirmDialog(
             title = "Stop recording?",
             text = "The trip is saved and processed. You cannot resume it afterwards.",
             confirmLabel = "Stop",
+            destructive = true,
             onConfirm = {
                 showStopDialog = false
                 vm.stop()
             },
             onDismiss = { showStopDialog = false },
         )
+    }
+    if (showNoteDialog) {
+        NoteDialog(
+            onSave = { note ->
+                showNoteDialog = false
+                vm.annotate(AnnotationKind.NOTE, note)
+            },
+            onDismiss = { showNoteDialog = false },
+        )
+    }
+    if (showLoopDialog) {
+        ConfirmDialog(
+            title = "Back at the start?",
+            text = "Marks this point as the trip start again so the path can be closed into a loop.",
+            confirmLabel = "Yes, I am at the start",
+            onConfirm = {
+                showLoopDialog = false
+                vm.annotate(AnnotationKind.LOOP_CLOSED, "")
+            },
+            onDismiss = { showLoopDialog = false },
+        )
+    }
+}
+
+/**
+ * "Ready to record" with a back arrow before the start; "Recording" or "Paused" without one once it runs
+ * (Back then asks whether to stop). The subtitle names what is recorded, read from the adopted recording.
+ */
+@Composable
+private fun RecordTopBar(ui: RecordUiState, onBack: () -> Unit) {
+    when (ui.phase) {
+        RecordPhase.SETUP, RecordPhase.COMPASS, RecordPhase.STARTING ->
+            AppTopBar(title = "Ready to record", subtitle = modeLabel(ui.mode), onBack = onBack)
+        RecordPhase.RECORDING -> AppTopBar(
+            title = if (ui.recording?.paused == true) "Paused" else "Recording",
+            subtitle = RecordStatus.headerSubtitle(ui.mode, ui.carry),
+        )
+        RecordPhase.STOPPING, RecordPhase.DONE ->
+            AppTopBar(title = "Saving trip", subtitle = RecordStatus.headerSubtitle(ui.mode, ui.carry))
     }
 }
 
@@ -227,63 +312,83 @@ private fun SetupContent(
 ) {
     val starting = ui.phase == RecordPhase.STARTING
     val inputsDisabled = starting || ui.phase == RecordPhase.COMPASS
-    // No vertical scroll here: the weighted spacer needs a bounded height to push Start to the bottom.
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 20.dp, vertical = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        Text(modeDescription(ui.mode), style = MaterialTheme.typography.bodyLarge)
-        Text("Carry position", style = MaterialTheme.typography.titleMedium)
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            for (position in CarryPosition.entries) {
-                FilterChip(
-                    selected = ui.carry == position,
-                    onClick = { onCarry(position) },
-                    label = { Text(carryLabel(position)) },
-                    enabled = !inputsDisabled,
-                )
+    Column(modifier = Modifier.fillMaxSize()) {
+        // The guidance scrolls; the error and Start stay pinned below it, so both are always in reach.
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            GlassCard(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SectionHeader(title = "Before you start", icon = Icons.Filled.TipsAndUpdates)
+                    Text(modeDescription(ui.mode), style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        northText(ui),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            Column {
+                SectionHeader(title = "Phone carried in")
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    for (position in CarryPosition.entries) {
+                        BrandFilterChip(
+                            selected = ui.carry == position,
+                            onClick = { onCarry(position) },
+                            label = TripFormat.carryLabel(position),
+                            enabled = !inputsDisabled,
+                        )
+                    }
+                }
             }
         }
-        Text(
-            northText(ui),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(modifier = Modifier.weight(1f))
-        if (ui.error != null) {
-            Text(ui.error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
-        }
-        Button(
-            onClick = onStart,
-            enabled = !inputsDisabled,
-            modifier = Modifier.fillMaxWidth().height(80.dp),
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            if (starting) {
-                CircularProgressIndicator(modifier = Modifier.size(24.dp), color = MaterialTheme.colorScheme.onPrimary)
-            } else {
-                Text("Start recording", style = MaterialTheme.typography.titleLarge)
+            if (ui.error != null) {
+                Text(ui.error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
+            }
+            BrandButton(
+                onClick = onStart,
+                enabled = !inputsDisabled,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(64.dp),
+            ) {
+                if (starting) {
+                    CircularProgressIndicator(
+                        modifier = Modifier
+                            .size(24.dp)
+                            .semantics { contentDescription = "Starting the recording" },
+                        color = MaterialTheme.colorScheme.onSurface,
+                        strokeWidth = 3.dp,
+                    )
+                } else {
+                    Text("Start recording", style = MaterialTheme.typography.titleMedium)
+                }
             }
         }
     }
 }
 
+/**
+ * The live part above the pinned controls. Camera modes split it between the preview and the cards; the
+ * preview stays composed for the whole recording, since leaving composition would restart ARCore, and keeps
+ * square corners because a Compose clip cannot round a SurfaceView. Pocket gives the cards all of it.
+ */
 @Composable
-private fun RecordingContent(
-    ui: RecordUiState,
-    controller: RecordingController,
-    onAnnotate: (AnnotationKind, String) -> Unit,
-    onPause: () -> Unit,
-    onResume: () -> Unit,
-    onStop: () -> Unit,
-) {
-    val recording = ui.recording ?: return
-    var showNoteDialog by rememberSaveable { mutableStateOf(false) }
-    var showLoopDialog by rememberSaveable { mutableStateOf(false) }
-
+private fun RecordingContent(ui: RecordUiState, recording: RecordingState.Recording, controller: RecordingController) {
+    val pocket = ui.mode == TripMode.POCKET
     Column(modifier = Modifier.fillMaxSize()) {
-        if (ui.mode != TripMode.POCKET) {
+        if (!pocket) {
             ArSection(mode = ui.mode, controller = controller, modifier = Modifier.fillMaxWidth().weight(1f))
         }
         Column(
@@ -294,118 +399,83 @@ private fun RecordingContent(
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            StatusPanel(recording)
-            SensorHealthRow(ui.stats)
-            AnnotationButtons(
-                onWaypoint = { onAnnotate(AnnotationKind.WAYPOINT, "") },
-                onJunction = { onAnnotate(AnnotationKind.JUNCTION, "") },
-                onChamber = { onAnnotate(AnnotationKind.CHAMBER, "") },
-                onNote = { showNoteDialog = true },
-                onLoop = { showLoopDialog = true },
-                onReorient = { onAnnotate(AnnotationKind.REORIENT, "") },
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-                OutlinedButton(
-                    onClick = { if (recording.paused) onResume() else onPause() },
-                    modifier = Modifier.weight(1f).height(56.dp),
-                ) {
-                    Text(if (recording.paused) "Resume" else "Pause")
-                }
-                Button(
-                    onClick = onStop,
-                    modifier = Modifier.weight(1f).height(56.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.error,
-                        contentColor = MaterialTheme.colorScheme.onError,
-                    ),
-                ) {
-                    Text("Stop", style = MaterialTheme.typography.titleMedium)
-                }
-            }
-        }
-    }
-
-    if (showNoteDialog) {
-        NoteDialog(
-            onSave = { note ->
-                showNoteDialog = false
-                onAnnotate(AnnotationKind.NOTE, note)
-            },
-            onDismiss = { showNoteDialog = false },
-        )
-    }
-    if (showLoopDialog) {
-        ConfirmDialog(
-            title = "Back at the start?",
-            text = "Marks this point as the trip start again so the path can be closed into a loop.",
-            confirmLabel = "Yes, I am at the start",
-            onConfirm = {
-                showLoopDialog = false
-                onAnnotate(AnnotationKind.LOOP_CLOSED, "")
-            },
-            onDismiss = { showLoopDialog = false },
-        )
-    }
-}
-
-@Composable
-private fun StatusPanel(recording: RecordingState.Recording) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column {
-            Text(
-                text = formatElapsed(recording.elapsedNs),
-                style = MaterialTheme.typography.displayMedium,
-                fontFamily = FontFamily.Monospace,
-            )
-            Text(
-                text = if (recording.paused) "Paused" else "Recording · ${carryLabel(recording.carryPosition)}",
-                style = MaterialTheme.typography.bodyMedium,
-                color = if (recording.paused) {
-                    MaterialTheme.colorScheme.tertiary
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
-            )
-            if (recording.paused) {
-                Text(
-                    text = "Sensors keep logging; this stretch is left out of the path and the timer.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-        Column(horizontalAlignment = Alignment.End) {
-            Text(text = recording.stepCount.toString(), style = MaterialTheme.typography.headlineMedium)
-            Text(text = "steps", style = MaterialTheme.typography.bodySmall)
-            Text(text = "${recording.annotationCount} marks", style = MaterialTheme.typography.bodySmall)
+            StatusCard(ui, recording)
+            SensorTiles(ui.stats, recording.elapsedNs)
+            StatsCard(ui, recording, pocket)
         }
     }
 }
 
+/**
+ * The status headline with its dot, what is recorded and how it is processed, and the battery. Tapping it
+ * opens the full per-sensor list with rates, which used to be always on screen.
+ */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun SensorHealthRow(stats: SensorStats) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        if (stats.writeError != null) {
-            Text(
-                "Log write failed: ${stats.writeError}",
-                color = MaterialTheme.colorScheme.error,
-                style = MaterialTheme.typography.bodySmall,
+private fun StatusCard(ui: RecordUiState, recording: RecordingState.Recording) {
+    val status = RecordStatus.status(ui.stats, recording)
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    val battery = rememberBatteryState()
+    val scheme = MaterialTheme.colorScheme
+    GlassCard(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(
+                    role = Role.Button,
+                    onClickLabel = if (expanded) "Hide sensor list" else "Show all sensors",
+                ) { expanded = !expanded }
+                .semantics { stateDescription = if (expanded) "Expanded" else "Collapsed" }
+                .heightIn(min = 56.dp)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            // Decorative: the headline says the same in words.
+            Box(
+                modifier = Modifier
+                    .size(12.dp)
+                    .clip(CircleShape)
+                    .background(toneColor(status.tone)),
             )
-        } else if (!stats.coreSensorsHealthy) {
-            Text(
-                "Accelerometer or gyroscope is not delivering",
-                color = MaterialTheme.colorScheme.error,
-                style = MaterialTheme.typography.bodySmall,
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    status.text,
+                    // Follows the words, not the layout: in Hebrew "3 sensors not delivering" must not put its
+                    // count after the sentence.
+                    style = MaterialTheme.typography.titleMedium.copy(textDirection = TextDirection.Content),
+                    color = if (status.tone == RecordTone.Good) scheme.onSurface else toneColor(status.tone),
+                )
+                Text(
+                    RecordStatus.statusSubtitle(ui.mode, ui.carry),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = scheme.onSurfaceVariant,
+                )
+            }
+            BatteryIndicator(battery)
+            Icon(
+                if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                contentDescription = null,
+                tint = scheme.onSurfaceVariant,
             )
         }
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            for (kind in SensorKind.entries) {
-                SensorChip(stats.of(kind))
+        if (status.detail != null) {
+            Text(
+                status.detail,
+                style = MaterialTheme.typography.bodySmall,
+                color = scheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
+            )
+        }
+        AnimatedVisibility(visible = expanded) {
+            FlowRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                for (kind in SensorKind.entries) SensorChip(ui.stats.of(kind))
             }
         }
     }
@@ -414,74 +484,246 @@ private fun SensorHealthRow(stats: SensorStats) {
 @Composable
 private fun SensorChip(health: SensorHealth) {
     val scheme = MaterialTheme.colorScheme
-    val (background, foreground) = when {
-        !health.available -> scheme.surfaceVariant to scheme.onSurfaceVariant
-        health.stalled -> scheme.errorContainer to scheme.onErrorContainer
-        health.sampleCount == 0L -> scheme.surfaceVariant to scheme.onSurfaceVariant
-        else -> scheme.secondaryContainer to scheme.onSecondaryContainer
-    }
-    val detail = when {
-        !health.available -> "none"
-        health.stalled -> "stalled"
-        health.kind == SensorKind.STEP -> health.sampleCount.toString()
-        else -> formatRate(health.rateHz)
+    val (background, foreground) = when (RecordStatus.chipTone(health)) {
+        RecordTone.Bad -> scheme.errorContainer to scheme.onErrorContainer
+        RecordTone.Good -> scheme.secondaryContainer to scheme.onSecondaryContainer
+        RecordTone.Neutral, RecordTone.Warning -> scheme.surfaceContainerHighest to scheme.onSurfaceVariant
     }
     Surface(shape = MaterialTheme.shapes.small, color = background, contentColor = foreground) {
         Text(
-            text = "${health.kind.label} $detail",
-            style = MaterialTheme.typography.labelSmall,
+            text = RecordStatus.chipText(health),
+            style = MaterialTheme.typography.labelMedium,
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
         )
     }
 }
 
+/** IMU, Steps, Heading and Mag, each a state word in its colour, read by TalkBack as one sentence. */
 @Composable
-private fun AnnotationButtons(
-    onWaypoint: () -> Unit,
-    onJunction: () -> Unit,
-    onChamber: () -> Unit,
+private fun SensorTiles(stats: SensorStats, activeNs: Long) {
+    val magnet = ImageVector.vectorResource(R.drawable.ic_magnet)
+    val tiles = listOf(
+        sensorTile("IMU", Icons.Filled.Sensors, RecordStatus.imuTile(stats, activeNs)),
+        sensorTile("Steps", Icons.AutoMirrored.Filled.DirectionsWalk, RecordStatus.stepsTile(stats)),
+        sensorTile("Heading", Icons.Filled.Explore, RecordStatus.headingTile(stats, activeNs)),
+        sensorTile("Mag", magnet, RecordStatus.magTile(stats, activeNs)),
+    )
+    StatGrid(tiles = tiles, maxColumns = 4)
+}
+
+@Composable
+private fun sensorTile(label: String, icon: ImageVector, state: SensorTileState): StatTileData {
+    val valueIcon = when {
+        state.bars != null -> barsIcon(state.bars)
+        state.tone == RecordTone.Good -> Icons.Filled.Check
+        state.tone == RecordTone.Warning -> Icons.Filled.WarningAmber
+        state.tone == RecordTone.Bad -> Icons.Filled.ErrorOutline
+        else -> null
+    }
+    return StatTileData(
+        label = label,
+        value = state.value,
+        icon = icon,
+        detail = state.detail,
+        contentDescription = state.spoken,
+        valueColor = toneColor(state.tone),
+        valueIcon = valueIcon,
+    )
+}
+
+private fun barsIcon(bars: Int): ImageVector = when {
+    bars >= 3 -> Icons.Filled.SignalCellularAlt
+    bars == 2 -> Icons.Filled.SignalCellularAlt2Bar
+    bars == 1 -> Icons.Filled.SignalCellularAlt1Bar
+    else -> Icons.Filled.SignalCellular0Bar
+}
+
+/**
+ * The live counters. Pocket has no preview to look at, so its card leads with a large clock and says when
+ * the path appears; camera modes show the time as a tile next to the others.
+ */
+@Composable
+private fun StatsCard(ui: RecordUiState, recording: RecordingState.Recording, pocket: Boolean) {
+    val n = RecordStatus.numbers(recording, ui.stats, ui.strideLengthM, ui.timeExcludesPauses)
+    val tiles = buildList {
+        if (!pocket) add(StatTileData("Time", n.clock, Icons.Filled.Timer, n.clockDetail))
+        add(StatTileData("Steps", n.steps, Icons.AutoMirrored.Filled.DirectionsWalk, n.stepsDetail))
+        add(StatTileData("Marks", n.marks, Icons.Filled.Flag))
+        add(StatTileData("Distance ≈", n.distance, Icons.Filled.Route, n.distanceDetail, n.distanceSpoken))
+        add(StatTileData("Cadence", n.cadence, Icons.Filled.Speed, n.cadenceDetail, n.cadenceSpoken))
+    }
+    GlassCard(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            if (pocket) {
+                Column(modifier = Modifier.semantics(mergeDescendants = true) {}) {
+                    Text(
+                        n.clock,
+                        style = MaterialTheme.typography.displayMedium.copy(
+                            fontWeight = FontWeight.SemiBold,
+                            textDirection = TextDirection.Ltr,
+                            // Equal-width digits, so the clock does not shuffle sideways every second.
+                            fontFeatureSettings = "tnum",
+                        ),
+                        maxLines = 1,
+                    )
+                    if (n.clockDetail != null) {
+                        Text(
+                            n.clockDetail,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Text(
+                        "The path is computed when you stop.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            }
+            StatGrid(tiles = tiles, maxColumns = 3, framed = false)
+        }
+    }
+}
+
+/**
+ * Pinned under the live part in every mode: the marks as a 3 + 2 grid that never scrolls, the volume-key
+ * hint, and Pause, Stop and the waypoint flag, large enough to hit while walking.
+ */
+@Composable
+private fun RecordControls(
+    paused: Boolean,
+    onAnnotate: (AnnotationKind, String) -> Unit,
     onNote: () -> Unit,
     onLoop: () -> Unit,
-    onReorient: () -> Unit,
+    onPause: () -> Unit,
+    onResume: () -> Unit,
+    onStop: () -> Unit,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            BigButton("Waypoint", Modifier.weight(1f), onWaypoint)
-            BigButton("Junction", Modifier.weight(1f), onJunction)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        // Each row takes its tallest button's height, so one label wrapping at a large text size does not
+        // leave its neighbours shorter.
+        val markRow = Modifier
+            .fillMaxWidth()
+            .height(IntrinsicSize.Min)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = markRow) {
+            MarkButton("Junction", Modifier.weight(1f)) { onAnnotate(AnnotationKind.JUNCTION, "") }
+            MarkButton("Chamber", Modifier.weight(1f)) { onAnnotate(AnnotationKind.CHAMBER, "") }
+            MarkButton("Note", Modifier.weight(1f), onNote)
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            BigButton("Chamber", Modifier.weight(1f), onChamber)
-            BigButton("Note", Modifier.weight(1f), onNote)
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            BigButton("Back at start", Modifier.weight(1f), onLoop)
-            BigButton("Re-orient", Modifier.weight(1f), onReorient)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = markRow) {
+            MarkButton("Back at start", Modifier.weight(1f), onLoop)
+            MarkButton("Re-orient", Modifier.weight(1f)) { onAnnotate(AnnotationKind.REORIENT, "") }
         }
         Text(
             "Volume keys also mark a waypoint.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            RoundIconButton(
+                onClick = if (paused) onResume else onPause,
+                icon = if (paused) Icons.Filled.PlayArrow else Icons.Filled.Pause,
+                contentDescription = if (paused) "Resume recording" else "Pause recording",
+                size = 64.dp,
+            )
+            StopPill(onClick = onStop, modifier = Modifier.weight(1f))
+            RoundIconButton(
+                onClick = { onAnnotate(AnnotationKind.WAYPOINT, "") },
+                icon = Icons.Filled.Flag,
+                contentDescription = "Mark waypoint",
+                size = 64.dp,
+            )
+        }
     }
 }
 
 @Composable
-private fun BigButton(label: String, modifier: Modifier, onClick: () -> Unit) {
-    FilledTonalButton(onClick = onClick, modifier = modifier.height(64.dp)) {
-        Text(label, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
+private fun MarkButton(label: String, modifier: Modifier, onClick: () -> Unit) {
+    FilledTonalButton(
+        onClick = onClick,
+        modifier = modifier
+            .heightIn(min = 56.dp)
+            .fillMaxHeight(),
+        shape = MaterialTheme.shapes.medium,
+        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+    ) {
+        // Wraps to a second line rather than clipping at large text sizes; the button grows with it.
+        Text(label, style = MaterialTheme.typography.labelLarge, textAlign = TextAlign.Center)
     }
+}
+
+/** The red Stop pill; "Stop Recording" when that fits beside the two round buttons, otherwise "Stop". */
+@Composable
+private fun StopPill(onClick: () -> Unit, modifier: Modifier) {
+    val colors = MaterialTheme.imuColors
+    val style = MaterialTheme.typography.titleMedium
+    val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    BoxWithConstraints(modifier = modifier) {
+        val fullWidth = remember(measurer, style, density) {
+            with(density) { measurer.measure(STOP_FULL, style, maxLines = 1).size.width.toDp() }
+        }
+        val fits = fullWidth + StopIconSize + StopIconGap + StopPaddingH * 2 <= maxWidth
+        Button(
+            onClick = onClick,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(64.dp),
+            shape = CircleShape,
+            colors = ButtonDefaults.buttonColors(containerColor = colors.stopRed, contentColor = colors.onStopRed),
+            contentPadding = PaddingValues(horizontal = StopPaddingH),
+        ) {
+            Icon(Icons.Filled.Stop, contentDescription = null, modifier = Modifier.size(StopIconSize))
+            Spacer(Modifier.width(StopIconGap))
+            Text(
+                if (fits) STOP_FULL else "Stop",
+                style = style,
+                maxLines = 1,
+                modifier = Modifier.semantics { contentDescription = "Stop recording" },
+            )
+        }
+    }
+}
+
+private const val STOP_FULL = "Stop Recording"
+private val StopIconSize = 24.dp
+private val StopIconGap = 8.dp
+private val StopPaddingH = 20.dp
+
+@Composable
+private fun toneColor(tone: RecordTone): Color = when (tone) {
+    RecordTone.Good -> MaterialTheme.imuColors.success
+    RecordTone.Warning -> MaterialTheme.imuColors.warning
+    RecordTone.Bad -> MaterialTheme.colorScheme.error
+    RecordTone.Neutral -> MaterialTheme.colorScheme.onSurfaceVariant
 }
 
 @Composable
 private fun BusyContent(text: String) {
-    Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        CircularProgressIndicator()
-        Spacer(modifier = Modifier.height(16.dp))
-        Text(text, style = MaterialTheme.typography.bodyLarge, textAlign = TextAlign.Center)
+    Box(modifier = Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+        GlassCard(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                CircularProgressIndicator()
+                Text(text, style = MaterialTheme.typography.bodyLarge, textAlign = TextAlign.Center)
+            }
+        }
     }
 }
 
@@ -492,12 +734,24 @@ private fun ConfirmDialog(
     confirmLabel: String,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
+    destructive: Boolean = false,
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = { Text(text) },
-        confirmButton = { TextButton(onClick = onConfirm) { Text(confirmLabel) } },
+        confirmButton = {
+            TextButton(
+                onClick = onConfirm,
+                colors = if (destructive) {
+                    ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                } else {
+                    ButtonDefaults.textButtonColors()
+                },
+            ) {
+                Text(confirmLabel)
+            }
+        },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
@@ -559,13 +813,6 @@ private fun northText(ui: RecordUiState): String {
             "North on the map is the gyroscope's own direction for this trip, not the compass's; Settings can " +
                 "turn North from compass on. $start"
     }
-}
-
-private fun carryLabel(position: CarryPosition): String = when (position) {
-    CarryPosition.HAND -> "Hand"
-    CarryPosition.POCKET -> "Pocket"
-    CarryPosition.CHEST -> "Chest"
-    CarryPosition.HELMET -> "Helmet"
 }
 
 /** Everything worth asking for; some may be declined without blocking the recording. */

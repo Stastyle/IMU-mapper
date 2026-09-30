@@ -20,10 +20,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FlashOff
 import androidx.compose.material.icons.filled.FlashOn
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -60,7 +57,11 @@ import com.stastyle.imumapper.capture.arcore.rotationDegrees
 import com.stastyle.imumapper.capture.modeLabel
 import com.stastyle.imumapper.pipeline.core.TrackingState
 import com.stastyle.imumapper.pipeline.core.TripMode
+import com.stastyle.imumapper.ui.common.BrandButton
+import com.stastyle.imumapper.ui.common.RoundIconButton
 import com.stastyle.imumapper.ui.common.findActivity
+import com.stastyle.imumapper.ui.theme.ImuMapperTheme
+import com.stastyle.imumapper.ui.theme.imuColors
 
 /**
  * Camera half of the recording screen for the ARCore modes: the live camera preview with the tracking
@@ -140,7 +141,8 @@ fun ArSection(mode: TripMode, controller: RecordingController, modifier: Modifie
     // order, so open/resume/pause never interleave. Order matters: the view is paused before the
     // session so the GL thread cannot call update() on a paused session.
     DisposableEffect(active, recording?.tripId, retry) {
-        if (active && recording != null) {
+        // active includes recording != null, which the compiler carries into this branch.
+        if (active) {
             val opened = manager.open(mode, recording.photosDir, rotationDegrees(displayRotation(context)))
             if (opened && manager.resume()) glView.onResume()
         } else if (recording == null) {
@@ -159,35 +161,42 @@ fun ArSection(mode: TripMode, controller: RecordingController, modifier: Modifie
         }
     }
 
-    Box(modifier = modifier.background(Color.Black)) {
-        if (ready && cameraGranted) {
-            AndroidView(factory = { glView }, modifier = Modifier.fillMaxSize())
-        }
-        val state = availabilityState
-        when {
-            !cameraGranted -> CenterMessage("Camera permission is needed for ${modeLabel(mode)} mode.")
-            state is ArAvailability.Checking -> CenterMessage("Checking ARCore…", progress = true)
-            state is ArAvailability.NeedsInstall -> CenterMessage(
-                "${state.detail}. Camera tracking is off until it is; the IMU log still records.",
-                actionLabel = "Install ARCore",
-                onAction = { context.findActivity()?.let { availability.requestInstall(it, true) } },
-            )
-            state is ArAvailability.InstallRequested -> CenterMessage("Finishing the ARCore install", progress = true)
-            state is ArAvailability.Unsupported -> CenterMessage("${state.detail}. The IMU log still records.")
-            state is ArAvailability.Error -> CenterMessage(
-                state.message,
-                actionLabel = "Retry",
-                onAction = { availability.check() },
-            )
-            failed -> CenterMessage(
-                arState.error ?: "ARCore failed",
-                actionLabel = "Retry",
-                onAction = {
-                    manager.close()
-                    retry++
-                },
-            )
-            else -> ArOverlay(mode = mode, state = arState, onToggleTorch = { manager.setTorch(!arState.torchOn) })
+    // Black stands in for the camera image before the first frame and behind the messages that replace it;
+    // it is the camera's colour, not a themed surface, so it stays black whatever the theme. The chips,
+    // buttons and messages over it are the dark theme's for the same reason: in light colours the green and
+    // amber tracking states, the torch button and the white-on-scrim labels would not read over a camera image.
+    ImuMapperTheme(dark = true) {
+        Box(modifier = modifier.background(Color.Black)) {
+            if (ready && cameraGranted) {
+                AndroidView(factory = { glView }, modifier = Modifier.fillMaxSize())
+            }
+            val state = availabilityState
+            when {
+                !cameraGranted -> CenterMessage("Camera permission is needed for ${modeLabel(mode)} mode.")
+                state is ArAvailability.Checking -> CenterMessage("Checking ARCore…", progress = true)
+                state is ArAvailability.NeedsInstall -> CenterMessage(
+                    "${state.detail}. Camera tracking is off until it is; the IMU log still records.",
+                    actionLabel = "Install ARCore",
+                    onAction = { context.findActivity()?.let { availability.requestInstall(it, true) } },
+                )
+                state is ArAvailability.InstallRequested ->
+                    CenterMessage("Finishing the ARCore install", progress = true)
+                state is ArAvailability.Unsupported -> CenterMessage("${state.detail}. The IMU log still records.")
+                state is ArAvailability.Error -> CenterMessage(
+                    state.message,
+                    actionLabel = "Retry",
+                    onAction = { availability.check() },
+                )
+                failed -> CenterMessage(
+                    arState.error ?: "ARCore failed",
+                    actionLabel = "Retry",
+                    onAction = {
+                        manager.close()
+                        retry++
+                    },
+                )
+                else -> ArOverlay(mode = mode, state = arState, onToggleTorch = { manager.setTorch(!arState.torchOn) })
+            }
         }
     }
 }
@@ -202,15 +211,16 @@ private fun ArOverlay(mode: TripMode, state: ArSessionState, onToggleTorch: () -
         ) {
             TrackingChip(state)
             if (state.torchSupported) {
-                Surface(color = Color.Black.copy(alpha = 0.5f), shape = RoundedCornerShape(24.dp)) {
-                    IconButton(onClick = onToggleTorch) {
-                        Icon(
-                            imageVector = if (state.torchOn) Icons.Filled.FlashOn else Icons.Filled.FlashOff,
-                            contentDescription = if (state.torchOn) "Torch on" else "Torch off",
-                            tint = if (state.torchOn) Color(0xFFFFD54F) else Color.White,
-                        )
-                    }
-                }
+                RoundIconButton(
+                    onClick = onToggleTorch,
+                    icon = if (state.torchOn) Icons.Filled.FlashOn else Icons.Filled.FlashOff,
+                    contentDescription = if (state.torchOn) "Turn the torch off" else "Turn the torch on",
+                    contentColor = if (state.torchOn) {
+                        MaterialTheme.imuColors.warning
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    },
+                )
             } else if (mode == TripMode.FLASHLIGHT) {
                 Label("No torch on this camera")
             }
@@ -231,19 +241,21 @@ private fun TrackingChip(state: ArSessionState) {
     when {
         state.status != ArStatus.RUNNING -> {
             text = "CAMERA PAUSED"
-            color = Color(0xFFBDBDBD)
+            // Dimmed overlay text, so it reads as inactive next to the green and amber states.
+            color = MaterialTheme.imuColors.onCameraOverlay.copy(alpha = 0.75f)
         }
         state.tracking == TrackingState.TRACKING -> {
             text = "TRACKING"
-            color = Color(0xFF81C784)
+            color = MaterialTheme.imuColors.success
         }
         else -> {
             val detail = state.trackingDetail
             text = if (detail.isEmpty()) "PAUSED" else "PAUSED · $detail"
-            color = Color(0xFFFFB74D)
+            color = MaterialTheme.imuColors.warning
         }
     }
-    Surface(color = Color.Black.copy(alpha = 0.5f), shape = RoundedCornerShape(8.dp)) {
+    // Half-dark, so the chip reads over any camera image.
+    Surface(color = MaterialTheme.colorScheme.scrim.copy(alpha = 0.5f), shape = RoundedCornerShape(8.dp)) {
         Text(
             text = text,
             color = color,
@@ -256,10 +268,10 @@ private fun TrackingChip(state: ArSessionState) {
 @Composable
 private fun Label(text: String) {
     if (text.isEmpty()) return
-    Surface(color = Color.Black.copy(alpha = 0.5f), shape = RoundedCornerShape(8.dp)) {
+    Surface(color = MaterialTheme.colorScheme.scrim.copy(alpha = 0.5f), shape = RoundedCornerShape(8.dp)) {
         Text(
             text = text,
-            color = Color.White,
+            color = MaterialTheme.imuColors.onCameraOverlay,
             style = MaterialTheme.typography.labelMedium,
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
         )
@@ -279,16 +291,19 @@ private fun CenterMessage(
         verticalArrangement = Arrangement.Center,
     ) {
         if (progress) {
-            CircularProgressIndicator(modifier = Modifier.size(28.dp).padding(bottom = 4.dp), color = Color.White)
+            CircularProgressIndicator(
+                modifier = Modifier.size(28.dp).padding(bottom = 4.dp),
+                color = MaterialTheme.imuColors.onCameraOverlay,
+            )
         }
         Text(
             text = text,
-            color = Color.White,
+            color = MaterialTheme.imuColors.onCameraOverlay,
             style = MaterialTheme.typography.bodyMedium,
             textAlign = TextAlign.Center,
         )
         if (actionLabel != null && onAction != null) {
-            Button(onClick = onAction, modifier = Modifier.padding(top = 12.dp)) { Text(actionLabel) }
+            BrandButton(onClick = onAction, modifier = Modifier.padding(top = 12.dp)) { Text(actionLabel) }
         }
     }
 }

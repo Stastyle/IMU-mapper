@@ -11,6 +11,7 @@ import com.stastyle.imumapper.pipeline.survey.ReferenceLine
 import com.stastyle.imumapper.pipeline.survey.StretchMeasure
 import com.stastyle.imumapper.pipeline.survey.SurveyCsv
 import com.stastyle.imumapper.pipeline.survey.TraverseLeg
+import com.stastyle.imumapper.ui.common.formatDuration
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -113,7 +114,8 @@ object SurveyFormat {
      */
     fun cursorLabel(startedAtEpochMs: Long?, elapsedNs: Long, distanceM: Double, zone: ZoneId): String {
         val time = if (startedAtEpochMs == null) {
-            formatDuration(elapsedNs / 1e9)
+            // A cursor before the path's first point reads as its start, never as a dash.
+            formatDuration((elapsedNs / 1e9).coerceAtLeast(0.0))
         } else {
             CLOCK.withZone(zone).format(Instant.ofEpochMilli(startedAtEpochMs + elapsedNs / 1_000_000L))
         }

@@ -3,20 +3,17 @@ package com.stastyle.imumapper.ui.viewer
 import android.graphics.Bitmap
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Photo
-import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -29,53 +26,27 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import com.stastyle.imumapper.pipeline.core.PathStats
 import com.stastyle.imumapper.render.MarkerKind
 import com.stastyle.imumapper.render.SceneMarker
+import com.stastyle.imumapper.ui.common.GlassCard
+import com.stastyle.imumapper.ui.common.formatDuration
 import java.util.Locale
-import kotlin.math.roundToInt
 
-/** Numbers panel under the canvas: distance, duration, steps, vertical range, closure, VIO share. */
-@Composable
-fun StatsPanel(stats: PathStats, modifier: Modifier = Modifier) {
-    Surface(
-        modifier = modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
-        tonalElevation = 3.dp,
-    ) {
-        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                StatItem("Distance", formatMetres(stats.distanceM))
-                StatItem("Duration", formatDuration(stats.durationS))
-                StatItem("Steps", stats.stepCount.toString())
-            }
-            Spacer(Modifier.height(6.dp))
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                StatItem("Vertical", formatRange(stats.minZ, stats.maxZ))
-                StatItem("Closure", formatClosure(stats.closureErrorM, stats.distanceM))
-                StatItem("VIO", "${(stats.vioFraction * 100).roundToInt()} %")
-            }
-        }
-    }
-}
-
-@Composable
-private fun StatItem(label: String, value: String) {
-    Column(horizontalAlignment = Alignment.Start) {
-        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-    }
-}
-
-/** Card shown above the stats when a marker is tapped. */
+/**
+ * The tapped marker: its colour, title, time and position, and for a keyframe its photo. It sits under the
+ * Path tab's canvas and over the bottom of the 3D tab's.
+ */
 @Composable
 fun MarkerCard(marker: SceneMarker, onOpenPhoto: () -> Unit, onClose: () -> Unit, modifier: Modifier = Modifier) {
-    Card(modifier = modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
+    // Over the 3D canvas a tap between the card's texts must not reach the map under it, as it did not
+    // through the Card this replaced; an empty pointer handler takes the hit.
+    GlassCard(modifier = modifier.fillMaxWidth().pointerInput(Unit) {}) {
         Row(
             modifier = Modifier.padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -87,7 +58,12 @@ fun MarkerCard(marker: SceneMarker, onOpenPhoto: () -> Unit, onClose: () -> Unit
                 val position = String.format(
                     Locale.US, "%.1f E, %.1f N, %.1f up", marker.position.x, marker.position.y, marker.position.z,
                 )
-                Text("${formatDuration(marker.elapsedS)} · $position", style = MaterialTheme.typography.bodySmall)
+                // A mark from before the path's first point has a negative time; it reads as the start.
+                Text(
+                    "${formatDuration(marker.elapsedS.coerceAtLeast(0.0))} · $position",
+                    style = MaterialTheme.typography.bodySmall.copy(textDirection = TextDirection.Ltr),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 if (marker.detail.isNotBlank() && marker.kind != MarkerKind.KEYFRAME) {
                     Text(marker.detail, style = MaterialTheme.typography.bodySmall)
                 }
@@ -113,7 +89,7 @@ fun PhotoDialog(title: String, bitmap: Bitmap?, loading: Boolean, error: String?
         Surface(
             modifier = Modifier.fillMaxWidth().padding(12.dp),
             shape = MaterialTheme.shapes.large,
-            tonalElevation = 6.dp,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
         ) {
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 16.dp)) {
@@ -144,23 +120,4 @@ fun PhotoDialog(title: String, bitmap: Bitmap?, loading: Boolean, error: String?
             }
         }
     }
-}
-
-fun formatMetres(m: Double): String = String.format(Locale.US, "%.1f m", m)
-
-fun formatRange(minZ: Double, maxZ: Double): String =
-    String.format(Locale.US, "%.1f m (%+.1f…%+.1f)", maxZ - minZ, minZ, maxZ)
-
-fun formatClosure(errorM: Double?, distanceM: Double): String {
-    if (errorM == null) return "—"
-    val pct = if (distanceM > 0.0) errorM / distanceM * 100.0 else 0.0
-    return String.format(Locale.US, "%.2f m (%.1f %%)", errorM, pct)
-}
-
-fun formatDuration(seconds: Double): String {
-    val total = seconds.coerceAtLeast(0.0).roundToInt()
-    val h = total / 3600
-    val m = (total % 3600) / 60
-    val s = total % 60
-    return if (h > 0) String.format(Locale.US, "%d:%02d:%02d", h, m, s) else String.format(Locale.US, "%d:%02d", m, s)
 }

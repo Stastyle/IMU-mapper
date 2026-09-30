@@ -272,7 +272,7 @@ class RecordingController private constructor(context: Context) {
                 endedAtEpochMs = trip.endedAtEpochMs ?: System.currentTimeMillis(),
                 status = TripStatus.RECORDED,
                 rawLogSizeBytes = file.length(),
-                notes = if (trip.notes.isBlank()) "Recording ended unexpectedly" else trip.notes,
+                notes = if (trip.notes.isBlank()) ENDED_UNEXPECTEDLY_NOTE else trip.notes,
             ),
         )
     }
@@ -480,6 +480,12 @@ class RecordingController private constructor(context: Context) {
     private fun nowNs(): Long = SystemClock.elapsedRealtimeNanos()
 
     companion object {
+        /**
+         * The note [finalizeOrphanedTrip] leaves on a trip whose recorder died. Its endedAtEpochMs is when the app
+         * noticed, not when recording stopped, so screens that show the note must not present that time as the end.
+         */
+        const val ENDED_UNEXPECTEDLY_NOTE = "Recording ended unexpectedly"
+
         private const val TAG = "RecordingController"
         private const val TICK_MS = 250L
 

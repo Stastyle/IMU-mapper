@@ -31,7 +31,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.stastyle.imumapper.pipeline.survey.Detail
@@ -39,6 +38,8 @@ import com.stastyle.imumapper.pipeline.survey.LegTotals
 import com.stastyle.imumapper.pipeline.survey.Station
 import com.stastyle.imumapper.pipeline.survey.StationKind
 import com.stastyle.imumapper.pipeline.survey.TraverseLeg
+import com.stastyle.imumapper.ui.theme.MatchSheetWindowTheme
+import com.stastyle.imumapper.ui.theme.layoutTextAlign
 
 /** The traverse as a table, one row per leg; a tap on a row selects that leg on the map. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -91,6 +92,7 @@ fun StationSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
     ) {
+        MatchSheetWindowTheme()
         Column(modifier = Modifier.padding(horizontal = 24.dp)) {
             Text(station.name, style = MaterialTheme.typography.titleMedium)
             Text(
@@ -237,7 +239,7 @@ private fun TableRow(
                     else -> 1
                 },
                 overflow = TextOverflow.Ellipsis,
-                textAlign = if (i < NAME_COLUMNS) TextAlign.Start else TextAlign.End,
+                textAlign = layoutTextAlign(end = i >= NAME_COLUMNS),
                 modifier = Modifier.weight(COLUMN_WEIGHTS.getOrElse(i) { 1f }).padding(horizontal = 2.dp),
             )
         }

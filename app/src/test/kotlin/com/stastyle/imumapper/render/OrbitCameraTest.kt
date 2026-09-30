@@ -9,6 +9,7 @@ import kotlin.math.sin
 import kotlin.math.tan
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -178,6 +179,31 @@ class OrbitCameraTest {
         assertEquals(OrbitCamera.MAX_PITCH_RAD, cam.pitchRad, 1e-9)
         val low = cam.orbited(0.0, -10.0)
         assertEquals(OrbitCamera.MIN_PITCH_RAD, low.pitchRad, 1e-9)
+    }
+
+    @Test
+    fun topDownAfterTheTopPresetOrAnOrbitToTheClamp() {
+        val bounds = Bounds(Vec3(-5.0, -5.0, 0.0), Vec3(5.0, 5.0, 2.0))
+        val start = OrbitCamera()
+        assertTrue(start.withPreset(CameraPreset.TOP, bounds, width, height).isTopDown)
+        assertTrue(start.orbited(0.3, 10.0).isTopDown)
+        // Pan and zoom keep the view straight down.
+        val top = start.withPreset(CameraPreset.TOP, bounds, width, height)
+        assertTrue(top.panned(40f, -25f, height).zoomed(1.7).isTopDown)
+        // A rounding error short of the clamp is still straight down; a visible tilt is not.
+        assertTrue(OrbitCamera(pitchRad = OrbitCamera.MAX_PITCH_RAD - 1e-9).isTopDown)
+        assertFalse(OrbitCamera(pitchRad = OrbitCamera.MAX_PITCH_RAD - 0.01).isTopDown)
+    }
+
+    @Test
+    fun notTopDownForThe3dAndSidePresets() {
+        val bounds = Bounds(Vec3(-5.0, -5.0, 0.0), Vec3(5.0, 5.0, 2.0))
+        val top = OrbitCamera().withPreset(CameraPreset.TOP, bounds, width, height)
+        assertFalse(top.withPreset(CameraPreset.THREE_D, bounds, width, height).isTopDown)
+        assertFalse(top.withPreset(CameraPreset.SIDE, bounds, width, height).isTopDown)
+        assertFalse(OrbitCamera().isTopDown)
+        // Tilting down from the top view leaves it.
+        assertFalse(top.orbited(0.0, -0.1).isTopDown)
     }
 
     @Test

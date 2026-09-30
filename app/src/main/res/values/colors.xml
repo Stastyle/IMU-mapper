@@ -1,4 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="ic_launcher_background">#10233A</color>
+    <!-- The light theme's background, shown before Compose draws; values-night holds the navy one. On API
+         31+ the Appearance setting picks between them (PlatformNightMode), so a cold start never flashes the
+         other theme's colour. -->
+    <color name="window_background">#F5F7FA</color>
 </resources>

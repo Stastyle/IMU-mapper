@@ -1,5 +1,6 @@
 package com.stastyle.imumapper.ui.viewer
 
+import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
@@ -38,6 +39,7 @@ import com.stastyle.imumapper.render.SceneOptions
 import com.stastyle.imumapper.render.SurveyHit
 import com.stastyle.imumapper.render.SurveyLayer
 import com.stastyle.imumapper.ui.calibration.CalibrationMath
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -56,6 +58,14 @@ data class SurveyMessage(val text: String, val undoable: Boolean)
 
 /** A written CSV waiting for the share sheet; the screen builds the Intent (SurveyShare), keeping this JVM-testable. */
 data class SurveyCsvShare(val file: File, val subject: String, val text: String)
+
+/**
+ * The written trip ZIP's share sheet, waiting for the screen to open it. The screen builds it around
+ * TripExporter's Intent; the view model only holds it, so its tests pass a fake and never touch an Intent.
+ */
+fun interface ShareRequest {
+    fun launch(context: Context)
+}
 
 /** Everything the survey panel, sheets and layer need, rebuilt after each change. */
 data class SurveyUi(
@@ -90,7 +100,8 @@ data class ViewerUiState(
     val result: PathResult? = null,
     val overlayRunId: Int? = null,
     val overlayResult: PathResult? = null,
-    val options: SceneOptions = SceneOptions(),
+    /** Coloured by distance walked, so the canvas, the elevation chart and the trip cards agree. */
+    val options: SceneOptions = SceneOptions(colorMode = ColorMode.PROGRESS),
     /** Draw the selected run's path before loop closure and smoothing instead of the corrected one. */
     val showRaw: Boolean = false,
     /** The raw view of [result], null while [showRaw] is off or the run stores no separate raw path. */
@@ -113,8 +124,19 @@ data class ViewerUiState(
     val surveyMessage: SurveyMessage? = null,
     /** One-shot: the screen hands it to the share sheet, then calls consumeCsvShare. */
     val pendingCsv: SurveyCsvShare? = null,
+    /** Share and Export ZIP exist: the screen passed a way to export the whole trip. */
+    val canShare: Boolean = false,
+    /** A whole-trip ZIP is being written for Share; further taps are ignored until it is done. */
+    val busy: Boolean = false,
+    /** One-shot: the share sheet for the written ZIP; the screen starts it, then calls consumeShare. */
+    val pendingShare: ShareRequest? = null,
+    /** One-shot snackbar text that is not a survey edit's (a failed export); the screen calls dismissMessage. */
+    val message: String? = null,
 ) {
-    /** What the canvas draws as the main path and what the stats panel describes. */
+    /** Share is offered but not while the trip is still being written or an export is already running. */
+    val shareEnabled: Boolean get() = canShare && !busy && trip != null && trip.status != TripStatus.RECORDING
+
+    /** What the canvas draws as the main path and what the Path and Graph tabs describe. */
     val shownResult: PathResult? get() = if (showRaw) rawResult ?: result else result
 
     /**
@@ -151,9 +173,14 @@ class ViewerViewModel(
     private val surveys: SurveyStore = SurveyStore(files),
     /** Tests pass Dispatchers.Unconfined so file work finishes inside the call. */
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    /**
+     * Writes the whole-trip ZIP and returns what opens its share sheet (TripExporter, which needs a Context, so it
+     * comes in as a function); null hides Share and Export ZIP.
+     */
+    private val shareTrip: (suspend (tripId: Long) -> ShareRequest)? = null,
 ) : ViewModel() {
 
-    private val _ui = MutableStateFlow(ViewerUiState())
+    private val _ui = MutableStateFlow(ViewerUiState(canShare = shareTrip != null))
     val ui: StateFlow<ViewerUiState> = _ui.asStateFlow()
 
     private val _camera = MutableStateFlow(OrbitCamera())
@@ -174,8 +201,16 @@ class ViewerViewModel(
     private var surveyPanelPx = 0f
     /** What fits keep the path clear of: the survey panel in Survey mode, nothing outside it (as before). */
     private val bottomInset: Float get() = if (_ui.value.surveyMode) surveyPanelPx else 0f
-    /** The camera the last fit or preset produced; while the view is still that one, a panel change refits. */
+    /**
+     * The camera the last fit or preset produced; while the view is still that one, a panel or canvas size
+     * change refits.
+     */
     private var lastFit: OrbitCamera? = null
+    /**
+     * A preset asked for before any canvas was measured (the screen restored onto the Graph or Details tab, then
+     * Survey mode or Top view): the first fit applies it once the viewport and the result are known.
+     */
+    private var pendingPreset: CameraPreset? = null
 
     // Survey mode. Declared before init, which may already publish a loaded run.
     /** Kept after leaving Survey mode, so undo survives a re-entry; null until the mode first opens. */
@@ -317,7 +352,7 @@ class ViewerViewModel(
             _ui.update { it.copy(result = result, rawResult = raw, error = null) }
             // In Survey mode the stations are placed again on the new run; either way the bounds follow.
             publishSurvey()
-            if (needsFit) fitIfPossible()
+            if (needsFit || pendingPreset != null) fitIfPossible()
         }
     }
 
@@ -364,12 +399,23 @@ class ViewerViewModel(
 
     // --- camera ---
 
+    /**
+     * The canvas's size. The first one (with a result) frames the path. After that the canvas changes height
+     * with the tab (the Path tab's short canvas, the 3D tab's tall one), so a view nobody moved since the last
+     * fit is fitted again to the new size; a moved one is left as the user put it.
+     */
     fun setViewport(widthPx: Float, heightPx: Float) {
         if (widthPx <= 0f || heightPx <= 0f) return
         val changed = widthPx != viewportWidth || heightPx != viewportHeight
+        val untouched = lastFit != null && _camera.value == lastFit
         viewportWidth = widthPx
         viewportHeight = heightPx
-        if (changed && needsFit) fitIfPossible()
+        if (!changed) return
+        if (needsFit || pendingPreset != null) {
+            fitIfPossible()
+        } else if (untouched) {
+            fitToPath()
+        }
     }
 
     /**
@@ -391,7 +437,15 @@ class ViewerViewModel(
 
     private fun fitIfPossible() {
         if (viewportWidth <= 0f || _ui.value.result == null) return
-        _camera.update { it.fitted(currentBounds, viewportWidth, viewportHeight, bottomInset) }
+        val preset = pendingPreset
+        pendingPreset = null
+        _camera.update {
+            if (preset != null) {
+                it.withPreset(preset, currentBounds, viewportWidth, viewportHeight, bottomInset)
+            } else {
+                it.fitted(currentBounds, viewportWidth, viewportHeight, bottomInset)
+            }
+        }
         lastFit = _camera.value
         needsFit = false
     }
@@ -415,11 +469,47 @@ class ViewerViewModel(
         lastFit = _camera.value
     }
 
+    /** Before any canvas was measured the preset waits for the first fit ([pendingPreset]). */
     fun applyPreset(preset: CameraPreset) {
-        if (viewportWidth <= 0f) return
+        if (viewportWidth <= 0f) {
+            pendingPreset = preset
+            return
+        }
+        pendingPreset = null
         _camera.update { it.withPreset(preset, currentBounds, viewportWidth, viewportHeight, bottomInset) }
         lastFit = _camera.value
     }
+
+    // --- share ---
+
+    /**
+     * Share and Export ZIP: writes the whole-trip ZIP and hands its share sheet to the screen
+     * ([ViewerUiState.pendingShare]), or says why it failed ([ViewerUiState.message]). A tap while an export runs,
+     * or on a trip still being recorded, does nothing.
+     */
+    fun share() {
+        val build = shareTrip ?: return
+        if (!_ui.value.shareEnabled) return
+        _ui.update { it.copy(busy = true) }
+        viewModelScope.launch {
+            try {
+                val outcome = runCatching { build(tripId) }
+                outcome.exceptionOrNull()?.let { e -> if (e is CancellationException) throw e }
+                _ui.update { state ->
+                    outcome.fold(
+                        onSuccess = { request -> state.copy(pendingShare = request) },
+                        onFailure = { e -> state.copy(message = "Export failed: ${describe(e)}") },
+                    )
+                }
+            } finally {
+                _ui.update { it.copy(busy = false) }
+            }
+        }
+    }
+
+    fun consumeShare() = _ui.update { it.copy(pendingShare = null) }
+
+    fun dismissMessage() = _ui.update { it.copy(message = null) }
 
     // --- survey mode ---
 

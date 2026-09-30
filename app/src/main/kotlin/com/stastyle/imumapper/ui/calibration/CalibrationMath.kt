@@ -4,6 +4,7 @@ import com.stastyle.imumapper.pipeline.core.HeadingAxisMode
 import com.stastyle.imumapper.pipeline.core.Quat
 import com.stastyle.imumapper.pipeline.core.Vec3
 import com.stastyle.imumapper.pipeline.pdr.OrientationEstimator
+import com.stastyle.imumapper.render.PathScene
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.atan2
@@ -235,6 +236,56 @@ object CalibrationMath {
         val centreX = (bounds.minX + bounds.maxX) / 2.0
         val centreY = (bounds.minY + bounds.maxY) / 2.0
         return PlanTransform(scale, widthPx / 2.0 - centreX * scale, heightPx / 2.0 + centreY * scale)
+    }
+
+    /**
+     * Grid spacing in metres for a preview of [widthPx] x [heightPx] drawn with [transform]: the viewer's
+     * spacing ([PathScene.gridSpacing]) for the ground the canvas shows, which for a long thin walk is far
+     * wider than the walk. A 5 m square gets 1 m. Null when even that spacing would put lines closer than
+     * [minGapPx], where a grid would read as a solid fill and its chip would name lines nobody can count.
+     */
+    fun previewGridSpacing(transform: PlanTransform, widthPx: Double, heightPx: Double, minGapPx: Double): Double? {
+        val spacing = PathScene.gridSpacing(max(widthPx, heightPx) / transform.scale)
+        return if (spacing * transform.scale < minGapPx) null else spacing
+    }
+
+    /** Colour steps of the preview's distance ramp: smooth to the eye, and a few paths instead of thousands. */
+    const val PREVIEW_COLOR_STEPS: Int = 48
+
+    /**
+     * Splits a path whose points have the distance [fractions] (0 to 1, never decreasing, one per point,
+     * as `PathProgress.fractions` gives them) into runs whose segments share one of [steps] colour steps,
+     * so the preview draws one polyline per step instead of one line per segment. Returns the first point
+     * of each run, in order. A run ends where the next one starts, sharing that point so the line has no
+     * gap, and the last one ends at the last point. A single point is one run; no points, none.
+     */
+    fun progressRuns(fractions: DoubleArray, steps: Int = PREVIEW_COLOR_STEPS): IntArray {
+        if (fractions.isEmpty()) return IntArray(0)
+        val n = max(steps, 1)
+        val starts = ArrayList<Int>()
+        var current = -1
+        // The last point starts no segment, so only the others can open a run.
+        for (i in 0 until max(fractions.size - 1, 1)) {
+            // NaN converts to 0, which keeps a broken fraction in the first colour rather than throwing.
+            val step = (fractions[i].coerceIn(0.0, 1.0) * n).toInt().coerceAtMost(n - 1)
+            if (step != current) {
+                starts += i
+                current = step
+            }
+        }
+        return starts.toIntArray()
+    }
+
+    /**
+     * Width for the value of a label / value row [availablePx] wide, with [gapPx] between the two, when
+     * the label wants [labelPx] and the value [valuePx] on one line. Both get what they want when that
+     * fits. Otherwise the shorter side keeps its width and the other wraps beside it, and two long sides
+     * share the row equally, so a long label ("Closure (expected 0 m (ends at the start))") never squeezes
+     * its value to nothing and a long value (a trip's notes) never hides its label.
+     */
+    fun valueRowValueWidth(availablePx: Int, gapPx: Int, labelPx: Int, valuePx: Int): Int {
+        val room = max(availablePx - gapPx, 0)
+        return min(valuePx, max(room / 2, room - labelPx)).coerceAtLeast(0)
     }
 
     // --- ARCore vs PDR ---

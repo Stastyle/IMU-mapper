@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import com.stastyle.imumapper.pipeline.survey.Measure
 import com.stastyle.imumapper.pipeline.survey.ReferenceLine
 import com.stastyle.imumapper.pipeline.survey.SurveyCsv
+import com.stastyle.imumapper.ui.theme.MatchSheetWindowTheme
 import java.util.Locale
 import kotlin.math.abs
 
@@ -164,6 +165,7 @@ fun NorthSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
     ) {
+        MatchSheetWindowTheme()
         Column(modifier = Modifier.padding(horizontal = 24.dp).verticalScroll(rememberScrollState())) {
             Text("North", style = MaterialTheme.typography.titleMedium)
             Text(

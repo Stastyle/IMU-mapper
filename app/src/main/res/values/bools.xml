@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dark bar icons over the light window background; values-night turns them light over the navy one.
+         Only the window before MainActivity sets the bars (the splash) uses this. -->
+    <bool name="light_system_bars">true</bool>
+</resources>

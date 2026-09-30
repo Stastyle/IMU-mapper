@@ -42,7 +42,9 @@ enum class RecordPhase {
 }
 
 data class RecordUiState(
+    /** The route's mode until a recording is adopted, then the recording's own ([adopt]). */
     val mode: TripMode,
+    /** The chosen carry until a recording is adopted, then the recording's own ([adopt]). */
     val carry: CarryPosition = CarryPosition.HAND,
     val phase: RecordPhase = RecordPhase.SETUP,
     val recording: RecordingState.Recording? = null,
@@ -66,6 +68,10 @@ data class RecordUiState(
      * recording, so a recording must start in the pose they were calibrated in, not in the hand.
      */
     val offsetCalibrated: Boolean = false,
+    /** [PipelineConfig.strideLengthM] of the saved calibration, for the live distance estimate; null until read. */
+    val strideLengthM: Double? = null,
+    /** The shown recording has been paused at some point, so its clock leaves time out. */
+    val timeExcludesPauses: Boolean = false,
 ) {
     /** North of the next trip comes from the compass: the setting is on and the sensors exist. */
     val northFromCompass: Boolean
@@ -79,7 +85,46 @@ data class RecordUiState(
         get() = phase == RecordPhase.COMPASS && compassWaitS >= SKIP_COMPASS_AFTER_S &&
             compass?.status != CompassStatus.LOCKED
 
+    /**
+     * The state once the controller reports [recording] at [nowNs]. Every phase up to RECORDING adopts it,
+     * our own start as well as one already running when the screen opened, and takes its mode and carry: the
+     * record route may have been opened with another mode, and from here on the screen shows only what is
+     * being recorded. STOPPING and DONE keep their phase and only take the snapshot.
+     */
+    fun adopt(recording: RecordingState.Recording, nowNs: Long): RecordUiState {
+        val sameTrip = this.recording?.tripId == recording.tripId
+        val paused = (sameTrip && timeExcludesPauses) || recording.paused ||
+            RecordStatus.pausedTimeEvident(recording.startedNs, recording.elapsedNs, nowNs)
+        return if (phase in ADOPTING) {
+            copy(
+                phase = RecordPhase.RECORDING,
+                recording = recording,
+                mode = recording.mode,
+                carry = recording.carryPosition,
+                error = null,
+                compass = null,
+                timeExcludesPauses = paused,
+            )
+        } else {
+            copy(recording = recording, timeExcludesPauses = paused)
+        }
+    }
+
+    /**
+     * The saved carry position, which loads after the screen opens. It is only a preselection: once a
+     * recording is adopted the carry is the recording's, and a late read must not relabel it.
+     */
+    fun withSavedCarry(saved: CarryPosition): RecordUiState =
+        if (phase == RecordPhase.SETUP || phase == RecordPhase.COMPASS || phase == RecordPhase.STARTING) {
+            copy(carry = saved)
+        } else {
+            this
+        }
+
     companion object {
+        private val ADOPTING =
+            setOf(RecordPhase.SETUP, RecordPhase.COMPASS, RecordPhase.STARTING, RecordPhase.RECORDING)
+
         const val SKIP_COMPASS_AFTER_S = 8
 
         /** [com.stastyle.imumapper.pipeline.core.LogMeta.notes] of a trip started with "Start anyway". */
@@ -107,16 +152,25 @@ class RecordViewModel(
     /** Feeds the compass preview into [RecordUiState.compass]; runs only in [RecordPhase.COMPASS]. */
     private var compassJob: Job? = null
 
+    /** The user tapped a carry chip, so the saved position that loads late must not replace it. */
+    private var carryPicked = false
+
     init {
         viewModelScope.launch {
             val saved = runCatching { calibration.getCarryPosition() }.getOrDefault(CarryPosition.HAND)
-            _ui.update { it.copy(carry = saved) }
+            if (!carryPicked) _ui.update { it.withSavedCarry(saved) }
         }
         viewModelScope.launch {
             try {
                 calibration.observeConfig().collect { c ->
                     val offset = c.headingOffsetRad != 0.0 || c.headingAxis != HeadingAxisMode.AUTO
-                    _ui.update { it.copy(compassNorthSetting = c.northFromCompass, offsetCalibrated = offset) }
+                    _ui.update {
+                        it.copy(
+                            compassNorthSetting = c.northFromCompass,
+                            offsetCalibrated = offset,
+                            strideLengthM = c.strideLengthM,
+                        )
+                    }
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -135,16 +189,9 @@ class RecordViewModel(
                 shownTripId = state.tripId
                 // A recording owns the sensors now; the preview's feed has nothing left to show.
                 if (_ui.value.phase == RecordPhase.COMPASS) leaveCompass()
-                _ui.update {
-                    // Adopt a recording that is already running (screen re-entered) as well as our own.
-                    val adopting = it.phase == RecordPhase.SETUP || it.phase == RecordPhase.COMPASS ||
-                        it.phase == RecordPhase.STARTING || it.phase == RecordPhase.RECORDING
-                    if (adopting) {
-                        it.copy(phase = RecordPhase.RECORDING, recording = state, error = null, compass = null)
-                    } else {
-                        it.copy(recording = state)
-                    }
-                }
+                // Adopt a recording that is already running (screen re-entered) as well as our own.
+                val nowNs = SystemClock.elapsedRealtimeNanos()
+                _ui.update { it.adopt(state, nowNs) }
             }
             is RecordingState.Stopping -> Unit
             is RecordingState.Idle -> {
@@ -159,6 +206,7 @@ class RecordViewModel(
     }
 
     fun setCarry(position: CarryPosition) {
+        carryPicked = true
         _ui.update { it.copy(carry = position) }
         viewModelScope.launch {
             runCatching { calibration.saveCarryPosition(position) }

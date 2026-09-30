@@ -9,7 +9,11 @@ import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.roundToInt
 
-enum class ColorMode { TIME, ALTITUDE, SOURCE }
+/**
+ * What a path segment's colour shows. [PROGRESS] is the share of the path's length walked (see [PathProgress]), so a
+ * standing pause keeps its colour; [TIME] is elapsed time, [ALTITUDE] height, [SOURCE] whether PDR or VIO placed it.
+ */
+enum class ColorMode { PROGRESS, TIME, ALTITUDE, SOURCE }
 
 enum class MarkerKind { START, END, ANNOTATION, KEYFRAME }
 
@@ -39,6 +43,8 @@ data class SceneOptions(
     /** The path is decimated to this many segments so a drag stays smooth with 5 000+ points. */
     val maxPathSegments: Int = 3000,
     val maxCloudPoints: Int = 20000,
+    /** The colours of every line, marker and label; the viewer passes the one matching the app's theme. */
+    val palette: CanvasPalette = CanvasPalette.Dark,
 )
 
 /**
@@ -60,7 +66,23 @@ class SceneModel(
     val cloudColor: Int,
     val markers: List<SceneMarker>,
     val labels: List<SceneLabel>,
-)
+    /**
+     * Lines [pathLineStart] until [pathLineEnd] are the main path's segments, the only ones the renderer draws a glow
+     * or a casing under: the grid, the axes and an overlaid run lie outside the range. Empty when the path has no
+     * segment.
+     */
+    val pathLineStart: Int = 0,
+    val pathLineEnd: Int = 0,
+) {
+    fun isPathLine(line: Int): Boolean = line >= pathLineStart && line < pathLineEnd
+
+    /**
+     * Where [marker] is in [markers], or -1, matching every field but the colour. The colour comes from the canvas
+     * palette, so after a theme change a marker kept from the old scene differs from the rebuilt scene's copy in
+     * colour alone, and `indexOf` would lose the selection.
+     */
+    fun indexOfMarker(marker: SceneMarker): Int = markers.indexOfFirst { it == marker.copy(color = it.color) }
+}
 
 /** ARGB colour helpers; Compose's Color is not available in pure Kotlin. */
 object SceneColors {
@@ -89,53 +111,30 @@ object SceneColors {
         return lerp(stops[i], stops[i + 1], f - i)
     }
 
-    /** Blue -> cyan -> green -> yellow -> red, readable on the dark canvas. */
-    val TIME_STOPS = intArrayOf(
-        argb(255, 66, 133, 244),
-        argb(255, 38, 198, 218),
-        argb(255, 102, 187, 106),
-        argb(255, 255, 214, 0),
-        argb(255, 239, 83, 80),
-    )
+    // The dark palette's colours under the names they had before there was a light one. The scene takes its colours
+    // from SceneOptions.palette; these only read CanvasPalette.Dark, so the dark values live in one place.
+    val TIME_STOPS: IntArray get() = CanvasPalette.Dark.timeStops
+    val ALTITUDE_STOPS: IntArray get() = CanvasPalette.Dark.altitudeStops
+    val PROGRESS_STOPS: IntArray get() = CanvasPalette.Dark.progressStops
 
-    /** Deep purple (low) -> orange -> pale yellow (high). */
-    val ALTITUDE_STOPS = intArrayOf(
-        argb(255, 94, 53, 177),
-        argb(255, 30, 136, 229),
-        argb(255, 67, 160, 71),
-        argb(255, 251, 140, 0),
-        argb(255, 255, 241, 118),
-    )
+    val SOURCE_PDR: Int get() = CanvasPalette.Dark.sourcePdr
+    val SOURCE_VIO: Int get() = CanvasPalette.Dark.sourceVio
+    val SOURCE_INTERPOLATED: Int get() = CanvasPalette.Dark.sourceInterpolated
 
-    val SOURCE_PDR = argb(255, 255, 167, 38)
-    val SOURCE_VIO = argb(255, 38, 198, 218)
-    val SOURCE_INTERPOLATED = argb(255, 158, 158, 158)
+    val START: Int get() = CanvasPalette.Dark.start
+    val END: Int get() = CanvasPalette.Dark.end
+    val KEYFRAME: Int get() = CanvasPalette.Dark.keyframe
+    val CLOUD: Int get() = CanvasPalette.Dark.cloud
+    val GRID_MINOR: Int get() = CanvasPalette.Dark.gridMinor
+    val GRID_MAJOR: Int get() = CanvasPalette.Dark.gridMajor
+    val AXIS_EAST: Int get() = CanvasPalette.Dark.axisEast
+    val AXIS_NORTH: Int get() = CanvasPalette.Dark.axisNorth
+    val AXIS_UP: Int get() = CanvasPalette.Dark.axisUp
+    val NORTH_ARROW: Int get() = CanvasPalette.Dark.northArrow
 
-    val START = argb(255, 76, 175, 80)
-    val END = argb(255, 244, 67, 54)
-    val KEYFRAME = argb(255, 100, 181, 246)
-    val CLOUD = argb(80, 176, 190, 197)
-    val GRID_MINOR = argb(40, 255, 255, 255)
-    val GRID_MAJOR = argb(90, 255, 255, 255)
-    val AXIS_EAST = argb(255, 229, 57, 53)
-    val AXIS_NORTH = argb(255, 67, 160, 71)
-    val AXIS_UP = argb(255, 66, 165, 245)
-    val NORTH_ARROW = argb(255, 255, 193, 7)
+    fun forSource(source: PositionSource): Int = CanvasPalette.Dark.forSource(source)
 
-    fun forSource(source: PositionSource): Int = when (source) {
-        PositionSource.PDR -> SOURCE_PDR
-        PositionSource.VIO -> SOURCE_VIO
-        PositionSource.INTERPOLATED -> SOURCE_INTERPOLATED
-    }
-
-    fun forAnnotation(kind: AnnotationKind): Int = when (kind) {
-        AnnotationKind.WAYPOINT -> argb(255, 255, 202, 40)
-        AnnotationKind.JUNCTION -> argb(255, 171, 71, 188)
-        AnnotationKind.CHAMBER -> argb(255, 38, 198, 218)
-        AnnotationKind.NOTE -> argb(255, 236, 239, 241)
-        AnnotationKind.LOOP_CLOSED -> argb(255, 102, 187, 106)
-        AnnotationKind.REORIENT -> argb(255, 255, 112, 67)
-    }
+    fun forAnnotation(kind: AnnotationKind): Int = CanvasPalette.Dark.forAnnotation(kind)
 }
 
 /** Growable flat line list used while building a [SceneModel]. */
@@ -217,13 +216,16 @@ object PathScene {
         val lines = LineSink(result.points.size + (overlay?.points?.size ?: 0) + 256)
         val labels = ArrayList<SceneLabel>()
         val spacing = gridSpacing(max(bounds.size.x, bounds.size.y))
-        if (options.showGrid) addGrid(lines, labels, bounds, spacing)
-        addAxes(lines, labels, spacing)
+        val palette = options.palette
+        if (options.showGrid) addGrid(lines, labels, bounds, spacing, palette)
+        addAxes(lines, labels, spacing, palette)
 
         if (overlay != null) addPath(lines, overlay, options, OVERLAY_WIDTH_DP, OVERLAY_ALPHA)
+        val pathLineStart = lines.count
         addPath(lines, result, options, PATH_WIDTH_DP, 0xFF)
+        val pathLineEnd = lines.count
 
-        val markers = if (options.showMarkers) buildMarkers(result) else emptyList()
+        val markers = if (options.showMarkers) buildMarkers(result, palette) else emptyList()
 
         val cloudIdx = if (options.showPointCloud) {
             decimate(result.pointCloud.size, options.maxCloudPoints)
@@ -246,13 +248,21 @@ object PathScene {
             lineWidths = lines.widths(),
             cloudCount = cloudIdx.size,
             cloudCoords = cloud,
-            cloudColor = SceneColors.CLOUD,
+            cloudColor = palette.cloud,
             markers = markers,
             labels = labels,
+            pathLineStart = pathLineStart,
+            pathLineEnd = pathLineEnd,
         )
     }
 
-    private fun addGrid(lines: LineSink, labels: MutableList<SceneLabel>, bounds: Bounds, spacing: Double) {
+    private fun addGrid(
+        lines: LineSink,
+        labels: MutableList<SceneLabel>,
+        bounds: Bounds,
+        spacing: Double,
+        palette: CanvasPalette,
+    ) {
         // The floor sits on the lowest metre so the path never dips below the grid.
         val floorZ = floor(bounds.min.z / spacing) * spacing
         val minX = floor(bounds.min.x / spacing) * spacing - spacing
@@ -264,13 +274,13 @@ object PathScene {
         for (i in 0..nx) {
             val x = minX + i * spacing
             val major = (x / spacing).roundToInt() % 5 == 0
-            val color = if (major) SceneColors.GRID_MAJOR else SceneColors.GRID_MINOR
+            val color = if (major) palette.gridMajor else palette.gridMinor
             lines.add(x, minY, floorZ, x, maxY, floorZ, color, GRID_WIDTH_DP)
         }
         for (j in 0..ny) {
             val y = minY + j * spacing
             val major = (y / spacing).roundToInt() % 5 == 0
-            val color = if (major) SceneColors.GRID_MAJOR else SceneColors.GRID_MINOR
+            val color = if (major) palette.gridMajor else palette.gridMinor
             lines.add(minX, y, floorZ, maxX, y, floorZ, color, GRID_WIDTH_DP)
         }
         // North arrow in the south-east corner of the grid, clear of the path.
@@ -278,23 +288,22 @@ object PathScene {
         val base = Vec3(maxX, minY, floorZ)
         val tip = Vec3(maxX, minY + len, floorZ)
         val head = spacing * 0.4
-        lines.add(base, tip, SceneColors.NORTH_ARROW, AXIS_WIDTH_DP)
-        lines.add(tip, Vec3(maxX - head, minY + len - head, floorZ), SceneColors.NORTH_ARROW, AXIS_WIDTH_DP)
-        lines.add(tip, Vec3(maxX + head, minY + len - head, floorZ), SceneColors.NORTH_ARROW, AXIS_WIDTH_DP)
-        labels.add(SceneLabel(Vec3(maxX, minY + len + head, floorZ), "N", SceneColors.NORTH_ARROW))
-        val spacingText = if (spacing >= 1.0) "${spacing.roundToInt()} m grid" else "$spacing m grid"
-        labels.add(SceneLabel(Vec3(minX, minY, floorZ), spacingText, SceneColors.GRID_MAJOR))
+        lines.add(base, tip, palette.northArrow, AXIS_WIDTH_DP)
+        lines.add(tip, Vec3(maxX - head, minY + len - head, floorZ), palette.northArrow, AXIS_WIDTH_DP)
+        lines.add(tip, Vec3(maxX + head, minY + len - head, floorZ), palette.northArrow, AXIS_WIDTH_DP)
+        // The spacing is not labelled here: the viewer shows it in a chip that stays put while the grid moves.
+        labels.add(SceneLabel(Vec3(maxX, minY + len + head, floorZ), "N", palette.northArrow))
     }
 
-    private fun addAxes(lines: LineSink, labels: MutableList<SceneLabel>, spacing: Double) {
+    private fun addAxes(lines: LineSink, labels: MutableList<SceneLabel>, spacing: Double, palette: CanvasPalette) {
         val len = max(1.0, spacing)
         val o = Vec3.ZERO
-        lines.add(o, Vec3(len, 0.0, 0.0), SceneColors.AXIS_EAST, AXIS_WIDTH_DP)
-        lines.add(o, Vec3(0.0, len, 0.0), SceneColors.AXIS_NORTH, AXIS_WIDTH_DP)
-        lines.add(o, Vec3(0.0, 0.0, len), SceneColors.AXIS_UP, AXIS_WIDTH_DP)
-        labels.add(SceneLabel(Vec3(len * 1.15, 0.0, 0.0), "E", SceneColors.AXIS_EAST))
-        labels.add(SceneLabel(Vec3(0.0, len * 1.15, 0.0), "N", SceneColors.AXIS_NORTH))
-        labels.add(SceneLabel(Vec3(0.0, 0.0, len * 1.15), "Up", SceneColors.AXIS_UP))
+        lines.add(o, Vec3(len, 0.0, 0.0), palette.axisEast, AXIS_WIDTH_DP)
+        lines.add(o, Vec3(0.0, len, 0.0), palette.axisNorth, AXIS_WIDTH_DP)
+        lines.add(o, Vec3(0.0, 0.0, len), palette.axisUp, AXIS_WIDTH_DP)
+        labels.add(SceneLabel(Vec3(len * 1.15, 0.0, 0.0), "E", palette.axisEast))
+        labels.add(SceneLabel(Vec3(0.0, len * 1.15, 0.0), "N", palette.axisNorth))
+        labels.add(SceneLabel(Vec3(0.0, 0.0, len * 1.15), "Up", palette.axisUp))
     }
 
     private fun addPath(lines: LineSink, result: PathResult, options: SceneOptions, width: Float, alpha: Int) {
@@ -305,19 +314,23 @@ object PathScene {
         val tSpan = max((pts.last().tNs - t0).toDouble(), 1.0)
         val zMin = result.stats.minZ
         val zSpan = max(result.stats.maxZ - zMin, 1e-6)
+        // From every point, not the decimated ones, so a colour marks the same place as in a thumbnail.
+        val progress = if (options.colorMode == ColorMode.PROGRESS) PathProgress.fractions(pts) else DoubleArray(0)
+        val palette = options.palette
         for (k in 0 until idx.size - 1) {
             val a = pts[idx[k]]
             val b = pts[idx[k + 1]]
             val color = when (options.colorMode) {
-                ColorMode.TIME -> SceneColors.gradient(SceneColors.TIME_STOPS, (a.tNs - t0) / tSpan)
-                ColorMode.ALTITUDE -> SceneColors.gradient(SceneColors.ALTITUDE_STOPS, (a.p.z - zMin) / zSpan)
-                ColorMode.SOURCE -> SceneColors.forSource(a.source)
+                ColorMode.PROGRESS -> PathProgress.color(progress[idx[k]], palette)
+                ColorMode.TIME -> SceneColors.gradient(palette.timeStops, (a.tNs - t0) / tSpan)
+                ColorMode.ALTITUDE -> SceneColors.gradient(palette.altitudeStops, (a.p.z - zMin) / zSpan)
+                ColorMode.SOURCE -> palette.forSource(a.source)
             }
             lines.add(a.p, b.p, SceneColors.withAlpha(color, alpha), width)
         }
     }
 
-    private fun buildMarkers(result: PathResult): List<SceneMarker> {
+    private fun buildMarkers(result: PathResult, palette: CanvasPalette): List<SceneMarker> {
         val out = ArrayList<SceneMarker>()
         val pts = result.points
         if (pts.isEmpty()) return out
@@ -326,7 +339,7 @@ object PathScene {
         out.add(
             SceneMarker(
                 kind = MarkerKind.START, position = pts.first().p, tNs = pts.first().tNs, elapsedS = 0.0,
-                title = "Start", detail = "Trip origin", color = SceneColors.START,
+                title = "Start", detail = "Trip origin", color = palette.start,
             ),
         )
         for (a in result.annotations) {
@@ -334,7 +347,7 @@ object PathScene {
             out.add(
                 SceneMarker(
                     kind = MarkerKind.ANNOTATION, position = a.p, tNs = a.tNs, elapsedS = elapsed(a.tNs),
-                    title = kindName, detail = a.note, color = SceneColors.forAnnotation(a.kind),
+                    title = kindName, detail = a.note, color = palette.forAnnotation(a.kind),
                     annotationKind = a.kind,
                 ),
             )
@@ -343,7 +356,7 @@ object PathScene {
             out.add(
                 SceneMarker(
                     kind = MarkerKind.KEYFRAME, position = k.p, tNs = k.tNs, elapsedS = elapsed(k.tNs),
-                    title = "Photo", detail = k.fileName, color = SceneColors.KEYFRAME, fileName = k.fileName,
+                    title = "Photo", detail = k.fileName, color = palette.keyframe, fileName = k.fileName,
                     headingRad = k.headingRad,
                 ),
             )
@@ -352,7 +365,7 @@ object PathScene {
         out.add(
             SceneMarker(
                 kind = MarkerKind.END, position = pts.last().p, tNs = pts.last().tNs,
-                elapsedS = elapsed(pts.last().tNs), title = "End", detail = "Trip end", color = SceneColors.END,
+                elapsedS = elapsed(pts.last().tNs), title = "End", detail = "Trip end", color = palette.end,
             ),
         )
         return out

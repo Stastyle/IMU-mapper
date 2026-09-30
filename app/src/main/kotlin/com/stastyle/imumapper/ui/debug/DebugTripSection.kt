@@ -9,8 +9,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Article
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -22,22 +24,27 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.stastyle.imumapper.pipeline.core.PathStats
 import com.stastyle.imumapper.pipeline.core.PipelineConfig
+import com.stastyle.imumapper.ui.calibration.CalibrationCard
 import com.stastyle.imumapper.ui.calibration.Fmt
+import com.stastyle.imumapper.ui.calibration.Hint
 import com.stastyle.imumapper.ui.calibration.ValueRow
+import com.stastyle.imumapper.ui.common.BrandButton
+import com.stastyle.imumapper.ui.common.StatusPill
+import com.stastyle.imumapper.ui.common.StatusTone
 import java.text.DateFormat
 import java.util.Date
 import java.util.Locale
 
 @Composable
 fun LogSummaryCard(ui: DebugUiState) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("Raw log", style = MaterialTheme.typography.titleMedium)
+    CalibrationCard(title = "Raw log", icon = Icons.AutoMirrored.Filled.Article) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             val trip = ui.trip
             if (trip != null) {
                 val carry = Fmt.carry(trip.carryPosition).lowercase()
@@ -105,10 +112,9 @@ private fun SummaryBody(s: LogSummary) {
 
 @Composable
 fun RunsCard(ui: DebugUiState, onToggle: (Int) -> Unit, onLoadConfig: (PipelineConfig) -> Unit) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("Processing runs", style = MaterialTheme.typography.titleMedium)
-            if (ui.runs.isEmpty()) Text("No runs stored yet.", style = MaterialTheme.typography.bodySmall)
+    CalibrationCard(title = "Processing runs", icon = Icons.Filled.History) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            if (ui.runs.isEmpty()) Hint("No runs stored yet.")
             for (run in ui.runs) {
                 RunRow(
                     run = run,
@@ -121,17 +127,39 @@ fun RunsCard(ui: DebugUiState, onToggle: (Int) -> Unit, onLoadConfig: (PipelineC
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun RunRow(run: RunInfo, expanded: Boolean, onToggle: () -> Unit, onLoadConfig: (PipelineConfig) -> Unit) {
     val e = run.entity
     HorizontalDivider()
-    Column(modifier = Modifier.fillMaxWidth().clickable(onClick = onToggle).padding(vertical = 6.dp)) {
-        val label = if (e.label.isNotBlank()) " · " + e.label else ""
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(
+                role = Role.Button,
+                onClickLabel = if (expanded) "Hide run details" else "Show run details",
+                onClick = onToggle,
+            )
+            .padding(vertical = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text("Run " + e.runId, style = MaterialTheme.typography.labelLarge)
+            StatusPill("pipeline v" + e.pipelineVersion, StatusTone.Neutral)
+        }
+        // What made the run (Re-process, PDR only, a tuning round) is a wrapping line, not a one-line pill: a
+        // tuning round names every value it changed, far more than fits across a phone.
+        if (e.label.isNotBlank()) {
+            Text(e.label, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+        }
         Text(
-            "Run " + e.runId + label + " · pipeline v" + e.pipelineVersion,
-            style = MaterialTheme.typography.labelLarge,
+            dateText(e.createdAtEpochMs),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Text(dateText(e.createdAtEpochMs), style = MaterialTheme.typography.bodySmall)
         val s = run.stats
         if (s != null) Text(statsLine(s), style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
     }
@@ -182,13 +210,18 @@ fun ConfigEditorCard(
     onPdrOnly: () -> Unit,
     onVioOnly: () -> Unit,
 ) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Pipeline config", style = MaterialTheme.typography.titleMedium)
-            Text(
-                if (ui.draftDirty) "Edited (not saved as calibration)" else "Current calibration",
-                style = MaterialTheme.typography.bodySmall,
+    CalibrationCard(
+        title = "Pipeline config",
+        icon = Icons.Filled.Tune,
+        action = {
+            StatusPill(
+                if (ui.draftDirty) "Edited" else "Current calibration",
+                if (ui.draftDirty) StatusTone.Warning else StatusTone.Neutral,
             )
+        },
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (ui.draftDirty) Hint("Edited, not saved as the calibration.")
             for (field in ConfigField.entries) {
                 when (field.type) {
                     FieldType.BOOL -> BoolField(field, ui.draft.bool(field)) { onField(field, it.toString()) }
@@ -199,7 +232,7 @@ fun ConfigEditorCard(
             }
             val canRun = ui.tripId != null && !ui.processing && ui.errors.isEmpty()
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = onReprocess, enabled = canRun) { Text("Re-process with this config") }
+                BrandButton(onClick = onReprocess, enabled = canRun) { Text("Re-process with this config") }
                 OutlinedButton(onClick = onPdrOnly, enabled = canRun) { Text("Run PDR only") }
                 OutlinedButton(onClick = onVioOnly, enabled = canRun && ui.summary?.hasVio == true) {
                     Text("Run VIO only")
