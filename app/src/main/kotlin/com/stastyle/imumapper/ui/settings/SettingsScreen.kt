@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Tune
@@ -77,6 +78,7 @@ import com.stastyle.imumapper.ui.common.SectionHeader
 import com.stastyle.imumapper.ui.common.StatusPill
 import com.stastyle.imumapper.ui.common.appContainer
 import com.stastyle.imumapper.ui.debug.ConfigDraft
+import com.stastyle.imumapper.ui.theme.ThemeMode
 import com.stastyle.imumapper.update.ReleaseInfo
 import com.stastyle.imumapper.update.ReleaseNotes
 import com.stastyle.imumapper.update.UpdateManager
@@ -84,8 +86,8 @@ import com.stastyle.imumapper.update.UpdateState
 import kotlin.math.roundToInt
 
 /**
- * Carry position, default trip mode, north from compass, steps to confirm a height change, check for
- * updates, the tools (assisted tuning and Debug), about.
+ * The theme, carry position, default trip mode, north from compass, steps to confirm a height change, check
+ * for updates, the tools (assisted tuning and Debug), about.
  *
  * As the Settings tab it has no back arrow ([onBack] null), shows the large tab header and hosts the tab
  * bar in [bottomBar]; with [onBack] it is a pushed screen with a back arrow instead.
@@ -102,6 +104,7 @@ fun SettingsScreen(
     val vm: SettingsViewModel = viewModel {
         SettingsViewModel(calibration = container.calibrationRepository, updates = UpdateManager.get(context))
     }
+    val themeMode by vm.themeMode.collectAsStateWithLifecycle()
     val carryPosition by vm.carryPosition.collectAsStateWithLifecycle()
     val tripMode by vm.defaultTripMode.collectAsStateWithLifecycle()
     val northFromCompass by vm.northFromCompass.collectAsStateWithLifecycle()
@@ -128,6 +131,7 @@ fun SettingsScreen(
                 .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            AppearanceSection(themeMode = themeMode, onThemeMode = vm::setThemeMode)
             RecordingSection(
                 carryPosition = carryPosition,
                 onCarryPosition = vm::setCarryPosition,
@@ -189,9 +193,10 @@ private fun SettingLabel(title: String, help: String, modifier: Modifier = Modif
     }
 }
 
+/** One chip per option; [selected] null (a setting still loading) marks none of them. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun <T> ChoiceChips(options: List<T>, selected: T, label: (T) -> String, onSelect: (T) -> Unit) {
+private fun <T : Any> ChoiceChips(options: List<T>, selected: T?, label: (T) -> String, onSelect: (T) -> Unit) {
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         for (option in options) {
             BrandFilterChip(
@@ -200,6 +205,23 @@ private fun <T> ChoiceChips(options: List<T>, selected: T, label: (T) -> String,
                 label = label(option),
             )
         }
+    }
+}
+
+@Composable
+private fun AppearanceSection(themeMode: ThemeMode?, onThemeMode: (ThemeMode) -> Unit) {
+    SectionCard(title = "Appearance", icon = Icons.Filled.Palette) {
+        SettingLabel(
+            "Theme",
+            "System follows the phone's dark theme setting. Dark dazzles less in a cave; Light reads better in " +
+                "daylight.",
+        )
+        ChoiceChips(
+            options = ThemeMode.entries,
+            selected = themeMode,
+            label = ::themeModeLabel,
+            onSelect = onThemeMode,
+        )
     }
 }
 
@@ -554,6 +576,12 @@ private fun releaseOf(state: UpdateState): ReleaseInfo? = when (state) {
 private const val MAX_CONFIRM_STEPS = 20
 
 private val DEFAULT_CONFIRM_STEPS = PipelineConfig().baroConfirmSteps
+
+private fun themeModeLabel(mode: ThemeMode): String = when (mode) {
+    ThemeMode.SYSTEM -> "System"
+    ThemeMode.LIGHT -> "Light"
+    ThemeMode.DARK -> "Dark"
+}
 
 private fun carryPositionLabel(position: CarryPosition): String = when (position) {
     CarryPosition.HAND -> "Hand"

@@ -1,11 +1,11 @@
 package com.stastyle.imumapper.ui.theme
 
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
-import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.ReadOnlyComposable
@@ -21,51 +21,52 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 /**
- * The one colour scheme: dark navy, and no dynamic colour, which would replace the brand palette on
- * Android 12 and later. Every role is set, so no baseline purple reaches a dialog, sheet, menu or
- * snackbar. `primary` and `error` are also text colours and reach 4.5:1 on the background, the card
- * and dialog containers, `secondaryContainer` and the canvas.
+ * All 36 roles of a scheme, set explicitly: no dynamic colour, which would replace the brand palette on
+ * Android 12 and later, and no baseline purple in a dialog, sheet, menu or snackbar. The values and their
+ * contrast rules are in [ThemePalettes].
  */
-private val DarkColorScheme = darkColorScheme(
-    primary = Color(0xFF64B5F6),
-    onPrimary = Color(0xFF00233A),
-    primaryContainer = Color(0xFF0F3A66),
-    onPrimaryContainer = Color(0xFFD6E9FF),
-    inversePrimary = Color(0xFF1565C0),
-    secondary = Color(0xFF4FC3F7),
-    onSecondary = Color(0xFF00233A),
-    secondaryContainer = Color(0xFF143357),
-    onSecondaryContainer = Color(0xFFCFE6FF),
-    tertiary = Color(0xFFFFB74D),
-    onTertiary = Color(0xFF3A2600),
-    tertiaryContainer = Color(0xFF4A3310),
-    onTertiaryContainer = Color(0xFFFFE0B2),
-    background = Color(0xFF07111F),
-    onBackground = Color(0xFFEAF2FF),
-    surface = Color(0xFF0B1628),
-    onSurface = Color(0xFFEAF2FF),
-    surfaceVariant = Color(0xFF16263F),
-    onSurfaceVariant = Color(0xFF8FA3BF),
-    surfaceTint = Color(0xFF64B5F6),
-    inverseSurface = Color(0xFFDDE7F5),
-    inverseOnSurface = Color(0xFF0B1628),
-    error = Color(0xFFFF8A80),
-    onError = Color(0xFF690005),
-    errorContainer = Color(0xFF4A1518),
-    onErrorContainer = Color(0xFFFFDAD6),
-    // outline draws interactive boundaries (switch track, text fields, unselected chips) and needs
-    // 3:1; outlineVariant is only for decoration such as dividers.
-    outline = Color(0xFF6F86A6),
-    outlineVariant = Color(0xFF1E3A5F),
-    scrim = Color(0xFF000000),
-    surfaceBright = Color(0xFF1E3352),
-    surfaceContainer = Color(0xFF111F35),
-    surfaceContainerHigh = Color(0xFF152741),
-    surfaceContainerHighest = Color(0xFF1A2E4C),
-    surfaceContainerLow = Color(0xFF0D1A2E),
-    surfaceContainerLowest = Color(0xFF060E1A),
-    surfaceDim = Color(0xFF07111F),
+private fun colorSchemeOf(p: ThemePalette) = ColorScheme(
+    primary = Color(p.primary),
+    onPrimary = Color(p.onPrimary),
+    primaryContainer = Color(p.primaryContainer),
+    onPrimaryContainer = Color(p.onPrimaryContainer),
+    inversePrimary = Color(p.inversePrimary),
+    secondary = Color(p.secondary),
+    onSecondary = Color(p.onSecondary),
+    secondaryContainer = Color(p.secondaryContainer),
+    onSecondaryContainer = Color(p.onSecondaryContainer),
+    tertiary = Color(p.tertiary),
+    onTertiary = Color(p.onTertiary),
+    tertiaryContainer = Color(p.tertiaryContainer),
+    onTertiaryContainer = Color(p.onTertiaryContainer),
+    background = Color(p.background),
+    onBackground = Color(p.onBackground),
+    surface = Color(p.surface),
+    onSurface = Color(p.onSurface),
+    surfaceVariant = Color(p.surfaceVariant),
+    onSurfaceVariant = Color(p.onSurfaceVariant),
+    surfaceTint = Color(p.surfaceTint),
+    inverseSurface = Color(p.inverseSurface),
+    inverseOnSurface = Color(p.inverseOnSurface),
+    error = Color(p.error),
+    onError = Color(p.onError),
+    errorContainer = Color(p.errorContainer),
+    onErrorContainer = Color(p.onErrorContainer),
+    outline = Color(p.outline),
+    outlineVariant = Color(p.outlineVariant),
+    scrim = Color(p.scrim),
+    surfaceBright = Color(p.surfaceBright),
+    surfaceContainer = Color(p.surfaceContainer),
+    surfaceContainerHigh = Color(p.surfaceContainerHigh),
+    surfaceContainerHighest = Color(p.surfaceContainerHighest),
+    surfaceContainerLow = Color(p.surfaceContainerLow),
+    surfaceContainerLowest = Color(p.surfaceContainerLowest),
+    surfaceDim = Color(p.surfaceDim),
 )
+
+private val DarkColorScheme = colorSchemeOf(ThemePalettes.Dark)
+
+private val LightColorScheme = colorSchemeOf(ThemePalettes.Light)
 
 private val BaseTypography = Typography()
 
@@ -126,18 +127,20 @@ private val AppShapes = Shapes(
 )
 
 /**
- * The app theme. It is dark whatever the system setting, because the brand look is dark and a dark
- * screen suits caves; `MainActivity` keeps the system bar icons light to match.
+ * The app theme, dark navy when [dark] and light otherwise; `MainActivity` picks [dark] from the Appearance
+ * setting and matches the system bar icons to it. The camera preview's overlay nests a dark theme of its
+ * own, because the camera image does not follow the setting.
  */
 @Composable
-fun ImuMapperTheme(content: @Composable () -> Unit) {
+fun ImuMapperTheme(dark: Boolean, content: @Composable () -> Unit) {
     val layoutDirection = LocalLayoutDirection.current
     val typography = remember(layoutDirection) { appTypography(layoutDirection) }
-    CompositionLocalProvider(LocalImuColors provides DarkImuColors) {
-        MaterialTheme(colorScheme = DarkColorScheme, typography = typography, shapes = AppShapes) {
-            // MaterialTheme leaves the content colour at black; text drawn outside a Surface or
-            // Scaffold would vanish on the navy background.
-            CompositionLocalProvider(LocalContentColor provides DarkColorScheme.onBackground, content = content)
+    val scheme = if (dark) DarkColorScheme else LightColorScheme
+    CompositionLocalProvider(LocalImuColors provides if (dark) DarkImuColors else LightImuColors) {
+        MaterialTheme(colorScheme = scheme, typography = typography, shapes = AppShapes) {
+            // MaterialTheme leaves the content colour at black, so text drawn outside a Surface or Scaffold
+            // would vanish on the dark background; both themes name their own text colour instead.
+            CompositionLocalProvider(LocalContentColor provides scheme.onBackground, content = content)
         }
     }
 }

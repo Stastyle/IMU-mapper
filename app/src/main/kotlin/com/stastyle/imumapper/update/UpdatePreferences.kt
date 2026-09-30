@@ -10,8 +10,10 @@ import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.stastyle.imumapper.pipeline.core.TripMode
+import com.stastyle.imumapper.ui.theme.ThemeMode
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import java.io.IOException
@@ -21,8 +23,8 @@ private val Context.updatesDataStore: DataStore<Preferences> by preferencesDataS
 
 /**
  * The "updates" preferences store: when the updater last asked GitHub, which tag the user has
- * already dismissed, the Settings screen's default trip mode, and whether the one-time heading offset
- * reset has run. The other keys live here because this is the app's only DataStore and a second one
+ * already dismissed, the Settings screen's default trip mode and theme, and whether the one-time heading
+ * offset reset has run. The other keys live here because this is the app's only DataStore and a second one
  * for a few keys is not worth a file.
  */
 class UpdatePreferences(context: Context) {
@@ -38,6 +40,12 @@ class UpdatePreferences(context: Context) {
         val name = prefs[KEY_DEFAULT_TRIP_MODE]
         TripMode.entries.firstOrNull { it.name == name } ?: TripMode.POCKET
     }
+
+    /**
+     * Settings → Appearance; an unreadable file or an unknown name reads as [ThemeMode.SYSTEM]. It emits only
+     * when the theme changes, not on every write to the other keys, because each emission re-themes the app.
+     */
+    val themeMode: Flow<ThemeMode> = data.map { prefs -> ThemeMode.parse(prefs[KEY_THEME_MODE]) }.distinctUntilChanged()
 
     suspend fun lastCheckEpochMs(): Long = data.first()[KEY_LAST_CHECK_EPOCH_MS] ?: 0L
 
@@ -56,6 +64,10 @@ class UpdatePreferences(context: Context) {
         store.edit { it[KEY_DEFAULT_TRIP_MODE] = mode.name }
     }
 
+    suspend fun setThemeMode(mode: ThemeMode) {
+        store.edit { it[KEY_THEME_MODE] = mode.name }
+    }
+
     /**
      * True once [com.stastyle.imumapper.data.HeadingOffsetReset] has run, or the user has saved a heading
      * offset of their own since the update, which leaves nothing to reset. Reads the store directly,
@@ -72,6 +84,7 @@ class UpdatePreferences(context: Context) {
         val KEY_LAST_CHECK_EPOCH_MS = longPreferencesKey("last_check_epoch_ms")
         val KEY_LAST_SEEN_TAG = stringPreferencesKey("last_seen_tag")
         val KEY_DEFAULT_TRIP_MODE = stringPreferencesKey("default_trip_mode")
+        val KEY_THEME_MODE = stringPreferencesKey("theme_mode")
         val KEY_HEADING_OFFSET_RESET_DONE = booleanPreferencesKey("heading_offset_reset_done")
     }
 }

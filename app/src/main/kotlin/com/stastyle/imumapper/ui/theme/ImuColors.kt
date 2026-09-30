@@ -9,8 +9,8 @@ import androidx.compose.ui.graphics.Color
 
 /**
  * Brand colours that have no Material 3 role. [brandFill] is separate from `primary` because
- * `primary` is also a text colour and must stay light enough to read on the cards, while white text
- * needs a darker blue under it.
+ * `primary` is also a text colour and must keep 4.5:1 on the cards, while white text needs its own
+ * blue under it. The values live in [ThemePalettes], where the contrast test reads them.
  */
 @Immutable
 data class ImuColors(
@@ -28,14 +28,17 @@ data class ImuColors(
     val brandFill: Color,
     /** Text and icons on [brandFill] (4.6:1). */
     val onBrandFill: Color,
+    /** "OK" states, also as text on the cards and tiles. */
     val success: Color,
+    /** Behind [success] text in a pill. */
     val successContainer: Color,
+    /** Low battery, "Waiting" and other cautions, also as text on the cards and tiles. */
     val warning: Color,
     /** The Stop Recording pill. */
     val stopRed: Color,
     /** Text and icons on [stopRed] (5.0:1). */
     val onStopRed: Color,
-    /** Behind the path canvas; dark, because survey order numbers are drawn in it. */
+    /** Behind the path canvas, the trip thumbnails and the calibration preview. */
     val canvasBackground: Color,
     /**
      * Text and the spinner over the camera preview, on a half-`scrim` chip or on the black camera
@@ -43,27 +46,43 @@ data class ImuColors(
      * `onSurface` would turn dark under a light theme and vanish on the scrim.
      */
     val onCameraOverlay: Color,
+    /** The translucent circle of a round icon button, over the canvas or the page. */
+    val buttonFill: Color,
+    /** The read-only pill over the canvas ("5 m grid"). */
+    val chipFill: Color,
+    /**
+     * A sheet laid over the canvas, such as the Survey mode panel: mostly opaque, so its readout stays legible
+     * over a bright path while the plan still shows through.
+     */
+    val panelFill: Color,
     /** True for the light scheme; screens that draw their own canvas pick the matching `CanvasPalette` with it. */
     val isLight: Boolean = false,
 )
 
-internal val DarkImuColors = ImuColors(
-    backgroundTop = Color(0xFF0C1D34),
-    backgroundBottom = Color(0xFF050B16),
-    // surfaceContainer at 88 % alpha.
-    cardFill = Color(0xFF111F35).copy(alpha = 0.88f),
-    cardBorder = Color(0xFF1E3A5F),
-    cardBorderStrong = Color(0xFF2F6FB5),
-    brandFill = Color(0xFF1976D2),
-    onBrandFill = Color(0xFFFFFFFF),
-    success = Color(0xFF34D399),
-    successContainer = Color(0xFF0B3326),
-    warning = Color(0xFFFBBF24),
-    stopRed = Color(0xFFD32F2F),
-    onStopRed = Color(0xFFFFFFFF),
-    canvasBackground = Color(0xFF0A1424),
-    onCameraOverlay = Color(0xFFFFFFFF),
+private fun imuColorsOf(p: ThemePalette) = ImuColors(
+    backgroundTop = Color(p.backgroundTop),
+    backgroundBottom = Color(p.backgroundBottom),
+    cardFill = Color(p.cardFill),
+    cardBorder = Color(p.cardBorder),
+    cardBorderStrong = Color(p.cardBorderStrong),
+    brandFill = Color(p.brandFill),
+    onBrandFill = Color(p.onBrandFill),
+    success = Color(p.success),
+    successContainer = Color(p.successContainer),
+    warning = Color(p.warning),
+    stopRed = Color(p.stopRed),
+    onStopRed = Color(p.onStopRed),
+    canvasBackground = Color(p.canvasBackground),
+    onCameraOverlay = Color(p.onCameraOverlay),
+    buttonFill = Color(p.buttonFill),
+    chipFill = Color(p.chipFill),
+    panelFill = Color(p.panelFill),
+    isLight = p.isLight,
 )
+
+internal val DarkImuColors = imuColorsOf(ThemePalettes.Dark)
+
+internal val LightImuColors = imuColorsOf(ThemePalettes.Light)
 
 /** Provided by [ImuMapperTheme]; the default keeps previews and tests outside the theme usable. */
 val LocalImuColors = staticCompositionLocalOf { DarkImuColors }

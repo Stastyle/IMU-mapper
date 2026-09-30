@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Colours only: a qualified copy of Theme.ImuMapper would replace the base style instead of merging. -->
+    <color name="window_background">#07111F</color>
+</resources>
