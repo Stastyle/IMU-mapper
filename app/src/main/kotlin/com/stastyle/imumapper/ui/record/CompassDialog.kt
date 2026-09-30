@@ -50,6 +50,7 @@ import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -282,7 +283,8 @@ private fun CompassDial(reading: CompassReading?, modifier: Modifier = Modifier)
             }
             Text(
                 text = heading?.let { headingText(it) } ?: "--",
-                style = MaterialTheme.typography.titleLarge,
+                // Left to right in Hebrew too, or the degree sign lands in front of the number.
+                style = MaterialTheme.typography.titleLarge.copy(textDirection = TextDirection.Ltr),
                 color = onFace,
             )
             if (heading != null) {

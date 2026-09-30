@@ -207,7 +207,11 @@ private fun ArOverlay(mode: TripMode, state: ArSessionState, onToggleTorch: () -
                     onClick = onToggleTorch,
                     icon = if (state.torchOn) Icons.Filled.FlashOn else Icons.Filled.FlashOff,
                     contentDescription = if (state.torchOn) "Turn the torch off" else "Turn the torch on",
-                    contentColor = if (state.torchOn) MaterialTheme.imuColors.warning else Color.White,
+                    contentColor = if (state.torchOn) {
+                        MaterialTheme.imuColors.warning
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    },
                 )
             } else if (mode == TripMode.FLASHLIGHT) {
                 Label("No torch on this camera")

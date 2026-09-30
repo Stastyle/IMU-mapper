@@ -16,9 +16,11 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -439,7 +441,9 @@ private fun StatusCard(ui: RecordUiState, recording: RecordingState.Recording) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     status.text,
-                    style = MaterialTheme.typography.titleMedium,
+                    // Follows the words, not the layout: in Hebrew "3 sensors not delivering" must not put its
+                    // count after the sentence.
+                    style = MaterialTheme.typography.titleMedium.copy(textDirection = TextDirection.Content),
                     color = if (status.tone == RecordTone.Good) scheme.onSurface else toneColor(status.tone),
                 )
                 Text(
@@ -603,12 +607,17 @@ private fun RecordControls(
             .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+        // Each row takes its tallest button's height, so one label wrapping at a large text size does not
+        // leave its neighbours shorter.
+        val markRow = Modifier
+            .fillMaxWidth()
+            .height(IntrinsicSize.Min)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = markRow) {
             MarkButton("Junction", Modifier.weight(1f)) { onAnnotate(AnnotationKind.JUNCTION, "") }
             MarkButton("Chamber", Modifier.weight(1f)) { onAnnotate(AnnotationKind.CHAMBER, "") }
             MarkButton("Note", Modifier.weight(1f), onNote)
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = markRow) {
             MarkButton("Back at start", Modifier.weight(1f), onLoop)
             MarkButton("Re-orient", Modifier.weight(1f)) { onAnnotate(AnnotationKind.REORIENT, "") }
         }
@@ -643,7 +652,9 @@ private fun RecordControls(
 private fun MarkButton(label: String, modifier: Modifier, onClick: () -> Unit) {
     FilledTonalButton(
         onClick = onClick,
-        modifier = modifier.heightIn(min = 56.dp),
+        modifier = modifier
+            .heightIn(min = 56.dp)
+            .fillMaxHeight(),
         shape = MaterialTheme.shapes.medium,
         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
     ) {
