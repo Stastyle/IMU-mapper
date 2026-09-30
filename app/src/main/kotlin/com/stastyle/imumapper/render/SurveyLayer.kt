@@ -7,35 +7,15 @@ import com.stastyle.imumapper.pipeline.survey.StationKind
 import kotlin.math.abs
 
 /**
- * ARGB colours of the survey layer. START and END are the scene's own, so a station reads as the
- * marker it replaces in Survey mode.
+ * A station as drawn. [order] is its 1-based place in the chain (last occurrence), 0 when not in it. Its fill comes
+ * from [kind] through [CanvasPalette.forStation] when it is drawn: the layer is built in the view model, which does
+ * not know the theme, and a theme change must not wait for a survey edit to recolour it.
  */
-object SurveyColors {
-    val START: Int = SceneColors.START
-    val END: Int = SceneColors.END
-    val MARK: Int = SceneColors.argb(255, 255, 202, 40)
-    val CORNER: Int = SceneColors.argb(255, 207, 216, 220)
-    val USER: Int = SceneColors.argb(255, 38, 198, 218)
-    val CHORD: Int = SceneColors.argb(255, 255, 255, 255)
-    val STRETCH: Int = SceneColors.argb(200, 255, 235, 59)
-    val CURSOR: Int = SceneColors.argb(255, 255, 64, 129)
-    val LABEL: Int = SceneColors.argb(230, 255, 255, 255)
-
-    fun forKind(kind: StationKind): Int = when (kind) {
-        StationKind.START -> START
-        StationKind.END -> END
-        StationKind.MARK -> MARK
-        StationKind.CORNER -> CORNER
-        StationKind.USER -> USER
-    }
-}
-
-/** A station as drawn. [order] is its 1-based place in the chain (last occurrence), 0 when not in it. */
 data class LayerStation(
     val id: Int,
     val position: Vec3,
     val name: String,
-    val color: Int,
+    val kind: StationKind,
     val selected: Boolean,
     val order: Int,
     /** What is written by and on its spot; null when an earlier station on the same spot carries it. */
@@ -121,7 +101,7 @@ class SurveyLayer(
                     id = s.id,
                     position = positions[i],
                     name = s.name,
-                    color = SurveyColors.forKind(s.kind),
+                    kind = s.kind,
                     selected = s.id in ringed,
                     order = order[s.id] ?: 0,
                     text = spots[i]?.let { spot ->

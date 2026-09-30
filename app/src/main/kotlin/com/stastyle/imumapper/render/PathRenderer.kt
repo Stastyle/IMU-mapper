@@ -1,5 +1,8 @@
 package com.stastyle.imumapper.render
 
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -8,7 +11,9 @@ import androidx.compose.ui.graphics.PaintingStyle
 import androidx.compose.ui.graphics.PointMode
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.ExperimentalTextApi
 import androidx.compose.ui.text.TextLayoutResult
@@ -18,20 +23,17 @@ import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.stastyle.imumapper.ui.theme.imuColors
 import kotlin.math.max
 
 /**
  * Draws a [ProjectedScene] onto a Compose Canvas. Nothing here allocates per primitive: the
  * projected scene already holds pixel coordinates in flat arrays, colours are ARGB ints turned into
- * the inline [Color] class, and the point cloud goes to the native canvas in one call.
+ * the inline [Color] class, and the point cloud goes to the native canvas in one call. The scene
+ * carries its own line, marker and label colours; the [CanvasPalette] passed to [drawScene] must be
+ * the one it was built with, and gives the background, the rings and the text around them.
  */
 object PathRenderer {
-    /**
-     * Canvas background; fixed dark so the colour ramps read the same in both themes. The survey layer writes
-     * station order numbers in this colour on the stations' light fills, so it has to stay dark.
-     */
-    val BACKGROUND = Color(0xFF0A1424)
-
     const val HIT_RADIUS_DP = 24f
 
     /** Start and End markers closer than this on screen share one "Start / End" label; see [mergeEndLabels]. */
@@ -40,23 +42,41 @@ object PathRenderer {
     private const val MARKER_RADIUS_DP = 7f
     private const val SELECTED_RADIUS_DP = 11f
     private const val SELECTION_RING_GAP_DP = 4f
+    private const val MARKER_RING_DP = 1.5f
+    private const val MARKER_OUTLINE_DP = 1f
     private const val CLOUD_POINT_DP = 2.5f
 
     /** The main path's glow: a stroke this many times the line's width, in the line's colour at this opacity. */
     private const val GLOW_WIDTH_FACTOR = 3f
     private const val GLOW_ALPHA = 0.22f
 
+    /**
+     * The main path's casing: a stroke this many times the line's width, so it thins with distance as the line
+     * does and a far stretch is not buried in white.
+     */
+    private const val CASING_WIDTH_FACTOR = 1.8f
+
+    /** The width of the stroke round each letter when the palette has a halo; half of it shows outside the glyph. */
+    private const val HALO_WIDTH_DP = 3f
+
     /** Space between the edge of a Start or End marker and its label. */
     private const val END_LABEL_GAP_DP = 4f
 
-    private val ringColor = Color.White
-    private val selectionColor = Color(0xFFFFFFFF)
-    private val endLabelStyle = TextStyle(
-        color = Color(0xFFEAF2FF),
+    /** The Start and End labels' style in [palette]; the shadow only where the palette has one. */
+    private fun endLabelStyle(palette: CanvasPalette): TextStyle = TextStyle(
+        color = Color(palette.label),
         fontSize = 12.sp,
         fontWeight = FontWeight.SemiBold,
-        shadow = Shadow(color = Color.Black, offset = Offset(0f, 1f), blurRadius = 3f),
+        shadow = labelShadow(palette),
     )
+
+    /** The soft shadow under the Start and End labels and the station names, or null when [palette] has none. */
+    internal fun labelShadow(palette: CanvasPalette): Shadow? =
+        if (SceneColors.alpha(palette.labelShadow) == 0) {
+            null
+        } else {
+            Shadow(color = Color(palette.labelShadow), offset = Offset(0f, 1f), blurRadius = 3f)
+        }
 
     /**
      * [paint] is reused across frames for the point cloud; create it once with `remember { Paint() }`.
@@ -68,9 +88,10 @@ object PathRenderer {
         textMeasurer: TextMeasurer?,
         selectedMarker: Int,
         paint: Paint,
+        palette: CanvasPalette,
     ) {
         val scene = projected.scene
-        drawRect(BACKGROUND, Offset.Zero, Size(size.width, size.height))
+        drawRect(Color(palette.background), Offset.Zero, Size(size.width, size.height))
 
         if (projected.cloudVisibleCount > 0) {
             paint.color = Color(scene.cloudColor)
@@ -80,13 +101,22 @@ object PathRenderer {
             drawContext.canvas.drawRawPoints(PointMode.Points, projected.cloudScreen, paint)
         }
 
-        drawGlow(projected)
+        when (palette.pathEmphasis) {
+            PathEmphasis.GLOW -> drawGlow(projected)
+            PathEmphasis.CASING -> drawCasing(projected, Color(palette.casing))
+        }
 
         val lineScreen = projected.lineScreen
         val markerScreen = projected.markerScreen
         val markerRadius = MARKER_RADIUS_DP.dp.toPx()
         val selectedRadius = SELECTED_RADIUS_DP.dp.toPx()
-        val ring = 1.5f.dp.toPx()
+        val ring = MARKER_RING_DP.dp.toPx()
+        val ringColor = Color(palette.markerRing)
+        val outlined = SceneColors.alpha(palette.markerOutline) != 0
+        val outlineColor = Color(palette.markerOutline)
+        val outline = MARKER_OUTLINE_DP.dp.toPx()
+        // Centred just outside the ring, so it hugs the ring without covering it.
+        val outlineGap = ring / 2f + outline / 2f
         val px = density
         // Far to near so nearer segments and markers paint over farther ones.
         for (k in projected.orderCount - 1 downTo 0) {
@@ -113,34 +143,79 @@ object PathRenderer {
                         ringColor, Offset(center.x - half, center.y - half), Size(half * 2, half * 2),
                         style = Stroke(width = ring),
                     )
+                    if (outlined) {
+                        val o = half + outlineGap
+                        drawRect(
+                            outlineColor, Offset(center.x - o, center.y - o), Size(o * 2, o * 2),
+                            style = Stroke(width = outline),
+                        )
+                    }
                 } else {
                     drawCircle(Color(marker.color), radius, center)
                     drawCircle(ringColor, radius, center, style = Stroke(width = ring))
+                    if (outlined) drawCircle(outlineColor, radius + outlineGap, center, style = Stroke(width = outline))
                 }
                 if (selected) {
                     val selectionRadius = radius + SELECTION_RING_GAP_DP.dp.toPx()
-                    drawCircle(selectionColor, selectionRadius, center, style = Stroke(width = ring))
+                    drawCircle(Color(palette.selectionRing), selectionRadius, center, style = Stroke(width = ring))
                 }
             }
         }
 
         if (textMeasurer != null) {
             val labelStyle = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            val haloed = hasHalo(palette)
             for (i in 0 until projected.labelCount) {
                 if (!projected.labelVisible[i]) continue
                 val label = scene.labels[i]
                 val origin = labelOrigin(
                     projected.labelScreen[i * 2], projected.labelScreen[i * 2 + 1], size.width, size.height,
                 ) ?: continue
-                drawText(
-                    textMeasurer = textMeasurer,
-                    text = label.text,
-                    topLeft = origin,
-                    style = labelStyle.copy(color = Color(label.color)),
-                )
+                if (haloed) {
+                    // Measured once and drawn twice, halo and then letters; see drawCanvasText.
+                    val layout = textMeasurer.measure(label.text, labelStyle)
+                    drawCanvasText(layout, origin, Color(label.color), null, palette)
+                } else {
+                    drawText(
+                        textMeasurer = textMeasurer,
+                        text = label.text,
+                        topLeft = origin,
+                        style = labelStyle.copy(color = Color(label.color)),
+                    )
+                }
             }
-            drawEndLabels(projected, textMeasurer, selectedMarker)
+            drawEndLabels(projected, textMeasurer, selectedMarker, palette)
         }
+    }
+
+    private fun hasHalo(palette: CanvasPalette): Boolean = SceneColors.alpha(palette.labelHalo) != 0
+
+    /**
+     * Draws [layout] at [origin] in [color] with [shadow], over a stroke of the palette's halo colour round each
+     * letter when it has one. The caller places [origin] with [labelOrigin], or checks it the same way.
+     *
+     * Every paint setting is passed rather than left to the layout: a TextMeasurer hands layouts that differ only in
+     * colour, shadow or stroke one shared paint, and a setting passed as null keeps whatever the last draw set. The
+     * halo's stroke would then fill the letters' next draw, and the dark theme's shadow would outlive a switch to
+     * light.
+     */
+    internal fun DrawScope.drawCanvasText(
+        layout: TextLayoutResult,
+        origin: Offset,
+        color: Color,
+        shadow: Shadow?,
+        palette: CanvasPalette,
+    ) {
+        if (hasHalo(palette)) {
+            drawText(
+                layout,
+                color = Color(palette.labelHalo),
+                topLeft = origin,
+                shadow = Shadow.None,
+                drawStyle = Stroke(width = HALO_WIDTH_DP.dp.toPx(), join = StrokeJoin.Round),
+            )
+        }
+        drawText(layout, color = color, topLeft = origin, shadow = shadow ?: Shadow.None, drawStyle = Fill)
     }
 
     /**
@@ -167,11 +242,39 @@ object PathRenderer {
     }
 
     /**
+     * An opaque stroke in [color], wider than the line, under each visible segment of the main path: on a light
+     * canvas it lifts the path off the grid and keeps it whole where it crosses the axes or an overlaid run. All of
+     * them go down before any line, as the glow does, so where the path crosses itself both stretches stay unbroken.
+     * Round caps close the joints; the casing is opaque, so overlapping caps cannot stack into a darker band.
+     */
+    private fun DrawScope.drawCasing(projected: ProjectedScene, color: Color) {
+        val scene = projected.scene
+        val lineScreen = projected.lineScreen
+        val px = density
+        for (i in scene.pathLineStart until scene.pathLineEnd) {
+            if (!projected.lineVisible[i]) continue
+            val s = i * 4
+            drawLine(
+                color = color,
+                start = Offset(lineScreen[s], lineScreen[s + 1]),
+                end = Offset(lineScreen[s + 2], lineScreen[s + 3]),
+                strokeWidth = projected.lineWidth[i] * px * CASING_WIDTH_FACTOR,
+                cap = StrokeCap.Round,
+            )
+        }
+    }
+
+    /**
      * "Start" and "End" beside their markers, or one "Start / End" when the two nearly coincide on screen. Found in
      * the scene's markers, so the labels go wherever the markers go (markers switched off, Survey mode). Each label
      * sits right of its marker unless it would cover the other marker or label; see [endLabelPlacement].
      */
-    private fun DrawScope.drawEndLabels(projected: ProjectedScene, textMeasurer: TextMeasurer, selectedMarker: Int) {
+    private fun DrawScope.drawEndLabels(
+        projected: ProjectedScene,
+        textMeasurer: TextMeasurer,
+        selectedMarker: Int,
+        palette: CanvasPalette,
+    ) {
         val markers = projected.scene.markers
         var start = -1
         var end = -1
@@ -187,13 +290,17 @@ object PathRenderer {
         val s = projected.markerScreen
         // Measured without a width limit, so the layouts are reused across frames and never wrap at the canvas edge.
         // Measured before placing, because whether a label reaches the other marker depends on its width in sp.
-        val startText = textMeasurer.measure("Start", endLabelStyle)
-        val endText = textMeasurer.measure("End", endLabelStyle)
+        val style = endLabelStyle(palette)
+        val startText = textMeasurer.measure("Start", style)
+        val endText = textMeasurer.measure("End", style)
         if (start < 0 || end < 0) {
             if (start >= 0) {
-                drawEndLabel(startText, s[start * 2], s[start * 2 + 1], endLabelClearance(start, selectedMarker))
+                val clear = endLabelClearance(start, selectedMarker)
+                drawEndLabel(startText, s[start * 2], s[start * 2 + 1], clear, palette)
             }
-            if (end >= 0) drawEndLabel(endText, s[end * 2], s[end * 2 + 1], endLabelClearance(end, selectedMarker))
+            if (end >= 0) {
+                drawEndLabel(endText, s[end * 2], s[end * 2 + 1], endLabelClearance(end, selectedMarker), palette)
+            }
             return
         }
         val startX = s[start * 2]
@@ -220,14 +327,14 @@ object PathRenderer {
         )
         if (placement == EndLabelPlacement.MERGED) {
             // Right of whichever marker is further right and level with their middle, so the text clears both.
-            val merged = textMeasurer.measure("Start / End", endLabelStyle)
-            drawEndLabel(merged, max(startX, endX), (startY + endY) / 2f, max(startClear, endClear))
+            val merged = textMeasurer.measure("Start / End", style)
+            drawEndLabel(merged, max(startX, endX), (startY + endY) / 2f, max(startClear, endClear), palette)
             return
         }
         val startDx = if (placement == EndLabelPlacement.START_LEFT) -(startClear + startW) else startClear
         val endDx = if (placement == EndLabelPlacement.END_LEFT) -(endClear + endW) else endClear
-        drawEndLabel(startText, startX, startY, startDx)
-        drawEndLabel(endText, endX, endY, endDx)
+        drawEndLabel(startText, startX, startY, startDx, palette)
+        drawEndLabel(endText, endX, endY, endDx, palette)
     }
 
     /** Pixels from a marker's centre to the edge of the marker, or of its selection ring when it is selected. */
@@ -244,9 +351,15 @@ object PathRenderer {
      * Draws [layout] with its left edge [dx] from the marker at ([x], [y]), centred on it vertically. A negative [dx]
      * puts the text left of the marker.
      */
-    private fun DrawScope.drawEndLabel(layout: TextLayoutResult, x: Float, y: Float, dx: Float) {
+    private fun DrawScope.drawEndLabel(
+        layout: TextLayoutResult,
+        x: Float,
+        y: Float,
+        dx: Float,
+        palette: CanvasPalette,
+    ) {
         val origin = labelOrigin(x, y, size.width, size.height, dx = dx, dy = -layout.size.height / 2f) ?: return
-        drawText(layout, topLeft = origin)
+        drawCanvasText(layout, origin, Color(palette.label), labelShadow(palette), palette)
     }
 
     /**
@@ -382,3 +495,11 @@ object PathRenderer {
     private const val LABEL_CULL_LEFT_PX = 200f
     private const val LABEL_CULL_TOP_PX = 50f
 }
+
+/**
+ * The canvas palette of the theme in use. Everything that draws a map, a thumbnail or a chart takes its colours from
+ * this, so they switch with the app's theme together.
+ */
+@Composable
+@ReadOnlyComposable
+fun canvasPalette(): CanvasPalette = if (MaterialTheme.imuColors.isLight) CanvasPalette.Light else CanvasPalette.Dark

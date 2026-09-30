@@ -58,8 +58,10 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.stastyle.imumapper.data.SurveyShare
 import com.stastyle.imumapper.render.CameraPreset
 import com.stastyle.imumapper.render.PathScene
+import com.stastyle.imumapper.render.SceneMarker
 import com.stastyle.imumapper.render.SceneModel
 import com.stastyle.imumapper.render.SurveyHit
+import com.stastyle.imumapper.render.canvasPalette
 import com.stastyle.imumapper.ui.common.AppScaffold
 import com.stastyle.imumapper.ui.common.AppTopBar
 import com.stastyle.imumapper.ui.common.GridScaleChip
@@ -135,15 +137,23 @@ fun ViewerScreen(
     // stations take the markers' place, so a tap can only mean one thing.
     val result = ui.sceneResult
     val overlay = ui.sceneOverlay
-    val options = if (ui.surveyMode) ui.options.copy(showMarkers = false) else ui.options
-    // Building the scene walks every point once; toggles, run changes and a new north rotation
+    // The canvas colours follow the app's theme; the palette is one of the options, so a theme change rebuilds the
+    // scene with the others.
+    val palette = canvasPalette()
+    val options = (if (ui.surveyMode) ui.options.copy(showMarkers = false) else ui.options).copy(palette = palette)
+    // Building the scene walks every point once; toggles, run changes, a new north rotation and a theme change
     // invalidate it. Survey edits do not: they rebuild only the survey layer.
     val scene: SceneModel? = remember(result, overlay, options) {
         result?.let { PathScene.build(it, options, overlay) }
     }
     val selectedMarker = ui.selectedMarker
-    val selectedIndex = if (scene == null || selectedMarker == null) -1 else scene.markers.indexOf(selectedMarker)
-    val shownMarker = selectedMarker?.takeIf { !ui.surveyMode && selectedIndex >= 0 }
+    val selectedIndex = if (scene == null || selectedMarker == null) {
+        -1
+    } else {
+        scene.markers.indexOfFirst { sameMarker(it, selectedMarker) }
+    }
+    // The scene's copy, so the card's swatch has the colour of the theme in use.
+    val shownMarker = scene?.markers?.getOrNull(selectedIndex)?.takeIf { !ui.surveyMode }
     // The gesture callbacks are created once; the tap handler reads the scene through a state holder
     // so a rebuilt scene (toggle, run change) is used without recreating the pointerInput.
     val latestScene = rememberUpdatedState(scene)
@@ -256,6 +266,7 @@ fun ViewerScreen(
                         gestures = gestures,
                         survey = survey?.layer,
                         orbitLocked = ui.surveyMode,
+                        palette = palette,
                     )
                     if (scene == null) {
                         StatusOverlay(ui, onRetry = vm::retryProcessing, modifier = Modifier.align(Alignment.Center))
@@ -497,6 +508,12 @@ fun ViewerScreen(
         }
     }
 }
+
+/**
+ * Whether [a] and [b] are the same marker of the path. Not `==`: a marker's colour comes from the theme's canvas
+ * palette, so after a theme change the marker the view model holds differs from the rebuilt scene's in colour alone.
+ */
+private fun sameMarker(a: SceneMarker, b: SceneMarker): Boolean = a == b.copy(color = a.color)
 
 /**
  * The trip's name over the date, the run and "raw". Outside Survey mode: Share (when an exporter is wired) and

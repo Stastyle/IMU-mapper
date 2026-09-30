@@ -336,6 +336,38 @@ class PathSceneTest {
     }
 
     @Test
+    fun theSceneTakesEveryColourFromItsPalette() {
+        val r = result(n = 20, cloud = 10)
+        val light = CanvasPalette.Light
+        val scene = PathScene.build(r, SceneOptions(colorMode = ColorMode.SOURCE, palette = light))
+        val first = scene.pathLineStart
+        assertEquals(light.sourcePdr, scene.lineColors[first])
+        assertEquals(light.sourceVio, scene.lineColors[first + 1])
+        assertEquals(light.cloud, scene.cloudColor)
+        assertEquals(listOf(light.start, light.junction, light.keyframe, light.end), scene.markers.map { it.color })
+        assertEquals(
+            listOf(light.northArrow, light.axisEast, light.axisNorth, light.axisUp),
+            scene.labels.map { it.color },
+        )
+        val furniture = setOf(
+            light.gridMinor, light.gridMajor, light.northArrow, light.axisEast, light.axisNorth, light.axisUp,
+        )
+        for (i in 0 until first) assertTrue(scene.lineColors[i] in furniture, "line $i")
+
+        // The same geometry as on the dark canvas: a theme changes colours only.
+        val dark = PathScene.build(r, SceneOptions(colorMode = ColorMode.SOURCE))
+        assertContentEquals(dark.lineCoords, scene.lineCoords)
+        assertContentEquals(dark.lineWidths, scene.lineWidths)
+        assertEquals(dark.pathLineStart, scene.pathLineStart)
+
+        val progressOptions = SceneOptions(showGrid = false, colorMode = ColorMode.PROGRESS, palette = light)
+        val byProgress = PathScene.build(r, progressOptions)
+        assertEquals(light.progressStops.first(), byProgress.lineColors[3])
+        // A theme change is an option change, so the viewer's scene cache rebuilds on it.
+        assertNotEquals(SceneOptions(palette = light), SceneOptions())
+    }
+
+    @Test
     fun packOrdersByDepthThenIndex() {
         assertTrue(ProjectedScene.pack(1.5f, 7) < ProjectedScene.pack(2.0f, 3))
         assertTrue(ProjectedScene.pack(2.0f, 3) < ProjectedScene.pack(2.0f, 4))

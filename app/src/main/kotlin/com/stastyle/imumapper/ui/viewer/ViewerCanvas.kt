@@ -10,12 +10,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.rememberTextMeasurer
+import com.stastyle.imumapper.render.CanvasPalette
 import com.stastyle.imumapper.render.OrbitCamera
 import com.stastyle.imumapper.render.PathRenderer
 import com.stastyle.imumapper.render.ProjectedScene
@@ -24,6 +26,7 @@ import com.stastyle.imumapper.render.SceneModel
 import com.stastyle.imumapper.render.SurveyHit
 import com.stastyle.imumapper.render.SurveyLayer
 import com.stastyle.imumapper.render.SurveyRenderer
+import com.stastyle.imumapper.render.canvasPalette
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.sqrt
@@ -63,6 +66,8 @@ fun ViewerCanvas(
     survey: SurveyLayer? = null,
     /** One-finger drag pans instead of orbiting (Survey mode's plan view). */
     orbitLocked: Boolean = false,
+    /** The palette [scene] was built with; it also colours the background and the survey layer. */
+    palette: CanvasPalette = canvasPalette(),
 ) {
     val projected = remember(scene) { scene?.let { ProjectedScene(it) } }
     // A survey edit rebuilds only the layer, so only this small projection is re-created.
@@ -79,7 +84,7 @@ fun ViewerCanvas(
     Canvas(
         modifier = modifier
             .fillMaxSize()
-            .background(PathRenderer.BACKGROUND)
+            .background(Color(palette.background))
             .onSizeChanged { latestGestures.value.onViewport(it.width.toFloat(), it.height.toFloat()) }
             .pointerInput(Unit) {
                 val doubleTapTimeout = viewConfiguration.doubleTapTimeoutMillis
@@ -221,10 +226,10 @@ fun ViewerCanvas(
     ) {
         val p = projected ?: return@Canvas
         p.update(camera, size.width, size.height)
-        with(PathRenderer) { drawScene(p, textMeasurer, selectedMarker, paint) }
+        with(PathRenderer) { drawScene(p, textMeasurer, selectedMarker, paint, palette) }
         val s = projectedSurvey ?: return@Canvas
         s.update(camera, size.width, size.height)
-        with(SurveyRenderer) { drawSurvey(s, textMeasurer) }
+        with(SurveyRenderer) { drawSurvey(s, textMeasurer, palette) }
     }
 }
 

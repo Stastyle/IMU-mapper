@@ -50,8 +50,11 @@ object PathProgress {
     @JvmName("fractionsOfPathPoints")
     fun fractions(points: List<PathPoint>): DoubleArray = fractions(cumulative(points))
 
-    /** The PROGRESS colour (ARGB) of a point at [fraction] of the path. */
-    fun color(fraction: Double): Int = SceneColors.gradient(SceneColors.PROGRESS_STOPS, fraction)
+    /** The PROGRESS colour (ARGB) of a point at [fraction] of the path, in [palette]. */
+    fun color(fraction: Double, palette: CanvasPalette): Int = SceneColors.gradient(palette.progressStops, fraction)
+
+    /** The PROGRESS colour (ARGB) of a point at [fraction] of the path on the dark canvas. */
+    fun color(fraction: Double): Int = color(fraction, CanvasPalette.Dark)
 
     private inline fun <T> cumulativeOf(points: List<T>, position: (T) -> Vec3): DoubleArray {
         val out = DoubleArray(points.size)
