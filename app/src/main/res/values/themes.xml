@@ -2,12 +2,26 @@
 <resources>
     <!-- No qualified variant (values-v31, values-night): a qualified style would replace this one instead of
          merging with it. The colours and bools it names have night variants instead, and on API 31+ the
-         splash screen takes the solid windowBackground. -->
+         splash screen takes the solid windowBackground. The parent is a dark theme, so android:isLightTheme
+         is false here until MainActivity lays one of the overlays below over its theme. -->
     <style name="Theme.ImuMapper" parent="android:Theme.Material.NoActionBar">
         <item name="android:windowLightStatusBar">@bool/light_system_bars</item>
         <item name="android:windowLightNavigationBar">@bool/light_system_bars</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowBackground">@color/window_background</item>
+    </style>
+
+    <!-- The platform's floating Cut/Copy/Paste toolbar picks a light or dark look from isLightTheme each time
+         it opens. MainActivity applies one of these from the app's own setting rather than relying on
+         values-night, because on API 30 the night qualifier follows the phone, not the app. Each holds only
+         that attribute, and parent="" stops the dotted name from implying a parent, so applying one changes
+         nothing else. -->
+    <style name="ThemeOverlay.ImuMapper.PlatformLight" parent="">
+        <item name="android:isLightTheme">true</item>
+    </style>
+
+    <style name="ThemeOverlay.ImuMapper.PlatformDark" parent="">
+        <item name="android:isLightTheme">false</item>
     </style>
 </resources>
