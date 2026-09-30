@@ -225,6 +225,12 @@ class RecordStatusTest {
             "Waiting",
             RecordStatus.headingTile(stats(silent(SensorKind.GAME_ROT), silent(SensorKind.ROT_VEC)), s).value,
         )
+        // The fused sensor delivering first right after the start is not yet a fallback; past the grace it is.
+        val gameLate = stats(silent(SensorKind.GAME_ROT))
+        assertEquals("Waiting", RecordStatus.headingTile(gameLate, s / 4).value)
+        assertEquals("Fallback", RecordStatus.headingTile(gameLate, 2 * s).value)
+        // Without a game rotation vector the fused one is the fallback at once.
+        assertEquals("Fallback", RecordStatus.headingTile(stats(absent(SensorKind.GAME_ROT)), s / 4).value)
     }
 
     @Test

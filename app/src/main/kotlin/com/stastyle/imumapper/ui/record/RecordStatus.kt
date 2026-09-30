@@ -183,6 +183,9 @@ object RecordStatus {
         val fused = stats.of(SensorKind.ROT_VEC)
         return when {
             delivering(game) -> SensorTileState("OK", RecordTone.Good, null, "Heading: OK")
+            // The counters restart with the recording, so the fused sensor's first sample may land a tick before
+            // the game rotation vector's; that is no reason to warn about a fallback before the grace is over.
+            game.available && !notDelivering(game, activeNs) -> waitingHeading()
             delivering(fused) -> SensorTileState(
                 "Fallback",
                 RecordTone.Warning,
@@ -193,9 +196,12 @@ object RecordStatus {
                 SensorTileState("None", RecordTone.Warning, null, "Heading: none, this phone has no rotation sensor")
             notDelivering(game, activeNs) || notDelivering(fused, activeNs) ->
                 SensorTileState("Stalled", RecordTone.Warning, null, "Heading: stalled")
-            else -> SensorTileState("Waiting", RecordTone.Neutral, null, "Heading: waiting for the first samples")
+            else -> waitingHeading()
         }
     }
+
+    private fun waitingHeading() =
+        SensorTileState("Waiting", RecordTone.Neutral, null, "Heading: waiting for the first samples")
 
     /**
      * The magnetometer's calibration, from the accuracy it last reported. A stalled sensor shows Stalled, never
