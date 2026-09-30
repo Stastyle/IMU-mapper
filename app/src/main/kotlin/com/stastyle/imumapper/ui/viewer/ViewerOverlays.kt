@@ -36,6 +36,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.toggleableState
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.unit.dp
 import com.stastyle.imumapper.data.db.TripStatus
 import com.stastyle.imumapper.render.CameraPreset
@@ -183,12 +188,20 @@ private fun ColorModeItem(label: String, mode: ColorMode, current: ColorMode, on
     )
 }
 
+/**
+ * One TalkBack stop that reads the label, "switch" and its state, as RawPathRow and Settings' switch do. A Switch
+ * with its own onCheckedChange would be a second, unnamed stop; drawn only, its taps go to the item.
+ */
 @Composable
 private fun ToggleItem(label: String, checked: Boolean, onToggle: () -> Unit) {
     DropdownMenuItem(
         text = { Text(label) },
         onClick = onToggle,
-        trailingIcon = { Switch(checked = checked, onCheckedChange = { onToggle() }) },
+        modifier = Modifier.semantics {
+            role = Role.Switch
+            toggleableState = ToggleableState(checked)
+        },
+        trailingIcon = { Switch(checked = checked, onCheckedChange = null) },
     )
 }
 
