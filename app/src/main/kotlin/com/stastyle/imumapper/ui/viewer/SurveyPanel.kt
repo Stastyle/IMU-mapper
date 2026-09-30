@@ -1,5 +1,6 @@
 package com.stastyle.imumapper.ui.viewer
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -8,11 +9,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -34,6 +35,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.stastyle.imumapper.pipeline.survey.LegMeasure
+import com.stastyle.imumapper.ui.common.BrandButton
 import java.time.ZoneId
 import kotlin.math.max
 
@@ -57,10 +59,15 @@ fun SurveyPanel(
 ) {
     val state = survey.state
     val readOnly = state.readOnly
+    // A glass sheet over the plan. [modifier] stays first on the outermost node, so the height the screen
+    // measures for the camera's bottom inset includes the border. A Surface (not a plain background) keeps
+    // taps on the panel's gaps from reaching the map under it.
     Surface(
         modifier = modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
-        tonalElevation = 3.dp,
+        shape = PanelShape,
+        color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = PANEL_ALPHA),
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
     ) {
         Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
             SelectionRow(survey.readout, canClear = state.selection != SurveySelection.None, onClear = onClear)
@@ -93,10 +100,10 @@ fun SurveyPanel(
                 OutlinedButton(onClick = onAddStation, enabled = !readOnly) { Text("+ Station") }
             }
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Button(onClick = onShowLegs, enabled = survey.legs.isNotEmpty(), modifier = Modifier.weight(1f)) {
+                BrandButton(onClick = onShowLegs, enabled = survey.legs.isNotEmpty(), modifier = Modifier.weight(1f)) {
                     Text("Legs")
                 }
-                Button(
+                BrandButton(
                     onClick = onSetAzimuth,
                     enabled = !readOnly && SurveyController.selectionEnds(state, survey.geometry) != null,
                     modifier = Modifier.weight(1f),
@@ -263,3 +270,7 @@ private fun copyLineOf(readout: SurveyReadout?, magnetic: Boolean): String? = wh
 private const val MIN_SCRUB_RANGE_M = 0.01
 private const val UNCERTAIN_ALPHA = 0.6f
 private val HOPS_MAX_HEIGHT = 96.dp
+
+/** Mostly opaque: the readout must stay legible over a bright path, while the plan still shows it continues. */
+private const val PANEL_ALPHA = 0.9f
+private val PanelShape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)

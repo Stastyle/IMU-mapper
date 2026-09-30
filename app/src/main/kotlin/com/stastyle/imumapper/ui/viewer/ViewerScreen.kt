@@ -1,76 +1,86 @@
 package com.stastyle.imumapper.ui.viewer
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.absolutePadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Undo
-import androidx.compose.material.icons.filled.BugReport
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.SquareFoot
-import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material.icons.filled.ViewInAr
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.Placeable
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.stastyle.imumapper.data.SurveyShare
-import com.stastyle.imumapper.data.db.PathResultEntity
-import com.stastyle.imumapper.data.db.TripStatus
 import com.stastyle.imumapper.render.CameraPreset
-import com.stastyle.imumapper.render.ColorMode
 import com.stastyle.imumapper.render.PathScene
 import com.stastyle.imumapper.render.SceneModel
 import com.stastyle.imumapper.render.SurveyHit
+import com.stastyle.imumapper.ui.common.AppScaffold
+import com.stastyle.imumapper.ui.common.AppTopBar
+import com.stastyle.imumapper.ui.common.GridScaleChip
+import com.stastyle.imumapper.ui.common.SegmentedTabs
 import com.stastyle.imumapper.ui.common.appContainer
+import com.stastyle.imumapper.ui.theme.imuColors
+import com.stastyle.imumapper.ui.triplist.TripFormat
 
-/** 3D path viewer for one trip, with Survey mode for measuring between points of the walk. */
-@OptIn(ExperimentalMaterial3Api::class)
+/** The Path tab's canvas takes this share of the height under the tabs; the cards scroll in the rest. */
+private const val PATH_CANVAS_WEIGHT = 0.42f
+
+/** Room the bottom-right buttons need beside a card over the 3D canvas, so they stay tappable. */
+private val OverlayEndClearance = 64.dp
+private val CanvasShape = RoundedCornerShape(20.dp)
+
+/**
+ * One trip's path, in tabs: Path (a short canvas over the trip summary and elevation profile), 3D (the canvas at
+ * full height), Graph (the profile large with height numbers) and Details (runs, raw path, facts and actions).
+ * Only one canvas is ever composed. Survey mode, for measuring between points of the walk, hides the tabs and
+ * gives the canvas the whole height under its own top bar.
+ */
 @Composable
 fun ViewerScreen(
     tripId: Long,
@@ -86,13 +96,17 @@ fun ViewerScreen(
             container.tripFiles,
             container.tripProcessor,
             surveys = container.surveyStore,
+            shareTrip = { id -> container.tripExporter.export(id).shareIntent },
         )
     }
     val ui by vm.ui.collectAsStateWithLifecycle()
     val camera by vm.camera.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val survey = ui.survey?.takeIf { ui.surveyMode }
+    var tabIndex by rememberSaveable { mutableIntStateOf(ViewerTab.PATH.ordinal) }
+    val tab = ViewerTab.entries[tabIndex]
 
+    var showRuns by remember { mutableStateOf(false) }
     var showLegs by remember { mutableStateOf(false) }
     var showDetail by remember { mutableStateOf(false) }
     var showSetAzimuth by remember { mutableStateOf(false) }
@@ -114,6 +128,7 @@ fun ViewerScreen(
     }
     val selectedMarker = ui.selectedMarker
     val selectedIndex = if (scene == null || selectedMarker == null) -1 else scene.markers.indexOf(selectedMarker)
+    val shownMarker = selectedMarker?.takeIf { !ui.surveyMode && selectedIndex >= 0 }
     // The gesture callbacks are created once; the tap handler reads the scene through a state holder
     // so a rebuilt scene (toggle, run change) is used without recreating the pointerInput.
     val latestScene = rememberUpdatedState(scene)
@@ -140,6 +155,10 @@ fun ViewerScreen(
             },
         )
     }
+    // Top view, Side view and Fit to path chosen from the Graph or Details tab bring the canvas back to show it.
+    val showView = {
+        if (tab == ViewerTab.GRAPH || tab == ViewerTab.DETAILS) tabIndex = ViewerTab.PATH.ordinal
+    }
 
     BackHandler(enabled = ui.surveyMode) { vm.toggleSurvey() }
     LaunchedEffect(ui.surveyMessage) {
@@ -153,111 +172,200 @@ fun ViewerScreen(
         if (answer == SnackbarResult.ActionPerformed) vm.surveyUndo()
         vm.dismissSurveyMessage()
     }
+    LaunchedEffect(ui.message) {
+        val text = ui.message ?: return@LaunchedEffect
+        snackbar.showSnackbar(text)
+        vm.dismissMessage()
+    }
     LaunchedEffect(ui.pendingCsv) {
         val csv = ui.pendingCsv ?: return@LaunchedEffect
         runCatching { context.startActivity(SurveyShare.intent(context, csv.file, csv.subject, csv.text)) }
         vm.consumeCsvShare()
     }
+    LaunchedEffect(ui.pendingShare) {
+        val intent = ui.pendingShare ?: return@LaunchedEffect
+        runCatching { context.startActivity(intent) }
+        vm.consumeShare()
+    }
 
-    Scaffold(
+    AppScaffold(
         topBar = {
-            TopAppBar(
-                title = { ViewerTitle(ui, tripId) },
-                navigationIcon = {
-                    IconButton(onClick = { if (ui.surveyMode) vm.toggleSurvey() else onBack() }) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                },
-                actions = {
-                    if (ui.surveyMode) {
-                        if (survey != null) {
-                            TextButton(
-                                onClick = { showNorth = true },
-                                contentPadding = PaddingValues(horizontal = 8.dp),
-                            ) {
-                                Text(SurveyFormat.northChipShort(survey.north, survey.magnetic), maxLines = 1)
-                            }
-                            IconButton(onClick = vm::surveyUndo, enabled = survey.state.undo.isNotEmpty()) {
-                                Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "Undo")
-                            }
-                        }
-                        SurveyToggle(surveyMode = true, onToggle = vm::toggleSurvey)
-                        SurveyMenu(ui, vm, onDetail = { showDetail = true })
-                    } else {
-                        RunMenu(ui, vm)
-                        PresetMenu(vm)
-                        ViewMenu(ui, vm)
-                        SurveyToggle(surveyMode = false, onToggle = vm::toggleSurvey)
-                        IconButton(onClick = { onOpenDebug(tripId) }) {
-                            Icon(Icons.Filled.BugReport, contentDescription = "Debug")
-                        }
-                    }
-                },
+            ViewerTopBar(
+                ui = ui,
+                tripId = tripId,
+                survey = survey,
+                vm = vm,
+                onBack = onBack,
+                onShowRuns = { showRuns = true },
+                onShowView = showView,
+                onOpenDebug = { onOpenDebug(tripId) },
+                onShowNorth = { showNorth = true },
+                onShowDetail = { showDetail = true },
             )
         },
+        // Outside Survey mode Share's result shows on every tab; in Survey mode the host sits on the canvas,
+        // above the panel, instead (below).
+        snackbarHost = { if (!ui.surveyMode) SnackbarHost(snackbar) },
     ) { padding ->
-        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
-            ViewerCanvas(
-                scene = scene,
-                camera = camera,
-                selectedMarker = selectedIndex,
-                gestures = gestures,
-                survey = survey?.layer,
-                orbitLocked = ui.surveyMode,
-            )
-            if (scene == null) {
-                StatusOverlay(ui, vm, modifier = Modifier.align(Alignment.Center))
-            }
-            if (survey != null) {
-                SurveyBanners(
-                    survey,
-                    onStartOver = { confirmStartOver = true },
-                    modifier = Modifier.align(Alignment.TopCenter),
+        Column(modifier = Modifier.fillMaxSize().padding(padding)) {
+            val tabsShown = !ui.surveyMode && scene != null
+            if (tabsShown) {
+                SegmentedTabs(
+                    tabs = ViewerTab.entries.map { it.label },
+                    selected = tabIndex,
+                    onSelect = { tabIndex = it },
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                 )
             }
-            Column(modifier = Modifier.align(Alignment.BottomCenter)) {
-                // The snackbar stacks above the panels instead of covering them (a Scaffold host would):
-                // an undoable message stays up for 10 s, over the survey panel's buttons.
-                SnackbarHost(snackbar, modifier = Modifier.align(Alignment.CenterHorizontally))
-                val marker = ui.selectedMarker
-                if (!ui.surveyMode && marker != null && selectedIndex >= 0) {
-                    MarkerCard(
-                        marker = marker,
-                        onOpenPhoto = { vm.openPhoto(marker) },
-                        onClose = { vm.selectMarker(null) },
+            // Null while the canvas has the whole height: Survey mode, and while there is no path to tab through.
+            val shownTab = tab.takeIf { tabsShown }
+            val error = ui.error?.takeIf { scene != null }
+            if (error != null && (shownTab == ViewerTab.GRAPH || shownTab == ViewerTab.DETAILS)) ErrorLine(error)
+            val gridChip = gridChipText(scene, options)
+            val canvasModifier = when (shownTab) {
+                null, ViewerTab.THREE_D -> Modifier.weight(1f).fillMaxWidth()
+                ViewerTab.PATH -> Modifier
+                    .weight(PATH_CANVAS_WEIGHT)
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .clip(CanvasShape)
+                    .border(1.dp, MaterialTheme.imuColors.cardBorder, CanvasShape)
+                ViewerTab.GRAPH, ViewerTab.DETAILS -> null
+            }
+            if (canvasModifier != null) {
+                Box(modifier = canvasModifier) {
+                    ViewerCanvas(
+                        scene = scene,
+                        camera = camera,
+                        selectedMarker = selectedIndex,
+                        gestures = gestures,
+                        survey = survey?.layer,
+                        orbitLocked = ui.surveyMode,
                     )
-                    Spacer(Modifier.height(8.dp))
-                }
-                if (ui.error != null && scene != null) {
-                    Text(
-                        ui.error ?: "",
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-                    )
-                }
-                val shown = ui.shownResult
-                if (survey != null) {
-                    SurveyPanel(
-                        survey = survey,
-                        startedAtEpochMs = ui.trip?.startedAtEpochMs,
-                        onClear = vm::clearSurveySelection,
-                        onCursor = vm::setSurveyCursor,
-                        onStep = vm::stepSurveyCursor,
-                        onAddStation = vm::addStationAtCursor,
-                        onMoveHere = vm::moveSelectedStationToCursor,
-                        onShowLegs = { showLegs = true },
-                        onSetAzimuth = { showSetAzimuth = true },
-                        // The panel covers the canvas's bottom, so the camera frames the plan above it.
-                        // The snackbar is left out: the view jumping when it times out would move a
-                        // station out from under a finger about to tap it.
-                        modifier = Modifier.onSizeChanged { vm.setBottomInset(it.height.toFloat()) },
-                    )
-                } else if (!ui.surveyMode && shown != null) {
-                    StatsPanel(shown.stats)
+                    if (scene == null) {
+                        StatusOverlay(ui, onRetry = vm::retryProcessing, modifier = Modifier.align(Alignment.Center))
+                    }
+                    if (survey != null) {
+                        SurveyBanners(
+                            survey,
+                            onStartOver = { confirmStartOver = true },
+                            // Clear of the fit button in the top-right corner.
+                            modifier = Modifier.align(Alignment.TopCenter).absolutePadding(right = 52.dp),
+                        )
+                    }
+                    if (scene != null) {
+                        CanvasTopButtons(
+                            surveyMode = ui.surveyMode,
+                            onFit = vm::fitToPath,
+                            onSurvey = vm::toggleSurvey,
+                            modifier = Modifier.align(AbsoluteAlignment.TopRight).padding(4.dp),
+                        )
+                        if (!ui.surveyMode) {
+                            CanvasBottomButtons(
+                                ui = ui,
+                                vm = vm,
+                                camera = camera,
+                                fullHeight = shownTab == ViewerTab.THREE_D,
+                                onFullHeight = { full ->
+                                    tabIndex = if (full) ViewerTab.THREE_D.ordinal else ViewerTab.PATH.ordinal
+                                },
+                                modifier = Modifier.align(AbsoluteAlignment.BottomRight).padding(4.dp),
+                            )
+                        }
+                    }
+                    when {
+                        ui.surveyMode -> Column(modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
+                            // The snackbar stacks above the panel instead of covering it (a Scaffold host
+                            // would): an undoable message stays up for 10 s, over the panel's buttons.
+                            SnackbarHost(snackbar, modifier = Modifier.align(Alignment.CenterHorizontally))
+                            if (gridChip != null) {
+                                GridScaleChip(
+                                    gridChip,
+                                    Modifier.align(AbsoluteAlignment.Left).absolutePadding(left = 12.dp, bottom = 8.dp),
+                                )
+                            }
+                            if (error != null) ErrorLine(error)
+                            if (survey != null) {
+                                SurveyPanel(
+                                    survey = survey,
+                                    startedAtEpochMs = ui.trip?.startedAtEpochMs,
+                                    onClear = vm::clearSurveySelection,
+                                    onCursor = vm::setSurveyCursor,
+                                    onStep = vm::stepSurveyCursor,
+                                    onAddStation = vm::addStationAtCursor,
+                                    onMoveHere = vm::moveSelectedStationToCursor,
+                                    onShowLegs = { showLegs = true },
+                                    onSetAzimuth = { showSetAzimuth = true },
+                                    // The panel covers the canvas's bottom, so the camera frames the plan above
+                                    // it. The snackbar and the grid chip are left out: the view jumping when a
+                                    // message times out would move a station out from under a finger about to
+                                    // tap it.
+                                    modifier = Modifier.onSizeChanged { vm.setBottomInset(it.height.toFloat()) },
+                                )
+                            }
+                        }
+                        shownTab == ViewerTab.THREE_D -> Column(
+                            modifier = Modifier
+                                .align(AbsoluteAlignment.BottomLeft)
+                                .fillMaxWidth()
+                                .absolutePadding(left = 8.dp, right = OverlayEndClearance, bottom = 8.dp),
+                        ) {
+                            if (error != null) ErrorLine(error)
+                            if (shownMarker != null) {
+                                MarkerCard(
+                                    marker = shownMarker,
+                                    onOpenPhoto = { vm.openPhoto(shownMarker) },
+                                    onClose = { vm.selectMarker(null) },
+                                )
+                            } else if (gridChip != null) {
+                                GridScaleChip(gridChip, Modifier.absolutePadding(left = 4.dp, bottom = 4.dp))
+                            }
+                        }
+                        scene != null && gridChip != null -> GridScaleChip(
+                            gridChip,
+                            Modifier.align(AbsoluteAlignment.BottomLeft).absolutePadding(left = 12.dp, bottom = 16.dp),
+                        )
+                    }
                 }
             }
+            val shown = ui.shownResult
+            when (shownTab) {
+                ViewerTab.PATH -> Column(modifier = Modifier.weight(1f - PATH_CANVAS_WEIGHT).fillMaxWidth()) {
+                    // Pinned under the canvas, above the scrolling cards: the canvas neither shrinks nor is covered.
+                    if (shownMarker != null) {
+                        MarkerCard(
+                            marker = shownMarker,
+                            onOpenPhoto = { vm.openPhoto(shownMarker) },
+                            onClose = { vm.selectMarker(null) },
+                            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp),
+                        )
+                    }
+                    if (error != null) ErrorLine(error)
+                    if (shown != null) PathTabCards(shown, Modifier.weight(1f).fillMaxWidth())
+                }
+                ViewerTab.GRAPH -> if (shown != null) GraphTab(shown, Modifier.weight(1f).fillMaxWidth())
+                ViewerTab.DETAILS -> DetailsTab(
+                    ui = ui,
+                    onSelectRun = vm::selectRun,
+                    onSelectOverlay = vm::selectOverlay,
+                    onToggleRaw = vm::toggleRaw,
+                    onSurveyMode = vm::toggleSurvey,
+                    onExport = if (ui.canShare) vm::share else null,
+                    onOpenDebug = { onOpenDebug(tripId) },
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                )
+                ViewerTab.THREE_D, null -> Unit
+            }
         }
+    }
+
+    if (showRuns) {
+        RunsDialog(
+            ui = ui,
+            onSelectRun = vm::selectRun,
+            onSelectOverlay = vm::selectOverlay,
+            onDismiss = { showRuns = false },
+        )
     }
 
     if (ui.photo != null || ui.photoLoading || ui.photoError != null) {
@@ -367,49 +475,173 @@ fun ViewerScreen(
     }
 }
 
+/**
+ * The trip's name over the date, the run and "raw". Outside Survey mode: Share (when an exporter is wired) and
+ * the overflow. Inside it the bar keeps Survey mode's own actions: the north chip, Undo, the ruler that leaves
+ * it, and its menu.
+ */
 @Composable
-private fun ViewerTitle(ui: ViewerUiState, tripId: Long) {
-    Column {
-        Text(ui.trip?.name ?: "Trip $tripId", maxLines = 1, overflow = TextOverflow.Ellipsis)
-        val run = ui.runs.firstOrNull { it.runId == ui.selectedRunId }
-        val subtitle = viewerSubtitle(ui.surveyMode, run?.let(::runLabel), ui.showRaw && ui.rawResult != null)
-        if (subtitle != null) {
-            Text(
-                subtitle,
-                style = MaterialTheme.typography.labelSmall,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+private fun ViewerTopBar(
+    ui: ViewerUiState,
+    tripId: Long,
+    survey: SurveyUi?,
+    vm: ViewerViewModel,
+    onBack: () -> Unit,
+    onShowRuns: () -> Unit,
+    onShowView: () -> Unit,
+    onOpenDebug: () -> Unit,
+    onShowNorth: () -> Unit,
+    onShowDetail: () -> Unit,
+) {
+    val run = ui.runs.firstOrNull { it.runId == ui.selectedRunId }
+    val parts = viewerSubtitleParts(
+        surveyMode = ui.surveyMode,
+        date = ui.trip?.let { TripFormat.date(it.startedAtEpochMs) },
+        run = run?.let(::runLabel),
+        raw = ui.showRaw && ui.rawResult != null,
+    )
+    val subtitle: (@Composable () -> Unit)? = parts?.let { p -> @Composable { SubtitleLine(p) } }
+    AppTopBar(
+        title = ui.trip?.name ?: "Trip $tripId",
+        subtitle = subtitle,
+        onBack = { if (ui.surveyMode) vm.toggleSurvey() else onBack() },
+        actions = {
+            if (ui.surveyMode) {
+                if (survey != null) {
+                    TextButton(onClick = onShowNorth, contentPadding = PaddingValues(horizontal = 8.dp)) {
+                        Text(SurveyFormat.northChipShort(survey.north, survey.magnetic), maxLines = 1)
+                    }
+                    IconButton(onClick = vm::surveyUndo, enabled = survey.state.undo.isNotEmpty()) {
+                        Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = "Undo")
+                    }
+                }
+                SurveyToggle(surveyMode = true, onToggle = vm::toggleSurvey)
+                SurveyMenu(ui, vm, onDetail = onShowDetail)
+            } else {
+                if (ui.canShare) {
+                    IconButton(
+                        onClick = vm::share,
+                        enabled = ui.shareEnabled,
+                        modifier = Modifier.semantics {
+                            contentDescription = "Share trip"
+                            if (ui.busy) stateDescription = "Preparing the ZIP"
+                        },
+                    ) {
+                        if (ui.busy) {
+                            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                        } else {
+                            Icon(Icons.Filled.Share, contentDescription = null)
+                        }
+                    }
+                }
+                ViewerOverflow(
+                    ui = ui,
+                    onRuns = onShowRuns,
+                    onPreset = { preset ->
+                        onShowView()
+                        vm.applyPreset(preset)
+                    },
+                    onFit = {
+                        onShowView()
+                        vm.fitToPath()
+                    },
+                    onSurvey = vm::toggleSurvey,
+                    onDebug = onOpenDebug,
+                )
+            }
+        },
+    )
+}
+
+/**
+ * The subtitle's parts as separate texts, each giving way in its turn: the date is cut first (and left out
+ * when barely a letter of it would show), then the run label; the separators and "raw" never are. A Row
+ * cannot do this, since it measures unweighted children in order and weights split the space, so this
+ * measures by priority and places in reading order (mirrored in a right-to-left language). TalkBack reads the
+ * whole line.
+ */
+@Composable
+private fun SubtitleLine(parts: SubtitleParts) {
+    Layout(
+        content = {
+            Text(parts.date.orEmpty(), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(SubtitleParts.SEPARATOR, maxLines = 1)
+            Text(parts.label.orEmpty(), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(SubtitleParts.SEPARATOR, maxLines = 1)
+            Text(SubtitleParts.RAW, maxLines = 1)
+        },
+        modifier = Modifier.clearAndSetSemantics { contentDescription = parts.text },
+    ) { measurables, constraints ->
+        val free = constraints.copy(minWidth = 0, minHeight = 0)
+        var remaining = if (constraints.hasBoundedWidth) constraints.maxWidth else Int.MAX_VALUE / 2
+        fun measure(index: Int): Placeable =
+            measurables[index].measure(free.copy(maxWidth = remaining.coerceAtLeast(0))).also { remaining -= it.width }
+        val hasDate = parts.date != null
+        val hasLabel = parts.label != null
+        val rawSeparator = if (parts.raw) measure(3) else null
+        val raw = if (parts.raw) measure(4) else null
+        val dateSeparator = if (hasDate && hasLabel) measure(1) else null
+        val label = if (hasLabel) measure(2) else null
+        val date = if (hasDate && remaining >= MIN_DATE_WIDTH.roundToPx()) measure(0) else null
+        val shown = listOfNotNull(date, dateSeparator.takeIf { date != null }, label, rawSeparator, raw)
+        val height = shown.maxOfOrNull { it.height } ?: 0
+        layout(shown.sumOf { it.width }, height) {
+            var x = 0
+            for (p in shown) {
+                p.placeRelative(x, (height - p.height) / 2)
+                x += p.width
+            }
         }
     }
 }
 
-/**
- * The top bar's second line: the run shown, and "raw" when the raw path is. Survey mode says
- * "Survey (beta)" in place of the run, which its menu checks, since the north chip, Undo, the ruler
- * and the menu leave the title too little room for both.
- */
-internal fun viewerSubtitle(surveyMode: Boolean, run: String?, raw: Boolean): String? = when {
-    surveyMode -> if (raw) "Survey (beta) · raw" else "Survey (beta)"
-    run == null -> null
-    raw -> "$run · raw"
-    else -> run
-}
+/** Less room than this for the date and it is left out rather than shown as a letter and an ellipsis. */
+private val MIN_DATE_WIDTH = 32.dp
 
 /**
- * The line under the Raw path switch. It says why the switch changes nothing when it cannot (the run
- * predates stored raw paths, or loop closure and smoothing moved no point), and otherwise what raw
- * means. Survey mode draws no dimmed corrected path ([ViewerUiState.sceneOverlay]), so it says that
- * its stations, placed by time, follow the raw path instead.
+ * The overflow outside Survey mode. The views and Fit act on the canvas, so from the Graph or Details tab they
+ * bring it back first (the screen's onPreset and onFit do that).
  */
-internal fun rawPathHint(ui: ViewerUiState): String = when {
-    ui.rawUnavailable -> "Re-process this run to store its raw path"
-    ui.showRaw && ui.rawResult == null && ui.result != null -> "Nothing was corrected in this run"
-    ui.surveyMode -> "Before loop closure and smoothing; stations follow by time"
-    else -> "Before loop closure and smoothing; the corrected path is dimmed"
+@Composable
+private fun ViewerOverflow(
+    ui: ViewerUiState,
+    onRuns: () -> Unit,
+    onPreset: (CameraPreset) -> Unit,
+    onFit: () -> Unit,
+    onSurvey: () -> Unit,
+    onDebug: () -> Unit,
+) {
+    var open by remember { mutableStateOf(false) }
+    val hasPath = ui.result != null
+    fun choose(action: () -> Unit): () -> Unit = {
+        open = false
+        action()
+    }
+    Box {
+        IconButton(onClick = { open = true }) {
+            Icon(Icons.Filled.MoreVert, contentDescription = "More options")
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(text = { Text("Runs…") }, onClick = choose(onRuns), enabled = ui.runs.isNotEmpty())
+            DropdownMenuItem(
+                text = { Text("Top view") },
+                onClick = choose { onPreset(CameraPreset.TOP) },
+                enabled = hasPath,
+            )
+            DropdownMenuItem(
+                text = { Text("Side view") },
+                onClick = choose { onPreset(CameraPreset.SIDE) },
+                enabled = hasPath,
+            )
+            DropdownMenuItem(text = { Text("Fit to path") }, onClick = choose(onFit), enabled = hasPath)
+            HorizontalDivider()
+            DropdownMenuItem(text = { Text("Survey mode") }, onClick = choose(onSurvey))
+            DropdownMenuItem(text = { Text("Debug") }, onClick = choose(onDebug))
+        }
+    }
 }
 
-/** The ruler: enters and leaves Survey mode, tinted while it is on. */
+/** The ruler inside Survey mode's top bar: tinted, and it leaves the mode. */
 @Composable
 private fun SurveyToggle(surveyMode: Boolean, onToggle: () -> Unit) {
     IconButton(onClick = onToggle) {
@@ -425,294 +657,43 @@ private fun SurveyToggle(surveyMode: Boolean, onToggle: () -> Unit) {
 @Composable
 private fun SurveyMenu(ui: ViewerUiState, vm: ViewerViewModel, onDetail: () -> Unit) {
     var open by remember { mutableStateOf(false) }
-    IconButton(onClick = { open = true }) {
-        Icon(Icons.Filled.MoreVert, contentDescription = "More")
-    }
-    DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-        val survey = ui.survey
-        DropdownMenuItem(
-            text = { Text("Export CSV") },
-            onClick = {
-                open = false
-                vm.exportSurveyCsv()
-            },
-            enabled = survey != null,
-        )
-        DropdownMenuItem(
-            text = { Text("Corner detail…") },
-            onClick = {
-                open = false
-                onDetail()
-            },
-            enabled = survey != null && !survey.state.readOnly,
-        )
-        RawPathItem(ui, vm)
-        if (ui.runs.isNotEmpty()) {
-            HorizontalDivider()
-            Text(
-                "Show run",
-                style = MaterialTheme.typography.labelMedium,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
-            )
-            for (run in ui.runs) {
-                DropdownMenuItem(
-                    text = { Text(runLabel(run)) },
-                    onClick = {
-                        open = false
-                        vm.selectRun(run.runId)
-                    },
-                    trailingIcon = { if (run.runId == ui.selectedRunId) CheckIcon() },
-                )
-            }
+    Box {
+        IconButton(onClick = { open = true }) {
+            Icon(Icons.Filled.MoreVert, contentDescription = "More")
         }
-    }
-}
-
-/**
- * A read-only survey and an arbitrary north are said at the top, where the plan is not covered by the
- * panel. An unreadable survey.json's banner offers Start over, so it does not lock the trip's survey; a
- * newer app's file does not, since updating the app edits it and moving it aside would hide it from that app.
- */
-@Composable
-private fun SurveyBanners(survey: SurveyUi, onStartOver: () -> Unit, modifier: Modifier = Modifier) {
-    val error = survey.error
-    val north = survey.northWarning
-    if (error == null && north == null) return
-    Column(
-        modifier = modifier.fillMaxWidth().padding(8.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        if (error != null) {
-            Banner(
-                error,
-                MaterialTheme.colorScheme.errorContainer,
-                MaterialTheme.colorScheme.onErrorContainer,
-                actionLabel = if (survey.canStartOver) "Start over" else null,
-                onAction = onStartOver,
-            )
-        }
-        if (north != null) {
-            Banner(
-                "North is arbitrary on this run ($north). Select two stations or a straight stretch and " +
-                    "use Set azimuth with a compass bearing.",
-                MaterialTheme.colorScheme.secondaryContainer,
-                MaterialTheme.colorScheme.onSecondaryContainer,
-            )
-        }
-    }
-}
-
-@Composable
-private fun Banner(
-    text: String,
-    container: Color,
-    content: Color,
-    actionLabel: String? = null,
-    onAction: () -> Unit = {},
-) {
-    Surface(
-        color = container,
-        contentColor = content,
-        shape = MaterialTheme.shapes.medium,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column {
-            Text(text, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(12.dp, 8.dp))
-            if (actionLabel != null) {
-                TextButton(
-                    onClick = onAction,
-                    colors = ButtonDefaults.textButtonColors(contentColor = content),
-                    modifier = Modifier.align(Alignment.End),
-                ) { Text(actionLabel) }
-            }
-        }
-    }
-}
-
-/** Start over keeps the unreadable file, so the dialog says that nothing is deleted. */
-@Composable
-private fun StartOverDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Start the survey over?") },
-        text = {
-            Text(
-                "The stations, names and compass readings in survey.json cannot be read. Starting over " +
-                    "renames that file and keeps it with the trip, so nothing is deleted, then starts a " +
-                    "new survey from the automatic stations. Its edits are saved again.",
-            )
-        },
-        confirmButton = { TextButton(onClick = onConfirm) { Text("Start over") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
-}
-
-@Composable
-private fun StatusOverlay(ui: ViewerUiState, vm: ViewerViewModel, modifier: Modifier = Modifier) {
-    val trip = ui.trip
-    Column(modifier = modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        when {
-            ui.processing -> {
-                CircularProgressIndicator()
-                Spacer(Modifier.height(12.dp))
-                Text("Processing trip…", style = MaterialTheme.typography.bodyLarge)
-            }
-            ui.error != null -> {
-                Text(ui.error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
-                Spacer(Modifier.height(12.dp))
-                Button(onClick = vm::retryProcessing) { Text("Retry") }
-            }
-            trip?.status == TripStatus.RECORDING -> {
-                Text("This trip is still being recorded.", style = MaterialTheme.typography.bodyLarge)
-            }
-            ui.loading || ui.runs.isNotEmpty() -> CircularProgressIndicator()
-            trip != null && trip.status == TripStatus.FAILED -> {
-                // The run the recording screen started failed; the view model does not repeat it on
-                // its own (see ViewerViewModel.maybeProcess), so the stored reason is shown here.
-                Text(
-                    "Processing failed: " + (trip.lastError ?: "no error message was recorded"),
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                Spacer(Modifier.height(12.dp))
-                Button(onClick = vm::retryProcessing) { Text("Retry") }
-            }
-            else -> {
-                Text("No processed path yet.", style = MaterialTheme.typography.bodyLarge)
-                Spacer(Modifier.height(12.dp))
-                Button(onClick = vm::retryProcessing) { Text("Process now") }
-            }
-        }
-    }
-}
-
-@Composable
-private fun RunMenu(ui: ViewerUiState, vm: ViewerViewModel) {
-    var open by remember { mutableStateOf(false) }
-    IconButton(onClick = { open = true }, enabled = ui.runs.isNotEmpty()) {
-        Icon(Icons.Filled.Layers, contentDescription = "Runs")
-    }
-    DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-        Text(
-            "Show run",
-            style = MaterialTheme.typography.labelMedium,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
-        )
-        for (run in ui.runs) {
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            val survey = ui.survey
             DropdownMenuItem(
-                text = { Text(runLabel(run)) },
+                text = { Text("Export CSV") },
                 onClick = {
                     open = false
-                    vm.selectRun(run.runId)
+                    vm.exportSurveyCsv()
                 },
-                trailingIcon = { if (run.runId == ui.selectedRunId) CheckIcon() },
-            )
-        }
-        if (ui.runs.size > 1) {
-            HorizontalDivider()
-            Text(
-                "Overlay (dimmed)",
-                style = MaterialTheme.typography.labelMedium,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                enabled = survey != null,
             )
             DropdownMenuItem(
-                text = { Text("None") },
+                text = { Text("Corner detail…") },
                 onClick = {
                     open = false
-                    vm.selectOverlay(null)
+                    onDetail()
                 },
-                trailingIcon = { if (ui.overlayRunId == null) CheckIcon() },
+                enabled = survey != null && !survey.state.readOnly,
             )
-            for (run in ui.runs) {
-                if (run.runId == ui.selectedRunId) continue
-                DropdownMenuItem(
-                    text = { Text(runLabel(run)) },
-                    onClick = {
-                        open = false
-                        vm.selectOverlay(run.runId)
-                    },
-                    trailingIcon = { if (run.runId == ui.overlayRunId) CheckIcon() },
-                )
+            RawPathItem(ui, vm)
+            if (ui.runs.isNotEmpty()) {
+                HorizontalDivider()
+                MenuCaption("Show run")
+                for (run in ui.runs) {
+                    DropdownMenuItem(
+                        text = { Text(runLabel(run)) },
+                        onClick = {
+                            open = false
+                            vm.selectRun(run.runId)
+                        },
+                        trailingIcon = { if (run.runId == ui.selectedRunId) CheckIcon() },
+                    )
+                }
             }
         }
     }
-}
-
-@Composable
-private fun PresetMenu(vm: ViewerViewModel) {
-    var open by remember { mutableStateOf(false) }
-    IconButton(onClick = { open = true }) {
-        Icon(Icons.Filled.ViewInAr, contentDescription = "View presets")
-    }
-    DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-        DropdownMenuItem(text = { Text("3D") }, onClick = { open = false; vm.applyPreset(CameraPreset.THREE_D) })
-        DropdownMenuItem(text = { Text("Top") }, onClick = { open = false; vm.applyPreset(CameraPreset.TOP) })
-        DropdownMenuItem(text = { Text("Side") }, onClick = { open = false; vm.applyPreset(CameraPreset.SIDE) })
-        HorizontalDivider()
-        DropdownMenuItem(text = { Text("Fit to path") }, onClick = { open = false; vm.fitToPath() })
-    }
-}
-
-@Composable
-private fun ViewMenu(ui: ViewerUiState, vm: ViewerViewModel) {
-    var open by remember { mutableStateOf(false) }
-    IconButton(onClick = { open = true }) {
-        Icon(Icons.Filled.Tune, contentDescription = "View options")
-    }
-    DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-        Text(
-            "Colour by",
-            style = MaterialTheme.typography.labelMedium,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
-        )
-        ColorModeItem("Elapsed time", ColorMode.TIME, ui.options.colorMode) { vm.setColorMode(it) }
-        ColorModeItem("Altitude", ColorMode.ALTITUDE, ui.options.colorMode) { vm.setColorMode(it) }
-        ColorModeItem("Source (PDR vs VIO)", ColorMode.SOURCE, ui.options.colorMode) { vm.setColorMode(it) }
-        HorizontalDivider()
-        ToggleItem("Floor grid", ui.options.showGrid, vm::toggleGrid)
-        ToggleItem("Point cloud", ui.options.showPointCloud, vm::togglePointCloud)
-        ToggleItem("Markers", ui.options.showMarkers, vm::toggleMarkers)
-        HorizontalDivider()
-        RawPathItem(ui, vm)
-    }
-}
-
-/** The Raw path switch and, under it, [rawPathHint]; the View menu and Survey mode's menu both draw it. */
-@Composable
-private fun RawPathItem(ui: ViewerUiState, vm: ViewerViewModel) {
-    ToggleItem("Raw path", ui.showRaw, vm::toggleRaw)
-    Text(
-        rawPathHint(ui),
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp).widthIn(max = 260.dp),
-    )
-}
-
-@Composable
-private fun ColorModeItem(label: String, mode: ColorMode, current: ColorMode, onSelect: (ColorMode) -> Unit) {
-    DropdownMenuItem(
-        text = { Text(label) },
-        onClick = { onSelect(mode) },
-        trailingIcon = { if (mode == current) CheckIcon() },
-    )
-}
-
-@Composable
-private fun ToggleItem(label: String, checked: Boolean, onToggle: () -> Unit) {
-    DropdownMenuItem(
-        text = { Text(label) },
-        onClick = onToggle,
-        trailingIcon = { Switch(checked = checked, onCheckedChange = { onToggle() }) },
-    )
-}
-
-@Composable
-private fun CheckIcon() {
-    Icon(Icons.Filled.Check, contentDescription = null)
-}
-
-private fun runLabel(run: PathResultEntity): String {
-    val base = "Run ${run.runId} · v${run.pipelineVersion}"
-    return if (run.label.isBlank()) base else "$base · ${run.label}"
 }
