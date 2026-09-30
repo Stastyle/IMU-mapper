@@ -181,10 +181,16 @@ object SurveyRenderer {
                 val h = layout.size.height.toFloat()
                 val origin = PathRenderer.labelOrigin(x, y, size.width, size.height, dx = -w / 2f, dy = -h / 2f)
                 if (origin != null) {
-                    // On the station's own fill, which is its contrast: no halo, which would cover the dot. Shrunk
-                    // about the centre to stay off the ring, which the light palette draws white like the number.
-                    val fill = radiusOf(text.selected) - ringOf(text.selected) / 2f
-                    scale(chainNumberScale(w, h, fill), Offset(x, y)) {
+                    // On the station's own fill, which is its contrast: no halo, which would cover the dot. A number
+                    // too wide for the fill is shrunk about the centre to stay off the ring, which the light palette
+                    // draws white like the number. One that fits gets no transform at all, not even an identity
+                    // one, so it is drawn by the very same call as before the scale existed.
+                    val k = chainNumberScale(w, h, radiusOf(text.selected) - ringOf(text.selected) / 2f)
+                    if (k < 1f) {
+                        scale(k, Offset(x, y)) {
+                            drawText(layout, orderColor, origin, shadow = Shadow.None, drawStyle = Fill)
+                        }
+                    } else {
                         drawText(layout, orderColor, origin, shadow = Shadow.None, drawStyle = Fill)
                     }
                 }
