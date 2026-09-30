@@ -156,13 +156,13 @@ Extended tokens (`ui/theme/ImuColors.kt`, `MaterialTheme.imuColors` through a
 Routes (`ui/nav/Routes.kt`): add `NEW_TRIP = "new-trip"`. Top-level: `TRIPS`, `NEW_TRIP`,
 `CALIBRATION`, `SETTINGS`. Pushed (no bar): `RECORD`, `VIEWER`, `TUNING`, `DEBUG`.
 
-- `AppBottomBar(currentRoute, recordingActive, updateAvailable, onSelect)` in `ui/nav`:
+- `AppBottomBar(currentRoute, recording, updateAvailable, onSelect)` in `ui/nav`:
   NavigationBar (container surfaceContainerLow at 92 % alpha; selected icon and label secondary;
   indicator primaryContainer) with Trips (`Icons.AutoMirrored.Filled.ViewList`), Record
   (`RadioButtonChecked`, badge while recording or stopping), Calibrate (`Straighten`), Settings
   (`Settings`, badge while UpdateManager.state is Available, Downloading, ReadyToInstall or
-  NeedsInstallPermission). Badged items add `stateDescription` ("Recording in progress",
-  "Update available"); the dot is decorative.
+  NeedsInstallPermission). Badged items add `stateDescription` ("Recording in progress", or
+  "Saving the last trip" while a stopped trip is saved; "Update available"); the dot is decorative.
 - Tab navigation: `navigate(route) { popUpTo(startDestination) { saveState = true };
   launchSingleTop = true; restoreState = true }`. NavHost transitions are 150 ms fades.
 - Double-tap guard: every push of `record`, `viewer`, `debug` and `tuning` uses
@@ -302,7 +302,8 @@ remaining height). Overlays use absolute alignment (D10):
 
 - Top-right column: fit to path (`NearMe`, "Fit to path") and Survey mode (`SquareFoot`,
   "Survey mode").
-- Bottom-right column: "3D"/"2D" text button (label from the VM camera: pure
+- Bottom-right group (a row on the Path tab, whose canvas can be short; a column on the 3D tab):
+  "3D"/"2D" text button (label from the VM camera: pure
   `OrbitCamera.isTopDown`; top-down shows "3D" → `applyPreset(THREE_D)`, otherwise "2D" →
   `applyPreset(TOP)`; "Switch to 3D view" / "Switch to top view"), Layers (the View options:
   colour by Progress / Time / Altitude / Source, floor grid, point cloud, markers, raw path and
@@ -417,8 +418,9 @@ still opens the stop dialog). Layout:
   of the path and the timer."; (5) green "Sensors OK". Tapping expands the full per-sensor chip
   list (Role.Button, "Show all sensors" / "Hide sensor list", expanded state).
 - **Tiles** (`StatGrid(maxColumns = 4)`, 2 × 2 when needed): IMU (OK / Stalled / None + accel
-  rate), Steps (ON / None), Heading (OK from game rotation; "Fallback" when only the rotation
-  vector delivers; Stalled; None), Mag (`ic_magnet`: None without a magnetometer; Stalled when
+  rate), Steps (ON / None), Heading (OK from game rotation; "Fallback" only when the game rotation
+  vector is absent or has delivered nothing in this recording, because the pipeline uses it
+  whenever the log holds any of its samples; Stalled when it stops mid-trip; None), Mag (`ic_magnet`: None without a magnetometer; Stalled when
   stalled, never a stale accuracy; "Waiting" while accuracy is null; else High / Medium / Low /
   Unreliable / No contact with bars). Full words, spoken as "Magnetometer: unreliable, wave the
   phone in a figure 8".
